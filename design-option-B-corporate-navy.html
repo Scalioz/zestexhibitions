@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Option B — Corporate Navy | Zest Exhibitions</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=Inter:wght@400;500&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+:root{--navy:#0B2A57;--navy-2:#123B72;--white:#FFFFFF;--fog:#F4F6F9;--grey:#6B7280;--steel:#B7BEC7;--accent:#2F6FED;--display:'Sora',sans-serif;--sans:'Inter',sans-serif;--mono:'IBM Plex Mono',monospace;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:var(--sans);background:var(--white);color:var(--navy);}
+a{color:inherit;text-decoration:none;}
+.wrap{max-width:1200px;margin:0 auto;padding:0 40px;}
+header{position:sticky;top:0;background:var(--white);border-bottom:1px solid #E7EAEE;z-index:10;}
+nav{display:flex;justify-content:space-between;align-items:center;padding:18px 40px;max-width:1200px;margin:0 auto;}
+.logo{font-family:var(--display);font-weight:700;font-size:20px;color:var(--navy);}
+.nav-links{display:flex;gap:30px;list-style:none;font-size:14px;color:var(--grey);}
+.cta-btn{background:var(--navy);color:#fff;padding:11px 22px;font-size:13.5px;font-weight:500;border-radius:2px;}
+.hero{background:var(--navy);color:#fff;padding:110px 0 90px;position:relative;overflow:hidden;}
+.hero::before{content:"";position:absolute;inset:0;z-index:0;background-image:url('images/hero-render.jpg');background-size:cover;background-position:center 25%;opacity:0.22;}
+.hero::after{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(100deg, rgba(11,42,87,0.98) 0%, rgba(11,42,87,0.88) 50%, rgba(11,42,87,0.55) 100%);}
+.hero .wrap{position:relative;z-index:2;}
+.eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--steel);margin-bottom:20px;}
+h1{font-family:var(--display);font-weight:700;font-size:clamp(36px,5vw,60px);line-height:1.08;max-width:760px;position:relative;}
+h1 span{color:#7EA6FF;}
+.sub{margin-top:22px;max-width:480px;color:#C7D2E3;font-size:16px;line-height:1.7;position:relative;}
+.btn-row{margin-top:36px;display:flex;gap:14px;position:relative;}
+.btn-white{background:#fff;color:var(--navy);padding:14px 28px;font-weight:600;font-size:14px;border-radius:2px;}
+.btn-outline{border:1px solid rgba(255,255,255,0.4);color:#fff;padding:14px 28px;font-weight:500;font-size:14px;border-radius:2px;}
+.stats{background:var(--fog);padding:50px 0;}
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;}
+.stat b{font-family:var(--display);font-size:36px;font-weight:700;color:var(--navy);}
+.stat p{margin-top:6px;font-size:12px;color:var(--grey);letter-spacing:.03em;text-transform:uppercase;}
+section{padding:90px 0;}
+.sec-title{font-family:var(--display);font-weight:700;font-size:34px;max-width:560px;}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:50px;}
+.card{border:1px solid #E7EAEE;border-radius:6px;overflow:hidden;}
+.card .ph{aspect-ratio:4/3;background:linear-gradient(135deg,var(--navy),var(--navy-2));}
+.card .cb{padding:20px;}
+.card .cb .k{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.06em;text-transform:uppercase;}
+.card .cb h4{font-family:var(--display);font-weight:600;font-size:17px;margin-top:8px;}
+footer{background:var(--navy);color:#C7D2E3;padding:40px 0;font-size:12.5px;text-align:center;}
+</style></head>
+<body>
+<header><nav><div class="logo">ZEST.</div><ul class="nav-links"><li>Services</li><li>Portfolio</li><li>About</li><li>Contact</li></ul><a class="cta-btn">Get a Quote</a></nav></header>
+<section class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Exhibition Design &amp; Fabrication — Noida, India</div>
+    <h1>We engineer <span>presence</span>, that builds your brand.</h1>
+    <p class="sub">Zest Exhibitions designs and fabricates world-class exhibition stalls, pavilions and commercial interiors, on schedule, every time.</p>
+    <div class="btn-row"><a class="btn-white">Start Your Enquiry</a><a class="btn-outline">View Portfolio →</a></div>
+  </div>
+</section>
+<section class="stats" style="padding:50px 0;">
+  <div class="wrap stats-grid">
+    <div class="stat"><b>250+</b><p>Stalls Delivered</p></div>
+    <div class="stat"><b>18+</b><p>Industries Serviced</p></div>
+    <div class="stat"><b>120+</b><p>Corporate Clients</p></div>
+    <div class="stat"><b>72hrs</b><p>Build Turnaround</p></div>
+  </div>
+</section>
+<section>
+  <div class="wrap">
+    <h2 class="sec-title">Selected work, engineered for the floor.</h2>
+    <div class="grid3">
+      <div class="card"><div class="ph" style="background-image:url('images/proj-01-doubledeck.jpg');background-size:cover;background-position:center;"></div><div class="cb"><div class="k">Manufacturing</div><h4>Double Deck Exhibition Pavilion</h4></div></div>
+      <div class="card"><div class="ph" style="background-image:url('images/proj-02-royaloverseas.jpg');background-size:cover;background-position:center;"></div><div class="cb"><div class="k">Corporate / Premium</div><h4>Royal Overseas — Premium Pavilion</h4></div></div>
+      <div class="card"><div class="ph" style="background-image:url('images/proj-07-marico.jpg');background-size:cover;background-position:center;"></div><div class="cb"><div class="k">Manufacturing / Industrial</div><h4>Mario Industries — Product Showcase Stall</h4></div></div>
+    </div>
+  </div>
+</section>
+<footer>© 2026 Zest Exhibitions — Option B: Corporate Navy, matched to your logo palette</footer>
+</body></html>

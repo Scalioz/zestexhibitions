@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Option C — Warm Concrete &amp; Steel | Zest Exhibitions</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Work+Sans:wght@400;500&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+:root{--concrete:#C9C4BA;--concrete-2:#DCD8CF;--steel:#1C1C1C;--steel-2:#2B2B2B;--rust:#D9642C;--grey:#6E6A62;--display:'Barlow Condensed',sans-serif;--sans:'Work Sans',sans-serif;--mono:'IBM Plex Mono',monospace;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:var(--sans);background:var(--concrete);color:var(--steel);}
+a{color:inherit;text-decoration:none;}
+.wrap{max-width:1200px;margin:0 auto;padding:0 40px;}
+header{position:sticky;top:0;background:rgba(201,196,186,0.92);backdrop-filter:blur(6px);border-bottom:2px solid var(--steel);z-index:10;}
+nav{display:flex;justify-content:space-between;align-items:center;padding:16px 40px;max-width:1200px;margin:0 auto;}
+.logo{font-family:var(--display);font-weight:700;font-size:26px;letter-spacing:.02em;text-transform:uppercase;}
+.nav-links{display:flex;gap:28px;list-style:none;font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:.04em;}
+.cta-btn{background:var(--rust);color:#fff;padding:11px 22px;font-family:var(--mono);font-size:12px;text-transform:uppercase;}
+.hero{padding:100px 0 80px;position:relative;overflow:hidden;background-image:repeating-linear-gradient(135deg, rgba(0,0,0,0.03) 0px, rgba(0,0,0,0.03) 2px, transparent 2px, transparent 14px);}
+.hero::before{content:"";position:absolute;inset:0;z-index:0;background-image:url('images/hero-render.jpg');background-size:cover;background-position:center 25%;opacity:0.18;filter:grayscale(1) contrast(1.1);}
+.hero::after{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(100deg, rgba(201,196,186,0.97) 0%, rgba(201,196,186,0.85) 50%, rgba(201,196,186,0.45) 100%);}
+.hero .wrap{position:relative;z-index:2;}
+.eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--rust);margin-bottom:18px;}
+h1{font-family:var(--display);font-weight:700;font-size:clamp(48px,7vw,86px);line-height:0.95;text-transform:uppercase;max-width:820px;}
+h1 span{color:var(--rust);}
+.sub{margin-top:22px;max-width:480px;color:var(--grey);font-size:16px;line-height:1.7;}
+.btn-row{margin-top:36px;display:flex;gap:14px;}
+.btn-steel{background:var(--steel);color:#fff;padding:15px 30px;font-family:var(--mono);font-size:13px;text-transform:uppercase;}
+.btn-line{border:2px solid var(--steel);padding:13px 28px;font-family:var(--mono);font-size:13px;text-transform:uppercase;}
+.stats{background:var(--steel);color:var(--concrete);padding:44px 0;}
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;text-align:center;}
+.stat b{font-family:var(--display);font-size:48px;font-weight:700;color:var(--rust);}
+.stat p{margin-top:4px;font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--concrete-2);}
+section{padding:90px 0;}
+.sec-title{font-family:var(--display);font-weight:700;font-size:44px;text-transform:uppercase;max-width:560px;}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;margin-top:50px;background:var(--steel);}
+.card{background:var(--concrete-2);}
+.card .ph{aspect-ratio:4/3;background:linear-gradient(135deg,#2B2B2B,#1C1C1C);position:relative;}
+.card .ph::after{content:"";position:absolute;top:10px;left:10px;width:8px;height:8px;border-radius:50%;background:var(--rust);}
+.card .cb{padding:20px;}
+.card .cb .k{font-family:var(--mono);font-size:10.5px;color:var(--rust);letter-spacing:.06em;text-transform:uppercase;}
+.card .cb h4{font-family:var(--display);font-weight:600;font-size:22px;margin-top:6px;text-transform:uppercase;}
+footer{background:var(--steel);color:var(--concrete);padding:40px 0;font-family:var(--mono);font-size:12px;text-align:center;text-transform:uppercase;letter-spacing:.03em;}
+</style></head>
+<body>
+<header><nav><div class="logo">Zest.</div><ul class="nav-links"><li>Services</li><li>Portfolio</li><li>About</li><li>Contact</li></ul><a class="cta-btn">Get a Quote</a></nav></header>
+<section class="hero">
+  <div class="wrap">
+    <div class="eyebrow">// Exhibition Design &amp; Fabrication — Noida, India</div>
+    <h1>We build <span>presence</span> that holds.</h1>
+    <p class="sub">Zest Exhibitions designs and fabricates world-class exhibition stalls, pavilions and commercial interiors, on schedule, every time.</p>
+    <div class="btn-row"><a class="btn-steel">Start Your Enquiry</a><a class="btn-line">View Portfolio →</a></div>
+  </div>
+</section>
+<section class="stats">
+  <div class="wrap stats-grid">
+    <div class="stat"><b>250+</b><p>Stalls Delivered</p></div>
+    <div class="stat"><b>18+</b><p>Industries Serviced</p></div>
+    <div class="stat"><b>120+</b><p>Corporate Clients</p></div>
+    <div class="stat"><b>72HRS</b><p>Build Turnaround</p></div>
+  </div>
+</section>
+<section>
+  <div class="wrap">
+    <h2 class="sec-title">Selected Builds</h2>
+    <div class="grid3">
+      <div class="card"><div class="ph" style="background-image:url('images/proj-04-danone.jpg');background-size:cover;background-position:center;"></div><div class="cb"><div class="k">FMCG / MNC</div><h4>Danone — Corner Stall</h4></div></div>
+      <div class="card"><div class="ph" style="background-image:url('images/proj-05-towa.jpg');background-size:cover;background-position:center;"></div><div class="cb"><div class="k">Technology</div><h4>Towa — Interactive Booth</h4></div></div>
+      <div class="card"><div class="ph" style="background-image:url('images/proj-03-mars.jpg');background-size:cover;background-position:center;"></div><div class="cb"><div class="k">FMCG</div><h4>Mars — Brand Stall</h4></div></div>
+    </div>
+  </div>
+</section>
+<footer>© 2026 Zest Exhibitions — Option C: Warm Concrete &amp; Steel, industrial workshop feel</footer>
+</body></html>
