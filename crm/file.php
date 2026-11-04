@@ -11,8 +11,8 @@ $allowed = $admin;
 if (!$allowed) {
   $pid = null;
   switch ($f['entity']) {
-    case 'card': $allowed = (int) val('SELECT owner_id FROM ' . T('clients') . ' WHERE id = ?', [$f['entity_id']]) === $uid; break;
-    case 'floor': case 'final': case 'wd': $pid = $f['entity_id']; break;
+    case 'card': case 'brief': $allowed = (int) val('SELECT owner_id FROM ' . T('clients') . ' WHERE id = ?', [$f['entity_id']]) === $uid; break;
+    case 'floor': case 'final': case 'wd': case 'pbrief': $pid = $f['entity_id']; break;
     case 'quote': $pid = val('SELECT project_id FROM ' . T('quotes') . ' WHERE id = ?', [$f['entity_id']]); break;
     case 'vquote': $pid = val('SELECT project_id FROM ' . T('vendor_quotes') . ' WHERE id = ?', [$f['entity_id']]); break;
     case 'revision': $pid = val('SELECT project_id FROM ' . T('revisions') . ' WHERE id = ?', [$f['entity_id']]); break;

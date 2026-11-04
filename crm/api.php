@@ -180,6 +180,7 @@ case 'client':
   $c = client_row($in['id'] ?? 0);
   $c['contacts'] = all('SELECT * FROM ' . T('contacts') . ' WHERE client_id = ? ORDER BY id', [$c['id']]);
   $c['cards'] = files_of('card', [$c['id']])[$c['id']] ?? [];
+  $c['briefs'] = files_of('brief', [$c['id']])[$c['id']] ?? [];
   $ps = all('SELECT * FROM ' . T('projects') . ' WHERE client_id = ? ORDER BY COALESCE(start_date, created_at) DESC', [$c['id']]);
   if (!$ADMIN) $ps = array_values(array_filter($ps, fn($p) => (int) $p['owner_id'] === $MID));
   $b = bills_for($ps); $um = users_map();
@@ -277,7 +278,7 @@ case 'project':
   $p['losses'] = $tb('losses', 'ldate, id');
   foreach (['vquotes', 'vpayments'] as $k) foreach ($p[$k] as &$r) { $r['vendor'] = $vn[$r['vendor_id']] ?? '—'; } unset($r);
   $p['files'] = [
-    'floor' => files_of('floor', [$id])[$id] ?? [], 'final' => files_of('final', [$id])[$id] ?? [], 'wd' => files_of('wd', [$id])[$id] ?? [],
+    'floor' => files_of('floor', [$id])[$id] ?? [], 'pbrief' => files_of('pbrief', [$id])[$id] ?? [], 'final' => files_of('final', [$id])[$id] ?? [], 'wd' => files_of('wd', [$id])[$id] ?? [],
     'quote' => files_of('quote', array_column($p['quotes'], 'id')), 'vquote' => files_of('vquote', array_column($p['vquotes'], 'id')),
     'revision' => files_of('revision', array_column($p['revisions'], 'id')),
   ];
@@ -335,8 +336,8 @@ case 'vq_select':
 case 'upload':
   $ent = $in['entity'] ?? ''; $eid = (int) ($in['entity_id'] ?? 0);
   switch ($ent) {
-    case 'card': client_row($eid); break;
-    case 'floor': case 'final': case 'wd': project_row($eid); break;
+    case 'card': case 'brief': client_row($eid); break;
+    case 'floor': case 'final': case 'wd': case 'pbrief': project_row($eid); break;
     case 'quote': case 'vquote': case 'revision':
       $tbl = ['quote' => 'quotes', 'vquote' => 'vendor_quotes', 'revision' => 'revisions'][$ent];
       $r = one('SELECT project_id FROM ' . T($tbl) . ' WHERE id = ?', [$eid]); if (!$r) fail('Not found', 404); project_row($r['project_id']); break;

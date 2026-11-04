@@ -162,7 +162,7 @@ routes.dnq = async () => {
 };
 
 routes.newclient = async () => {
-  const n = newClient || (newClient = { company: '', email: '', phone: '', person: '', designation: '', city: '', location: '', gst_no: '', notes: '', owner_id: '', contacts: [], cards: [] });
+  const n = newClient || (newClient = { company: '', email: '', phone: '', person: '', designation: '', city: '', location: '', gst_no: '', notes: '', owner_id: '', contacts: [], cards: [], briefs: [] });
   const F = (k, l, t = 'text') => `<label class="f">${l}<input data-nc="${k}" type="${t}" value="${esc(n[k])}"></label>`;
   view().innerHTML = `
   <div class="head"><div><h1>New client</h1><p>As you type the company, email or phone, the CRM checks every past record, including other employees' clients.</p></div></div>
@@ -175,6 +175,7 @@ routes.newclient = async () => {
   <div class="panel"><div class="ph"><h2>Others involved in the deal</h2><button class="btn ghost sm" id="nc-addc">+ Add person</button></div>
    ${n.contacts.length ? n.contacts.map((o, i) => `<div class="grid g3" style="margin-bottom:8px">${['name', 'designation', 'phone', 'email'].map(k => `<label class="f">${cap(k)}<input data-ncc="${i}" data-k="${k}" value="${esc(o[k])}"></label>`).join('')}</div>`).join('') : '<div class="sub">Purchase head, director, consultant — anyone else in the decision.</div>'}
   </div>
+  <div class="panel"><h2>Client brief / requirements</h2><p class="sub" style="margin-top:0">Upload the brief the customer gave — PDF, image, Word, Excel or PowerPoint.</p><div class="row"><label class="up">⬆ Upload brief<input type="file" multiple id="nc-brief" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx,.ppt,.pptx"></label>${n.briefs.map(f => `<span class="chip">📎 <span>${esc(f.name)}</span></span>`).join('')}</div></div>
   <div class="panel"><h2>Business cards</h2><div class="row"><label class="up">⬆ Add business card (photo / PDF)<input type="file" multiple id="nc-cards" accept=".jpg,.jpeg,.png,.webp,.heic,.pdf"></label>${n.cards.map(f => `<span class="chip">📎 <span>${esc(f.name)}</span></span>`).join('')}</div></div>
   <div class="row"><button class="btn" id="nc-save">Save client</button><a class="btn ghost" href="#clients">Cancel</a></div>`;
   dupCheck();
@@ -220,6 +221,7 @@ routes.client = async ({ id }) => {
     ${c.contacts.length ? `<div class="tw"><table>${c.contacts.map(o => `<tr><td><b>${esc(o.name)}</b><div class="sub">${esc(o.designation || '')}</div></td><td class="sub">${esc(o.phone || '')}<br>${esc(o.email || '')}</td><td class="r"><button class="btn link" data-delcontact="${o.id}" aria-label="Remove">✕</button></td></tr>`).join('')}</table></div>` : '<div class="sub">Nobody added.</div>'}
     <form class="grid g3" id="ct-form" style="margin-top:10px"><label class="f">Name<input name="name" required></label><label class="f">Designation<input name="designation"></label><label class="f">Phone<input name="phone"></label><div style="align-self:end"><button class="btn ghost sm">+ Add</button></div></form>
    </div>
+   <div class="panel"><h3>Client brief / requirements</h3><div class="row">${upBtn('brief', c.id, 'Upload brief')}${fileChips(c.briefs, isAdmin())}</div><p class="sub" style="margin-bottom:0">PDF, image, Word, Excel or PowerPoint.</p></div>
    <div class="panel"><h3>Business cards</h3><div class="row">${upBtn('card', c.id, 'Add card')}${fileChips(c.cards, isAdmin())}</div></div>
   </div>`;
 };
@@ -256,6 +258,7 @@ const vendorOpts = () => B.vendors.map(v => `<option value="${v.id}">${esc(v.nam
 const PT = {};
 PT.expo = p => `<div class="grid">${PF(p, 'expo', 'Expo name')}${PF(p, 'location', 'Location')}${PF(p, 'start_date', 'Start date', 'date')}${PF(p, 'end_date', 'End date', 'date')}${PF(p, 'area_sqm', 'Area (sqm)', 'number', 'step="0.01"')}${PF(p, 'stall_no', 'Stall no.')}
   ${isAdmin() ? `<label class="f">Handled by<select data-pf="owner_id">${B.users.filter(u => +u.active).map(u => `<option value="${u.id}" ${+u.id === +p.owner_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>` : ''}</div>
+  <h3 style="margin:18px 0 8px">Client brief for this expo</h3><div class="row">${upBtn('pbrief', p.id, 'Upload brief (PDF / image / Word / Excel / PPT)')}${fileChips(p.files.pbrief, isAdmin())}</div>
   <h3 style="margin:18px 0 8px">Floor plan</h3><div class="row">${upBtn('floor', p.id, 'Upload floor plan (JPG / PDF)')}${fileChips(p.files.floor, isAdmin())}</div>`;
 PT.design = p => `<div class="grid">${PF(p, 'designed_by', 'Designed by')}${PF(p, 'assigned_on', 'Design assigned on', 'date')}${PF(p, 'design_approved_by', 'Design approved by (Zest)')}</div>
   <h3 style="margin:18px 0 8px">Corrections</h3>
@@ -452,9 +455,10 @@ document.addEventListener('click', async e => {
       case 'nc-save': {
         const n = newClient; if (!n.company.trim()) return toast('Enter the company name', true);
         t.disabled = true;
-        const r = await act(() => api('client_save', { ...n, cards: undefined })).catch(() => null);
+        const r = await act(() => api('client_save', { ...n, cards: undefined, briefs: undefined })).catch(() => null);
         if (!r) { t.disabled = false; return; }
         if (n.cards.length) await act(() => uploadAll('card', r.id, n.cards)).catch(() => {});
+        if (n.briefs.length) await act(() => uploadAll('brief', r.id, n.briefs)).catch(() => {});
         newClient = null; toast('Client saved'); location.hash = '#client-' + r.id; return;
       }
       case 'dnq-open': $('#dnq-form').innerHTML = `<form class="panel" id="dnqf"><h3>Mark as “Do not quote”</h3><div class="grid"><label class="f">Reason<select name="reason" required>${B.reasons.map(r => `<option>${esc(r.label)}</option>`).join('')}</select></label><label class="f">What happened?<input name="note"></label></div><div class="row" style="margin-top:8px"><button class="btn danger">Confirm flag</button></div></form>`;
@@ -500,6 +504,7 @@ document.addEventListener('change', async e => {
     if (ds.vqsel) { await act(() => api('vq_select', { id: ds.vqsel }), 'Vendor chosen'); return refresh(); }
     if (ds.upload && t.files.length) { const files = [...t.files]; toast('Uploading…'); await act(() => uploadAll(ds.upload, ds.eid, files), `${files.length} file(s) uploaded`); return refresh(); }
     if (t.id === 'nc-cards') { newClient.cards.push(...t.files); return refresh(); }
+    if (t.id === 'nc-brief') { newClient.briefs.push(...t.files); return refresh(); }
     if (ds.rfile !== undefined) { draft.files[+ds.rfile].push(...t.files); return refresh(); }
     if (ds.woff !== undefined) { const i = +ds.woff; const w = t.checked ? [...B.weekly_off, i] : B.weekly_off.filter(x => x !== i); await act(() => api('settings_save', { weekly_off: w }), 'Weekly off saved'); await reboot(); return; }
     if (t.id === 'fm-dept') { C.fmDept = t.value; return refresh(); }
