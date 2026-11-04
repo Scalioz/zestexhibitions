@@ -66,10 +66,12 @@ async function route() {
   renderNav(r.name);
   const fn = routes[r.name] || routes.home;
   if ((r.name in ADMIN_ONLY) && !isAdmin()) { location.hash = '#home'; return; }
+  if ((r.name in RECORDS_ONLY) && !B.records) { location.hash = '#home'; return; }
   try { await fn(r); } catch (e) { if (e.message !== 'signed out') view().innerHTML = `<div class="alert bad"><b>Could not load this page</b><span class="m">${esc(e.message)}</span></div>`; }
   window.scrollTo(0, 0);
 }
 const ADMIN_ONLY = { reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
+const RECORDS_ONLY = { clients: 1, client: 1, project: 1, newclient: 1 };
 async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); window.scrollTo(0, y); }
 
 function renderNav(cur) {
@@ -80,7 +82,8 @@ function renderNav(cur) {
     ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('reportlog', 'Daily reports', B.flags || '')}
        <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('dnq', 'Do-not-quote list')}
        <div class="sec">Admin</div>${L('team', 'Team')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
-    : `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('report', 'Daily report', B.flags || '')}`;
+    : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('report', 'Daily report', B.flags || '')}`
+    : `${L('home', 'My dashboard')}${L('report', 'Daily report', B.flags || '')}`;
 }
 
 // ---------- HOME ----------
@@ -90,6 +93,16 @@ async function empHome() {
   const d = await api('home'); B.flags = d.missing.length; renderNav('home');
   const first = B.me.name.split(' ')[0];
   const hr = new Date().getHours(); const greet = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
+  if (!B.records) {
+    view().innerHTML = `
+    <div class="welcome">${PLAN}<div><h1>${greet}, ${esc(first)}</h1><p>${longDate(B.today)} · ${esc(B.me.department)}</p></div>
+     <div class="row"><a class="btn" href="#report">Open daily report</a></div></div>
+    ${d.missing.length ? `<div class="alert bad"><b>Daily report not submitted</b><span class="m">Missing for: ${d.missing.map(fd).join(', ')}. Admin can see this.</span></div>` : ''}
+    ${!d.today_done && d.today_working ? `<div class="alert warn"><b>Today's report is pending</b><span class="m">Submit before you leave for the day. <a href="#report">Open daily report →</a></span></div>` : ''}
+    ${d.today_done ? '<div class="alert" style="background:var(--ok-bg);color:var(--ok)"><b>Today\'s report is submitted</b></div>' : ''}
+    <div class="kpis"><div class="kpi"><span>Reports this month</span><b>${d.reports_month}</b></div><div class="kpi"><span>Entries this month</span><b>${d.entries_month}</b></div><div class="kpi hl"><span>Missed days</span><b>${d.missing.length}</b></div></div>`;
+    return;
+  }
   view().innerHTML = `
   <div class="welcome">${PLAN}<div><h1>${greet}, ${esc(first)}</h1><p>${longDate(B.today)} · ${esc(B.me.department)}</p></div>
    <div class="row"><a class="btn" href="#newclient">+ New client</a></div></div>
@@ -357,7 +370,9 @@ routes.team = async () => {
   view().innerHTML = `
   <div class="head"><div><h1>Team</h1><p>Only admin sets role and department. The department decides the daily report format.</p></div></div>
   <div class="panel"><div class="tw"><table><tr><th>Name</th><th>Login email</th><th>Designation</th><th>Department</th><th>Access</th><th>Joined</th><th>Status</th><th></th></tr>
-   ${d.users.map(u => `<tr><td><b>${esc(u.name)}</b><div class="sub">${esc(u.phone || '')}</div></td><td>${esc(u.email)}</td><td>${esc(u.designation || '')}</td><td>${esc(u.department)}</td><td>${u.role === 'admin' ? '<span class="pill p-enquiry">admin</span>' : 'Employee'}</td><td class="num">${fd(u.joined_on)}</td><td>${+u.active ? '<span class="pill p-ok">active</span>' : '<span class="pill p-off">disabled</span>'}</td><td class="r"><button class="btn ghost sm" data-edituser="${u.id}">Edit</button></td></tr>`).join('')}</table></div></div>
+   ${d.users.map(u => `<tr><td><b>${esc(u.name)}</b><div class="sub">${esc(u.phone || '')}</div></td><td>${esc(u.email)}</td><td>${esc(u.designation || '')}</td><td>${esc(u.department)}</td><td>${u.role === 'admin' ? '<span class="pill p-enquiry">admin</span>' : B.record_depts.includes(u.department) ? 'Clients + orders + report' : 'Daily report only'}</td><td class="num">${fd(u.joined_on)}</td><td>${+u.active ? '<span class="pill p-ok">active</span>' : '<span class="pill p-off">disabled</span>'}</td><td class="r"><button class="btn ghost sm" data-edituser="${u.id}">Edit</button></td></tr>`).join('')}</table></div></div>
+  <div class="panel"><h2>Who can add clients & orders</h2><p class="sub" style="margin-top:0">Ticked departments get Clients, New client and full expo orders (design, quotes, vendor quotes, extras, payments). Others only see their daily report.</p>
+   <div class="row">${B.departments.map(x => `<label class="row" style="gap:5px;margin-right:10px"><input type="checkbox" data-recdept="${esc(x)}" ${B.record_depts.includes(x) ? 'checked' : ''}>${esc(x)}</label>`).join('')}</div></div>
   <form class="panel" id="uform"><h2>${ed ? 'Edit ' + esc(ed.name) : 'Create employee login'}</h2>
    <div class="grid"><label class="f">Full name *<input name="name" required value="${esc(ed?.name)}"></label>
     <label class="f">Email (login ID) *<input name="email" type="email" ${ed ? 'disabled' : 'required'} value="${esc(ed?.email)}"></label>
@@ -514,6 +529,7 @@ document.addEventListener('change', async e => {
     if (ds.rfile !== undefined) { draft.files[+ds.rfile].push(...t.files); return refresh(); }
     if (ds.woff !== undefined) { const i = +ds.woff; const w = t.checked ? [...B.weekly_off, i] : B.weekly_off.filter(x => x !== i); await act(() => api('settings_save', { weekly_off: w }), 'Weekly off saved'); await reboot(); return; }
     if (t.id === 'fm-dept') { C.fmDept = t.value; return refresh(); }
+    if (ds.recdept !== undefined) { const set = new Set(B.record_depts); t.checked ? set.add(ds.recdept) : set.delete(ds.recdept); await act(() => api('settings_save', { record_depts: [...set] }), 'Access updated'); await reboot(); return; }
     if (t.tagName === 'SELECT' && t.name === 'vendor_id') {
       // "+ Add new vendor…" shows a name box right under the dropdown
       const form = t.closest('form'), box = form.querySelector('.nv');
