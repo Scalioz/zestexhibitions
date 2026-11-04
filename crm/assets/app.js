@@ -421,8 +421,8 @@ routes.settings = async () => {
   <div class="grid">
    <div class="panel"><h2>Rejection reasons</h2>${B.reasons.map(r => `<div class="row" style="justify-content:space-between;padding:3px 0"><span>${esc(r.label)}</span><button class="btn link" data-delreason="${r.id}">✕</button></div>`).join('')}
     <form class="row" id="rs-add" style="margin-top:8px"><input name="label" placeholder="New reason" required style="flex:1"><button class="btn ghost sm">Add</button></form></div>
-   <div class="panel"><h2>Vendors</h2>${B.vendors.length ? B.vendors.map(v => `<div class="row" style="justify-content:space-between;padding:3px 0"><span>${esc(v.name)} <span class="sub">${esc(v.phone || '')}</span></span><button class="btn link" data-delvendor="${v.id}">✕</button></div>`).join('') : '<div class="sub">No vendors yet.</div>'}
-    <form class="row" id="vd-add" style="margin-top:8px"><input name="name" placeholder="Vendor name" required style="flex:1"><input name="phone" placeholder="Phone" style="max-width:150px"><button class="btn ghost sm">Add</button></form></div>
+   <div class="panel"><h2>Vendors</h2>${B.vendors.length ? `<div class="tw"><table><tr><th>Vendor</th><th>Phone</th><th>City</th><th>Email</th><th></th></tr>${B.vendors.map(v => `<tr><td><b>${esc(v.name)}</b></td><td class="num">${esc(v.phone || '')}</td><td>${esc(v.city || '')}</td><td>${esc(v.email || '')}</td><td class="r"><button class="btn link" data-delvendor="${v.id}">✕</button></td></tr>`).join('')}</table></div>` : '<div class="sub">No vendors yet.</div>'}
+    <form class="grid g3 inset" id="vd-add" style="margin-top:10px"><label class="f">Vendor name *<input name="name" required></label><label class="f">Phone *<input name="phone" type="tel" required></label><label class="f">City *<input name="city" required></label><label class="f">Email<input name="email" type="email"></label><div style="align-self:end"><button class="btn ghost sm">+ Add vendor</button></div></form></div>
   </div>`;
   const sub = (id, a, msg) => { $(id).onsubmit = async e => { e.preventDefault(); await act(() => api(a, Object.fromEntries(new FormData(e.target))), msg); await reboot(); refresh(); }; };
   sub('#hol-add', 'holiday_add', 'Holiday added'); sub('#rs-add', 'reason_add', 'Reason added'); sub('#vd-add', 'vendor_add', 'Vendor added');
@@ -517,7 +517,14 @@ document.addEventListener('change', async e => {
     if (t.tagName === 'SELECT' && t.name === 'vendor_id') {
       // "+ Add new vendor…" shows a name box right under the dropdown
       const form = t.closest('form'), box = form.querySelector('.nv');
-      if (t.value === '__new' && !box) { t.closest('label').insertAdjacentHTML('afterend', '<label class="f nv">New vendor name *<input name="new_vendor" required placeholder="e.g. Metro Exhibits"></label>'); form.querySelector('[name=new_vendor]').focus(); }
+      if (t.value === '__new' && !box) {
+        t.closest('.grid').insertAdjacentHTML('afterend', `<div class="nv" style="margin-top:10px"><div class="sub" style="margin-bottom:6px"><b>New vendor details</b></div><div class="grid g3">
+          <label class="f">Vendor name *<input name="new_vendor" required placeholder="e.g. Metro Exhibits"></label>
+          <label class="f">Phone *<input name="new_vendor_phone" type="tel" required></label>
+          <label class="f">City *<input name="new_vendor_city" required></label>
+          <label class="f">Email<input name="new_vendor_email" type="email"></label></div></div>`);
+        form.querySelector('[name=new_vendor]').focus();
+      }
       if (t.value !== '__new' && box) box.remove();
       return;
     }
@@ -533,8 +540,8 @@ document.addEventListener('submit', async e => {
     const btn = f.querySelector('button:not([type=button])'); btn.disabled = true;
     try {
       if (data.vendor_id === '__new') {   // create the vendor first, then use it
-        const v = await act(() => api('vendor_add', { name: (data.new_vendor || '').trim() }));
-        data.vendor_id = v.id; delete data.new_vendor; await reboot();
+        const v = await act(() => api('vendor_add', { name: (data.new_vendor || '').trim(), phone: data.new_vendor_phone, city: data.new_vendor_city, email: data.new_vendor_email }));
+        data.vendor_id = v.id; ['new_vendor', 'new_vendor_phone', 'new_vendor_city', 'new_vendor_email'].forEach(k => delete data[k]); await reboot();
       }
       const r = await act(() => api('child_add', { project_id: C.project.id, kind: f.dataset.add, data }), 'Added');
       if (files.length) await act(() => uploadAll(f.dataset.add, r.id, files));

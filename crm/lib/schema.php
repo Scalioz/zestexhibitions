@@ -14,7 +14,7 @@ function create_schema($driver) {
   phone VARCHAR(30), active TINYINT NOT NULL DEFAULT 1, joined_on DATE NOT NULL, created_at DATETIME NOT NULL)$E",
 "CREATE TABLE IF NOT EXISTS {$t('holidays')} (id $PK, hdate DATE NOT NULL UNIQUE, reason VARCHAR(160) NOT NULL)$E",
 "CREATE TABLE IF NOT EXISTS {$t('reasons')} (id $PK, label VARCHAR(160) NOT NULL, active TINYINT NOT NULL DEFAULT 1)$E",
-"CREATE TABLE IF NOT EXISTS {$t('vendors')} (id $PK, name VARCHAR(160) NOT NULL, phone VARCHAR(40), notes TEXT, active TINYINT NOT NULL DEFAULT 1)$E",
+"CREATE TABLE IF NOT EXISTS {$t('vendors')} (id $PK, name VARCHAR(160) NOT NULL, phone VARCHAR(40), email VARCHAR(160), city VARCHAR(80), notes TEXT, active TINYINT NOT NULL DEFAULT 1)$E",
 "CREATE TABLE IF NOT EXISTS {$t('clients')} (
   id $PK, company VARCHAR(200) NOT NULL, email VARCHAR(160), phone VARCHAR(40), person VARCHAR(120), designation VARCHAR(120),
   location TEXT, city VARCHAR(80), gst_no VARCHAR(30), notes TEXT, owner_id $FK NOT NULL,
@@ -59,6 +59,12 @@ function migrate() {
   if ($v < 3) {
     try { db()->exec('ALTER TABLE ' . T('projects') . ' ADD COLUMN space_type VARCHAR(20)'); } catch (PDOException $e) { /* already there */ }
     set_setting('schema_v', 3);
+  }
+  if ($v < 4) {
+    foreach (['email VARCHAR(160)', 'city VARCHAR(80)'] as $col) {
+      try { db()->exec('ALTER TABLE ' . T('vendors') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ }
+    }
+    set_setting('schema_v', 4);
   }
 }
 

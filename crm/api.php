@@ -89,7 +89,7 @@ case 'boot':
     'weekly_off' => setting('weekly_off', [0]),
     'templates' => setting('templates', []),
     'reasons' => all('SELECT id, label FROM ' . T('reasons') . ' WHERE active = 1 ORDER BY id'),
-    'vendors' => all('SELECT id, name, phone FROM ' . T('vendors') . ' WHERE active = 1 ORDER BY name'),
+    'vendors' => all('SELECT id, name, phone, email, city FROM ' . T('vendors') . ' WHERE active = 1 ORDER BY name'),
     'users' => all('SELECT id, name, role, designation, department, active FROM ' . T('users') . ' ORDER BY name'),
     'today' => today(),
   ]);
@@ -553,8 +553,13 @@ case 'reason_del':
 
 case 'vendor_add':
   $nm = s($in['name'] ?? null, 160); if (!$nm) fail('Enter the vendor name.');
-  if ($ex = val('SELECT id FROM ' . T('vendors') . ' WHERE LOWER(name) = LOWER(?)', [$nm])) { q('UPDATE ' . T('vendors') . ' SET active = 1 WHERE id = ?', [$ex]); out(['id' => (int) $ex]); }
-  out(['id' => ins('vendors', ['name' => $nm, 'phone' => s($in['phone'] ?? null, 40)])]);
+  $vemail = strtolower(s($in['email'] ?? null, 160) ?? '');
+  if ($vemail && !filter_var($vemail, FILTER_VALIDATE_EMAIL)) fail('Vendor email looks wrong.');
+  $vd = ['phone' => s($in['phone'] ?? null, 40), 'email' => $vemail ?: null, 'city' => s($in['city'] ?? null, 80)];
+  if ($ex = val('SELECT id FROM ' . T('vendors') . ' WHERE LOWER(name) = LOWER(?)', [$nm])) {
+    upd('vendors', (int) $ex, array_filter($vd) + ['active' => 1]); out(['id' => (int) $ex]);
+  }
+  out(['id' => ins('vendors', ['name' => $nm] + $vd)]);
 
 case 'vendor_del':
   need_admin(); q('UPDATE ' . T('vendors') . ' SET active = 0 WHERE id = ?', [(int) ($in['id'] ?? 0)]); out(['ok' => true]);
