@@ -214,7 +214,7 @@ case 'client_full':
   $um = users_map();
   $c['owner'] = $um[$c['owner_id']] ?? '—'; $c['created_by_name'] = $um[$c['created_by']] ?? '—';
   $c['contacts'] = all('SELECT * FROM ' . T('contacts') . ' WHERE client_id = ?', [$c['id']]);
-  $c['cards'] = files_of('card', [$c['id']])[$c['id']] ?? []; $c['briefs'] = files_of('brief', [$c['id']])[$c['id']] ?? [];
+  $c['cards'] = files_of('card', [$c['id']])[$c['id']] ?? []; $c['briefs'] = files_of('brief', [$c['id']])[$c['id']] ?? []; $c['gstcert'] = files_of('gstcert', [$c['id']])[$c['id']] ?? [];
   $orders = report_orders(['client_id' => $c['id']]);
   $vn = []; foreach (all('SELECT id, name FROM ' . T('vendors')) as $v) $vn[$v['id']] = $v['name'];
   $ev = [];
@@ -273,6 +273,7 @@ case 'client':
   $c['contacts'] = all('SELECT * FROM ' . T('contacts') . ' WHERE client_id = ? ORDER BY id', [$c['id']]);
   $c['cards'] = files_of('card', [$c['id']])[$c['id']] ?? [];
   $c['briefs'] = files_of('brief', [$c['id']])[$c['id']] ?? [];
+  $c['gstcert'] = files_of('gstcert', [$c['id']])[$c['id']] ?? [];
   $ps = all('SELECT * FROM ' . T('projects') . ' WHERE client_id = ? ORDER BY COALESCE(start_date, created_at) DESC', [$c['id']]);
   if (!$ADMIN) $ps = array_values(array_filter($ps, fn($p) => (int) $p['owner_id'] === $MID));
   $b = bills_for($ps); $um = users_map();
@@ -337,7 +338,7 @@ case 'client_del':  // admin only: removes a client with all its orders, payment
   need_admin();
   $c = client_row($in['id'] ?? 0);
   $pids = array_map('intval', array_column(all('SELECT id FROM ' . T('projects') . ' WHERE client_id = ?', [$c['id']]), 'id'));
-  $files = all('SELECT * FROM ' . T('files') . " WHERE entity IN ('card','brief') AND entity_id = ?", [$c['id']]);
+  $files = all('SELECT * FROM ' . T('files') . " WHERE entity IN ('card','brief','gstcert') AND entity_id = ?", [$c['id']]);
   db()->beginTransaction();
   if ($pids) {
     $in_p = implode(',', $pids);
@@ -477,7 +478,7 @@ case 'vq_select':
 case 'upload':
   $ent = $in['entity'] ?? ''; $eid = (int) ($in['entity_id'] ?? 0);
   switch ($ent) {
-    case 'card': case 'brief': client_row($eid); break;
+    case 'card': case 'brief': case 'gstcert': client_row($eid); break;
     case 'floor': case 'final': case 'wd': case 'pbrief': project_row($eid); break;
     case 'quote': case 'vquote': case 'revision':
       $tbl = ['quote' => 'quotes', 'vquote' => 'vendor_quotes', 'revision' => 'revisions'][$ent];
