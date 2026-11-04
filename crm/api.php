@@ -207,9 +207,11 @@ case 'client_save':
     $ex = (array) ($in['expo'] ?? []);
     $hasExpo = array_filter(array_map(fn($x) => trim((string) $x), $ex));
     if ($hasExpo && !s($ex['expo'] ?? null)) fail('Enter the expo name (or clear the expo details).');
+    db()->beginTransaction();   // all-or-nothing: no half-saved client if something fails
     $id = ins('clients', $data);
     if ($hasExpo) create_project($id, $data['owner_id'], $ex);
     foreach ((array) ($in['contacts'] ?? []) as $ct) if (s($ct['name'] ?? null)) ins('contacts', ['client_id' => $id, 'name' => s($ct['name']), 'designation' => s($ct['designation'] ?? null), 'phone' => s($ct['phone'] ?? null), 'email' => s($ct['email'] ?? null)]);
+    db()->commit();
     out(['id' => $id]);
   }
   $c = client_row($in['id']);
@@ -246,6 +248,29 @@ case 'dup':
       'orders' => (int) val('SELECT COUNT(*) FROM ' . T('projects') . ' WHERE client_id = ?', [$r['id']]), 'last' => $last];
   }
   out(['matches' => $res]);
+
+case 'client_del':  // admin only: removes a client with all its orders, payments and files
+  need_admin();
+  $c = client_row($in['id'] ?? 0);
+  $pids = array_map('intval', array_column(all('SELECT id FROM ' . T('projects') . ' WHERE client_id = ?', [$c['id']]), 'id'));
+  $files = all('SELECT * FROM ' . T('files') . " WHERE entity IN ('card','brief') AND entity_id = ?", [$c['id']]);
+  db()->beginTransaction();
+  if ($pids) {
+    $in_p = implode(',', $pids);
+    foreach (['revision' => 'revisions', 'quote' => 'quotes', 'vquote' => 'vendor_quotes'] as $ent => $tbl) {
+      $ids = array_map('intval', array_column(all('SELECT id FROM ' . T($tbl) . " WHERE project_id IN ($in_p)"), 'id'));
+      if ($ids) $files = array_merge($files, all('SELECT * FROM ' . T('files') . ' WHERE entity = ? AND entity_id IN (' . implode(',', $ids) . ')', [$ent]));
+    }
+    $files = array_merge($files, all('SELECT * FROM ' . T('files') . " WHERE entity IN ('floor','final','wd','pbrief') AND entity_id IN ($in_p)"));
+    foreach (['revisions', 'quotes', 'vendor_quotes', 'extras', 'client_payments', 'vendor_payments', 'expenses', 'losses'] as $tbl) q('DELETE FROM ' . T($tbl) . " WHERE project_id IN ($in_p)");
+    q('DELETE FROM ' . T('projects') . " WHERE id IN ($in_p)");
+  }
+  q('DELETE FROM ' . T('contacts') . ' WHERE client_id = ?', [$c['id']]);
+  foreach ($files as $f) q('DELETE FROM ' . T('files') . ' WHERE id = ?', [$f['id']]);
+  q('DELETE FROM ' . T('clients') . ' WHERE id = ?', [$c['id']]);
+  db()->commit();
+  foreach ($files as $f) @unlink(__DIR__ . '/uploads/' . $f['stored_name']);
+  out(['ok' => true]);
 
 case 'dnq':
   $c = client_row($in['id'] ?? 0);

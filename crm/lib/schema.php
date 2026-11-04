@@ -56,9 +56,9 @@ function create_schema($driver) {
 // Upgrades older databases in place. Each step runs once.
 function migrate() {
   $v = (int) setting('schema_v', 1);
-  if ($v < 2) {
+  if ($v < 3) {
     try { db()->exec('ALTER TABLE ' . T('projects') . ' ADD COLUMN space_type VARCHAR(20)'); } catch (PDOException $e) { /* already there */ }
-    set_setting('schema_v', 2);
+    set_setting('schema_v', 3);
   }
 }
 
@@ -69,7 +69,6 @@ function seed_defaults() {
               'Design not approved','No response from client','Other'] as $r) ins('reasons', ['label' => $r]);
   }
   if (setting('departments') === null) set_setting('departments', ['Sales','Telecalling','Design','Data Research','Operations','Accounts']);
-  if (setting('schema_v') === null) set_setting('schema_v', 2);
   if (setting('weekly_off') === null) set_setting('weekly_off', [0]);
   if (setting('track_from') === null) set_setting('track_from', today());
   if (setting('templates') === null) set_setting('templates', default_templates());
