@@ -3,6 +3,7 @@
 require_once __DIR__ . '/lib/auth.php';
 require_once __DIR__ . '/lib/calc.php';
 require_once __DIR__ . '/lib/schema.php';
+require_once __DIR__ . '/lib/report.php';
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
@@ -175,6 +176,74 @@ case 'home':
     'vendors' => $vend, 'employees' => $emps, 'customers' => array_slice($cust, 0, 15),
     'lost' => $lost, 'recent' => $recent,
   ]);
+
+// ----- CLIENT LOG (admin reports) -----
+case 'client_log':
+  need_admin();
+  $f = ['from' => d($in['from'] ?? null), 'to' => d($in['to'] ?? null), 'status' => s($in['status'] ?? null, 12), 'user_id' => (int) ($in['user_id'] ?? 0), 'q' => s($in['q'] ?? null, 100)];
+  $orders = report_orders($f);
+  $cl = [];
+  foreach ($orders as $o) {
+    $k = $o['client_id'];
+    $c = &$cl[$k];
+    $c = $c ?? ['id' => $k, 'company' => $o['company'], 'city' => $o['client_city'], 'dnq' => (int) $o['dnq'], 'orders' => [], 'won' => 0, 'business' => 0, 'received' => 0, 'due' => 0, 'missed' => 0, 'profit' => 0, 'handlers' => []];
+    $c['orders'][] = ['id' => $o['id'], 'expo' => $o['expo'], 'location' => $o['location'], 'start_date' => $o['start_date'], 'area_sqm' => $o['area_sqm'], 'space_type' => $o['space_type'], 'stall_no' => $o['stall_no'],
+      'status' => $o['status'], 'owner' => $o['owner'], 'designed_by' => $o['designed_by'], 'fabricator' => $o['fabricator'], 'total' => $o['bill']['total'], 'received' => $o['bill']['received'],
+      'balance' => $o['bill']['balance'], 'profit' => $o['bill']['profit'], 'offered' => $o['offered'], 'reason' => $o['reason']];
+    $c['handlers'][$o['owner']] = 1;
+    if (is_won($o['status'])) { $c['won']++; $c['business'] += $o['bill']['total']; $c['received'] += $o['bill']['received']; $c['due'] += $o['bill']['balance']; $c['profit'] += $o['bill']['profit']; }
+    if ($o['status'] === 'rejected') $c['missed'] += (float) $o['offered'];
+    unset($c);
+  }
+  // clients with no orders yet (only when not filtering by order status / dates)
+  if (!$f['status'] && !$f['from'] && !$f['to']) {
+    $w = '1=1'; $pp = [];
+    if ($f['user_id']) { $w .= ' AND owner_id = ?'; $pp[] = $f['user_id']; }
+    if ($f['q']) { $w .= ' AND company LIKE ?'; $pp[] = '%' . $f['q'] . '%'; }
+    $um = users_map();
+    foreach (all('SELECT id, company, city, dnq, owner_id FROM ' . T('clients') . " WHERE $w", $pp) as $r) if (!isset($cl[$r['id']]))
+      $cl[$r['id']] = ['id' => $r['id'], 'company' => $r['company'], 'city' => $r['city'], 'dnq' => (int) $r['dnq'], 'orders' => [], 'won' => 0, 'business' => 0, 'received' => 0, 'due' => 0, 'missed' => 0, 'profit' => 0, 'handlers' => [$um[$r['owner_id']] ?? '—' => 1]];
+  }
+  foreach ($cl as &$c) $c['handlers'] = array_keys($c['handlers']); unset($c);
+  usort($cl, fn($a, $b) => strcasecmp($a['company'], $b['company']));
+  out(['clients' => array_values($cl), 'orders_n' => count($orders)]);
+
+case 'client_full':
+  need_admin();
+  $c = client_row($in['id'] ?? 0);
+  $um = users_map();
+  $c['owner'] = $um[$c['owner_id']] ?? '—'; $c['created_by_name'] = $um[$c['created_by']] ?? '—';
+  $c['contacts'] = all('SELECT * FROM ' . T('contacts') . ' WHERE client_id = ?', [$c['id']]);
+  $c['cards'] = files_of('card', [$c['id']])[$c['id']] ?? []; $c['briefs'] = files_of('brief', [$c['id']])[$c['id']] ?? [];
+  $orders = report_orders(['client_id' => $c['id']]);
+  $vn = []; foreach (all('SELECT id, name FROM ' . T('vendors')) as $v) $vn[$v['id']] = $v['name'];
+  $ev = [];
+  $ev[] = ['date' => substr($c['created_at'], 0, 10), 'type' => 'Client', 'text' => 'Client added by ' . $c['created_by_name']];
+  if ($c['dnq']) $ev[] = ['date' => $c['dnq_on'], 'type' => 'Do not quote', 'text' => 'Marked do-not-quote by ' . $c['dnq_by'] . ' — ' . $c['dnq_reason']];
+  foreach ($orders as &$o) {
+    $id = $o['id']; $tb = fn($t, $ord) => all('SELECT * FROM ' . T($t) . " WHERE project_id = ? ORDER BY $ord", [$id]);
+    $o['quotes'] = $tb('quotes', 'version'); $o['revisions'] = $tb('revisions', 'rdate'); $o['vquotes'] = $tb('vendor_quotes', 'amount'); $o['extras'] = $tb('extras', 'id');
+    $o['payments'] = $tb('client_payments', 'pdate'); $o['vpayments'] = $tb('vendor_payments', 'pdate'); $o['expenses'] = $tb('expenses', 'edate'); $o['losses'] = $tb('losses', 'ldate');
+    foreach (['vquotes', 'vpayments'] as $k) foreach ($o[$k] as &$r) { $r['vendor'] = $vn[$r['vendor_id']] ?? '—'; } unset($r);
+    $o['files'] = ['pbrief' => files_of('pbrief', [$id])[$id] ?? [], 'floor' => files_of('floor', [$id])[$id] ?? [], 'final' => files_of('final', [$id])[$id] ?? [], 'wd' => files_of('wd', [$id])[$id] ?? [],
+      'quote' => files_of('quote', array_column($o['quotes'], 'id'))];
+    $X = $o['expo'];
+    $ev[] = ['date' => substr($o['created_at'], 0, 10), 'type' => 'Order', 'text' => "Enquiry opened for $X, handled by {$o['owner']}"];
+    foreach ($o['quotes'] as $q) $ev[] = ['date' => $q['qdate'], 'type' => 'Quote', 'text' => "$X: quote V{$q['version']} ₹" . inr_txt($q['amount']) . ($q['approved_by'] ? ", approved by {$q['approved_by']}" : ', approval pending')];
+    if ($o['assigned_on']) $ev[] = ['date' => $o['assigned_on'], 'type' => 'Design', 'text' => "$X: design assigned to " . ($o['designed_by'] ?: '—')];
+    foreach ($o['revisions'] as $r) $ev[] = ['date' => $r['rdate'], 'type' => 'Design', 'text' => "$X: correction by " . ($r['done_by'] ?: '—') . ' — ' . $r['changes']];
+    foreach ($o['payments'] as $r) $ev[] = ['date' => $r['pdate'], 'type' => 'Payment in', 'text' => "$X: received ₹" . inr_txt($r['amount']) . " ({$r['mode']})"];
+    foreach ($o['vpayments'] as $r) $ev[] = ['date' => $r['pdate'], 'type' => 'Vendor paid', 'text' => "$X: paid {$r['vendor']} ₹" . inr_txt($r['amount']) . " ({$r['mode']})"];
+    foreach ($o['expenses'] as $r) $ev[] = ['date' => $r['edate'], 'type' => 'Expense', 'text' => "$X: {$r['category']} ₹" . inr_txt($r['amount']) . ($r['description'] ? " — {$r['description']}" : '')];
+    foreach ($o['losses'] as $r) $ev[] = ['date' => $r['ldate'], 'type' => 'Loss', 'text' => "$X: {$r['ltype']} ₹" . inr_txt($r['amount']) . ($r['note'] ? " — {$r['note']}" : '')];
+    foreach ($o['extras'] as $r) $ev[] = ['date' => $r['added_on'], 'type' => 'Extra', 'text' => "$X: {$r['item']} " . (float) $r['qty'] . ' × ₹' . inr_txt($r['rate'])];
+  }
+  unset($o);
+  $c['followups'] = followups_for($c['company']);
+  foreach ($c['followups'] as $fu) $ev[] = ['date' => $fu['date'], 'type' => 'Follow-up', 'text' => "{$fu['by']} ({$fu['dept']})" . ($fu['what'] ? ': ' . $fu['what'] : '')];
+  usort($ev, fn($a, $b) => strcmp($b['date'] ?? '', $a['date'] ?? ''));
+  $c['orders'] = $orders; $c['timeline'] = $ev;
+  out(['client' => $c]);
 
 // ----- CLIENTS -----
 case 'clients':

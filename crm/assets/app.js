@@ -71,7 +71,7 @@ async function route() {
   try { await fn(r); } catch (e) { if (e.message !== 'signed out') view().innerHTML = `<div class="alert bad"><b>Could not load this page</b><span class="m">${esc(e.message)}</span></div>`; }
   window.scrollTo(0, 0);
 }
-const ADMIN_ONLY = { reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
+const ADMIN_ONLY = { clientlog: 1, reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
 const RECORDS_ONLY = { clients: 1, client: 1, project: 1, newclient: 1 };
 async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); window.scrollTo(0, y); }
 
@@ -80,7 +80,7 @@ function renderNav(cur) {
   const on = map[cur] || cur;
   const L = (k, l, b) => `<a href="#${k}" class="${on === k ? 'on' : ''}">${l}${b ? `<span class="badge">${b}</span>` : ''}</a>`;
   $('#nav').innerHTML = isAdmin()
-    ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('reportlog', 'Daily reports', B.flags || '')}
+    ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('reportlog', 'Daily reports', B.flags || '')}
        <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('dnq', 'Do-not-quote list')}
        <div class="sec">Admin</div>${L('team', 'Team')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
     : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('report', 'Daily report', B.flags || '')}`
@@ -399,6 +399,57 @@ routes.reportlog = async () => {
      : `<div class="sub">${day.off ? 'No report expected.' : 'No employees to track on this day.'}</div>`}`).join('')}</div>`;
   $('#logf').onsubmit = e => { e.preventDefault(); const fm = new FormData(e.target); C.log = { from: fm.get('from'), to: fm.get('to'), user_id: fm.get('user_id') }; refresh(); };
 };
+
+// ---------- CLIENT LOG (admin) ----------
+routes.clientlog = async () => {
+  const f = C.clog || (C.clog = { q: '', user_id: '', status: '', from: '', to: '' });
+  const d = await api('client_log', f);
+  const sales = B.users.filter(u => u.role === 'employee');
+  const T = d.clients.reduce((a, c) => (a.b += c.business, a.r += c.received, a.d += c.due, a.m += c.missed, a.p += c.profit, a), { b: 0, r: 0, d: 0, m: 0, p: 0 });
+  const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
+  view().innerHTML = `
+  <div class="head"><div><h1>Client log</h1><p>Every client and order with its full history. Click a client to see everything.</p></div>
+   <a class="btn" href="export.php${qs ? '?' + qs : ''}">⬇ Export to Excel</a></div>
+  <form class="panel row" id="clogf" style="align-items:flex-end">
+   <label class="f" style="flex:1;min-width:180px">Search client / expo<input name="q" value="${esc(f.q)}"></label>
+   <label class="f">Handled by<select name="user_id"><option value="">Everyone</option>${sales.map(u => `<option value="${u.id}" ${+f.user_id === +u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>
+   <label class="f">Status<select name="status"><option value="">All</option>${['enquiry', 'quoted', 'won', 'rejected', 'completed'].map(s => `<option value="${s}" ${f.status === s ? 'selected' : ''}>${cap(s)}</option>`).join('')}</select></label>
+   <label class="f">Expo from<input type="date" name="from" value="${f.from}"></label><label class="f">to<input type="date" name="to" value="${f.to}"></label>
+   <button class="btn ghost">Apply</button>${Object.values(f).some(Boolean) ? '<button type="button" class="btn link" id="clogclear">Clear</button>' : ''}</form>
+  <div class="kpis"><div class="kpi"><span>Clients</span><b>${d.clients.length}</b><small>${d.orders_n} orders</small></div><div class="kpi hl"><span>Business won</span><b>${inr(T.b)}</b></div><div class="kpi"><span>Received</span><b>${inr(T.r)}</b></div><div class="kpi"><span>Outstanding</span><b>${inr(T.d)}</b></div><div class="kpi"><span>Missed</span><b>${inr(T.m)}</b></div><div class="kpi"><span>Profit</span><b>${inr(T.p)}</b></div></div>
+  <div class="log">${d.clients.length ? d.clients.map(c => `<details data-clog="${c.id}"><summary><b>${esc(c.company)}</b>${c.dnq ? '<span class="dnq">⛔ DO NOT QUOTE</span>' : ''}<span class="sub">${esc(c.city || '')} · ${esc(c.handlers.join(', '))}</span>
+     <span style="margin-left:auto" class="row"><span class="sub">${c.won}/${c.orders.length} won</span><span class="num">${inr(c.business)}</span>${c.due > 0.5 ? `<span class="pill p-quoted">${inr(c.due)} due</span>` : c.business ? '<span class="pill p-ok">paid</span>' : ''}</span></summary>
+     <div class="in">${c.orders.length ? `<div class="tw"><table><tr><th>Expo</th><th>Date</th><th>Area · type · stall</th><th>Status</th><th>Sales</th><th>Designer</th><th>Fabricator</th><th class="r">Bill</th><th class="r">Received</th><th class="r">Balance</th><th class="r">Profit</th></tr>
+      ${c.orders.map(o => `<tr class="click" data-go="project-${o.id}"><td><b>${esc(o.expo)}</b><div class="sub">${esc(o.location || '')}</div></td><td class="num">${fd(o.start_date)}</td><td>${o.area_sqm ? num(o.area_sqm) + ' sqm' : '—'}${o.space_type ? ' · ' + esc(o.space_type) : ''}${o.stall_no ? ' · ' + esc(o.stall_no) : ''}</td><td>${pill(o.status)}${o.reason ? `<div class="sub">${esc(o.reason)}</div>` : ''}</td><td>${esc(o.owner)}</td><td>${esc(o.designed_by || '—')}</td><td>${esc(o.fabricator || '—')}</td><td class="r num">${o.total ? inr(o.total) : '—'}</td><td class="r num">${inr(o.received)}</td><td class="r num">${o.total ? inr(o.balance) : '—'}</td><td class="r num">${o.total ? inr(o.profit) : '—'}</td></tr>`).join('')}</table></div>` : '<div class="sub">No orders yet.</div>'}
+     <div class="full" data-full="${c.id}"><div class="loading">Loading full history…</div></div></div></details>`).join('') : blank('No clients match these filters.')}</div>`;
+  $('#clogf').onsubmit = e => { e.preventDefault(); C.clog = Object.fromEntries(new FormData(e.target)); refresh(); };
+  if ($('#clogclear')) $('#clogclear').onclick = () => { C.clog = null; refresh(); };
+  document.querySelectorAll('details[data-clog]').forEach(el => el.addEventListener('toggle', () => { if (el.open && !el.dataset.loaded) { el.dataset.loaded = 1; loadFull(el.dataset.clog); } }));
+};
+async function loadFull(id) {
+  const box = document.querySelector(`[data-full="${id}"]`);
+  try {
+    const { client: c } = await api('client_full', { id });
+    const tag = { 'Payment in': 'p-ok', 'Vendor paid': 'p-quoted', 'Loss': 'p-bad', 'Expense': 'p-off', 'Do not quote': 'p-bad', 'Follow-up': 'p-enquiry' };
+    box.innerHTML = `<div class="grid" style="margin-top:14px">
+     <div class="inset"><h3 style="margin-bottom:6px">Client</h3><div>${esc(c.person || '—')}${c.designation ? ' · ' + esc(c.designation) : ''}</div><div class="sub">${esc(c.email || '')} ${esc(c.phone || '')}</div><div class="sub">${esc(c.location || '')}</div>${c.gst_no ? `<div class="sub">GSTIN ${esc(c.gst_no)}</div>` : ''}
+      <div class="sub" style="margin-top:6px">Handled by <b>${esc(c.owner)}</b> · added ${fd(c.created_at)} by ${esc(c.created_by_name)}</div>
+      ${c.contacts.length ? `<div style="margin-top:8px"><b class="sub">Others in the deal</b>${c.contacts.map(o => `<div class="sub">${esc(o.name)}${o.designation ? ' · ' + esc(o.designation) : ''} ${esc(o.phone || '')}</div>`).join('')}</div>` : ''}
+      <div style="margin-top:8px">${c.briefs.length ? '<b class="sub">Briefs</b>' + fileChips(c.briefs) : ''}${c.cards.length ? '<b class="sub">Business cards</b>' + fileChips(c.cards) : ''}</div></div>
+     <div class="inset"><h3 style="margin-bottom:6px">Who followed up</h3>${c.followups.length ? `<div class="tw"><table>${c.followups.slice(0, 15).map(x => `<tr><td class="num">${fd(x.date)}</td><td><b>${esc(x.by)}</b><div class="sub">${esc(x.dept)}</div></td><td class="sub">${esc(x.what)}</td></tr>`).join('')}</table></div>` : '<div class="sub">No daily-report entries mention this client.</div>'}</div></div>
+    ${c.orders.map(o => { const b = o.bill; return `<div class="inset" style="margin-top:12px"><div class="ph"><h3>${esc(o.expo)}${o.location ? ', ' + esc(o.location) : ''} ${pill(o.status)}</h3><a class="btn ghost sm" href="#project-${o.id}">Open order</a></div>
+      <div class="grid g3 sub">
+       <div><b>Expo</b><br>${fd(o.start_date)} – ${fd(o.end_date)}<br>${o.area_sqm ? num(o.area_sqm) + ' sqm' : '—'} · ${esc(o.space_type || '—')} · Stall ${esc(o.stall_no || '—')}</div>
+       <div><b>People</b><br>Sales: ${esc(o.owner)}<br>Designer: ${esc(o.designed_by || '—')} (${o.revisions.length} correction${o.revisions.length === 1 ? '' : 's'})<br>Design approved: ${esc(o.design_approved_by || '—')}</div>
+       <div><b>Fabrication</b><br>Vendor: ${esc(o.fabricator || '—')}<br>Vendor quotes: ${o.vquotes.length ? o.vquotes.map(v => `${esc(v.vendor)} ${inr(v.amount)}${+v.selected ? ' ✓' : ''}`).join(', ') : '—'}</div>
+       <div><b>Price</b><br>Offered ${inr(o.offered)} · Agreed ${inr(o.agreed)}<br>Quotes: ${o.quotes.map(q => `V${q.version} ${inr(q.amount)}`).join(', ') || '—'}<br>Approved by: ${esc(o.approved_by || '—')}</div>
+       <div><b>Money</b><br>Bill ${inr(b.total)} (GST ${inr(b.gst)}, extras ${inr(b.extras)})<br>Received ${inr(b.received)} · <span style="color:${b.balance > 0.5 ? 'var(--bad)' : 'var(--ok)'}">Balance ${inr(b.balance)}</span></div>
+       <div><b>Costs & profit</b><br>Vendor ${inr(b.vendor_paid)} · Expenses ${inr(b.expenses)} · Losses ${inr(b.losses)}<br>Profit <b>${inr(b.profit)}</b></div>
+      </div>${o.status === 'rejected' ? `<div class="sub" style="margin-top:6px"><b>Rejected by ${o.rejected_by === 'us' ? 'Zest' : 'client'}:</b> ${esc(o.reason || '')} ${esc(o.rejection_note || '')}</div>` : ''}
+      <div class="row" style="margin-top:8px">${['pbrief', 'floor', 'final', 'wd'].filter(k => o.files[k].length).map(k => `<span class="sub">${{ pbrief: 'Brief', floor: 'Floor plan', final: 'Final design', wd: 'Working drawing' }[k]}:</span>${fileChips(o.files[k])}`).join('')}</div></div>`; }).join('')}
+    <div class="inset" style="margin-top:12px"><h3 style="margin-bottom:6px">Full timeline</h3>${c.timeline.length ? `<div class="tw"><table>${c.timeline.map(x => `<tr><td class="num" style="white-space:nowrap">${fd(x.date)}</td><td><span class="pill ${tag[x.type] || 'p-off'}">${esc(x.type)}</span></td><td>${esc(x.text)}</td></tr>`).join('')}</table></div>` : '<div class="sub">Nothing yet.</div>'}</div>`;
+  } catch (e) { box.innerHTML = `<div class="alert bad"><span class="m">${esc(e.message)}</span></div>`; }
+}
 
 // ---------- TEAM ----------
 routes.team = async () => {
