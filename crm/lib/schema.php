@@ -66,9 +66,19 @@ function migrate() {
     }
     set_setting('schema_v', 4);
   }
+  if ($v < 5) { create_audit_table(); set_setting('schema_v', 5); }
+}
+
+// Change history: who corrected which money entry, before → after
+function create_audit_table() {
+  $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
+  $PK = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT UNSIGNED AUTO_INCREMENT PRIMARY KEY';
+  $E = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+  db()->exec('CREATE TABLE IF NOT EXISTS ' . T('audit') . " (id $PK, user_id INT NOT NULL, at DATETIME NOT NULL, project_id INT, kind VARCHAR(20) NOT NULL, entry_id INT NOT NULL, action VARCHAR(10) NOT NULL, before_json TEXT, after_json TEXT)$E");
 }
 
 function seed_defaults() {
+  create_audit_table();
   if (!val('SELECT COUNT(*) FROM ' . T('reasons'))) {
     foreach (['Payment history issue / dues pending','Unreasonable price expectation','Difficult to work with','Timeline not feasible',
               'Scope not suitable for us','Price too high (client chose other vendor)','Client cancelled expo participation',
