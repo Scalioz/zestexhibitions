@@ -26,7 +26,7 @@ $MID = (int) $me['id'];
 // Client & order records are for admin + departments the admin allows (default: Sales). Others only do daily reports.
 $RECORDS = $ADMIN || in_array($me['department'], setting('record_depts', ['Sales']), true);
 $RECORD_ACTIONS = ['clients', 'client', 'client_save', 'dup', 'dnq', 'contact_add', 'contact_del', 'project_create', 'project', 'project_save',
-  'child_add', 'child_del', 'vq_select', 'file_del', 'vendor_add'];
+  'child_add', 'child_update', 'child_del', 'vq_select', 'file_del', 'vendor_add'];
 if (in_array($A, $RECORD_ACTIONS, true) && !$RECORDS) fail('Your department does not have access to client records.', 403);
 if ($A === 'upload' && !$RECORDS && ($in['entity'] ?? '') !== 'ritem') fail('Your department does not have access to client records.', 403);
 
@@ -334,6 +334,8 @@ case 'project':
     'revision' => files_of('revision', array_column($p['revisions'], 'id')),
   ];
   $p['bill'] = project_bill($p, $p['extras'], $p['payments'], $p['vpayments'], $p['expenses'], $p['losses']);
+  $um = users_map();
+  $p['history'] = array_map(fn($h) => $h + ['by' => $um[$h['user_id']] ?? '—'], all('SELECT * FROM ' . T('audit') . ' WHERE project_id = ? ORDER BY id DESC LIMIT 50', [$id]));
   $c = one('SELECT id, company, dnq FROM ' . T('clients') . ' WHERE id = ?', [$p['client_id']]);
   $p['client'] = $c; $p['owner'] = users_map()[$p['owner_id']] ?? '—';
   out(['project' => $p]);
@@ -368,6 +370,24 @@ case 'child_add':
   }
   out(['id' => $id]);
 
+case 'child_update':  // correct a mistake in any entry; money changes are logged
+  $k = $in['kind'] ?? ''; if (!isset($KINDS[$k])) fail('Unknown entry type.');
+  [$table, $fields, $req] = $KINDS[$k];
+  $r = one('SELECT * FROM ' . T($table) . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]); if (!$r) fail('Not found', 404);
+  $p = project_row($r['project_id']);
+  $data = [];
+  foreach ($fields as $f => $type) if (array_key_exists($f, (array) ($in['data'] ?? []))) $data[$f] = clean($type, $in['data'][$f]);
+  foreach ($req as $f) if (array_key_exists($f, $data) && ($data[$f] === null || $data[$f] === '')) fail('Please fill: ' . str_replace('_', ' ', $f));
+  if ($k === 'extra' && array_key_exists('qty', $data) && !$data['qty']) $data['qty'] = 1;
+  $changed = array_filter($data, fn($v, $f) => (string) $v !== (string) $r[$f] && !(is_numeric($v) && is_numeric($r[$f]) && (float) $v === (float) $r[$f]), ARRAY_FILTER_USE_BOTH);
+  if (!$changed) out(['ok' => true]);
+  upd($table, $r['id'], $changed);
+  ins('audit', ['user_id' => $MID, 'at' => now(), 'project_id' => $p['id'], 'kind' => $k, 'entry_id' => $r['id'], 'action' => 'edit',
+    'before_json' => json_encode(array_intersect_key($r, $changed)), 'after_json' => json_encode($changed)]);
+  if ($k === 'quote' && isset($changed['amount']) && (int) $r['version'] === (int) val('SELECT MAX(version) FROM ' . T('quotes') . ' WHERE project_id = ?', [$p['id']]))
+    upd('projects', $p['id'], ['offered' => $changed['amount']]);
+  out(['ok' => true]);
+
 case 'child_del':
   $k = $in['kind'] ?? ''; if (!isset($KINDS[$k])) fail('Unknown entry type.');
   if (in_array($k, $ADMIN_DELETE_ONLY, true)) need_admin();
@@ -375,6 +395,7 @@ case 'child_del':
   $r = one('SELECT * FROM ' . T($table) . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]); if (!$r) fail('Not found', 404);
   project_row($r['project_id']);
   q('DELETE FROM ' . T($table) . ' WHERE id = ?', [$r['id']]);
+  ins('audit', ['user_id' => $MID, 'at' => now(), 'project_id' => $r['project_id'], 'kind' => $k, 'entry_id' => $r['id'], 'action' => 'delete', 'before_json' => json_encode($r), 'after_json' => null]);
   out(['ok' => true]);
 
 case 'vq_select':

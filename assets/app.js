@@ -63,6 +63,7 @@ const routes = {};
 function parseHash() { const h = (location.hash || '#home').slice(1); const [name, id, tab] = h.split('-'); return { name: name || 'home', id: id ? +id : null, tab }; }
 async function route() {
   const r = parseHash();
+  C.editing = null;
   renderNav(r.name);
   const fn = routes[r.name] || routes.home;
   if ((r.name in ADMIN_ONLY) && !isAdmin()) { location.hash = '#home'; return; }
@@ -269,6 +270,29 @@ routes.project = async ({ id, tab }) => {
 };
 const PF = (p, k, l, t = 'text', extra = '') => `<label class="f">${l}<input data-pf="${k}" type="${t}" value="${esc(t === 'number' ? num(p[k]) : p[k])}" ${extra}></label>`;
 const delBtn = (kind, id) => `<button class="btn link" data-delchild="${kind}:${id}" aria-label="Delete entry" title="Delete">✕</button>`;
+const acts = (kind, id, canDel = true) => `<span style="white-space:nowrap"><button class="btn link" data-editchild="${kind}:${id}" title="Edit" aria-label="Edit entry">✎ Edit</button>${canDel ? delBtn(kind, id) : ''}</span>`;
+// Inline edit form for one entry (opens in place of the row)
+const EF = {
+  revision: [['rdate', 'Date', 'date'], ['done_by', 'Done by'], ['changes', 'What changed']],
+  quote: [['qdate', 'Date', 'date'], ['amount', 'Amount (₹)', 'number'], ['approved_by', 'Approved by (Zest)'], ['notes', 'What changed']],
+  vquote: [['vendor_id', 'Vendor', 'vendor'], ['amount', 'Quote (₹)', 'number'], ['note', 'Quality note']],
+  extra: [['item', 'Item'], ['rate', 'Unit rate (₹)', 'number'], ['qty', 'Qty', 'number']],
+  payment: [['pdate', 'Date', 'date'], ['mode', 'Mode', ['Bank', 'Cash', 'UPI', 'Cheque']], ['reference', 'Reference / UTR'], ['amount', 'Amount (₹)', 'number']],
+  vpayment: [['pdate', 'Date', 'date'], ['vendor_id', 'Vendor', 'vendor'], ['mode', 'Mode', ['Bank', 'Cash', 'UPI', 'Cheque']], ['amount', 'Amount (₹)', 'number']],
+  expense: [['edate', 'Date', 'date'], ['category', 'Type', ['Flight', 'Train', 'Hotel', 'Commute', 'Food', 'Courier', 'Other']], ['description', 'Details'], ['amount', 'Amount (₹)', 'number']],
+  loss: [['ldate', 'Date', 'date'], ['ltype', 'Type', ['Client paid less', 'Vendor overpaid by mistake', 'Damage', 'Other']], ['note', 'Note'], ['amount', 'Amount (₹)', 'number']],
+};
+function rowOr(kind, r, cols, html) {
+  if (C.editing !== kind + ':' + r.id) return html;
+  const inp = ([k, l, t]) => {
+    const v = r[k] ?? '';
+    if (t === 'vendor') return `<label class="f">${l}<select name="${k}">${B.vendors.map(o => `<option value="${o.id}" ${+o.id === +v ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}${B.vendors.some(o => +o.id === +v) ? '' : `<option value="${esc(v)}" selected>${esc(r.vendor || 'Current vendor')}</option>`}</select></label>`;
+    if (Array.isArray(t)) return `<label class="f">${l}<select name="${k}">${[...new Set([...t, v].filter(Boolean))].map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`;
+    return `<label class="f">${l}<input name="${k}" type="${t || 'text'}" ${t === 'number' ? 'step="any"' : ''} value="${esc(t === 'number' ? num(v) : v)}"></label>`;
+  };
+  return `<tr><td colspan="${cols}" style="background:var(--gold-soft)"><form data-edit="${kind}:${r.id}"><div class="grid g3">${EF[kind].map(inp).join('')}</div>
+    <div class="row" style="margin-top:8px"><button class="btn sm">Save changes</button><button type="button" class="btn ghost sm" data-canceledit="1">Cancel</button></div></form></td></tr>`;
+}
 const canDelMoney = () => isAdmin();
 const vendorOpts = () => '<option value="">Select vendor</option>' + B.vendors.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('') + '<option value="__new">+ Add new vendor…</option>';
 const PT = {};
@@ -278,7 +302,7 @@ PT.expo = p => `<div class="grid">${PF(p, 'expo', 'Expo name')}${PF(p, 'location
   <h3 style="margin:18px 0 8px">Floor plan</h3><div class="row">${upBtn('floor', p.id, 'Upload floor plan (JPG / PDF)')}${fileChips(p.files.floor, isAdmin())}</div>`;
 PT.design = p => `<div class="grid">${PF(p, 'designed_by', 'Designed by')}${PF(p, 'assigned_on', 'Design assigned on', 'date')}${PF(p, 'design_approved_by', 'Design approved by (Zest)')}</div>
   <h3 style="margin:18px 0 8px">Corrections</h3>
-  ${p.revisions.length ? `<div class="tw"><table><tr><th>#</th><th>Date</th><th>Done by</th><th>What changed</th><th>File</th><th></th></tr>${p.revisions.map((r, i) => `<tr><td>R${i + 1}</td><td class="num">${fd(r.rdate)}</td><td>${esc(r.done_by || '')}</td><td>${esc(r.changes)}</td><td>${fileChips(p.files.revision[r.id], isAdmin())}</td><td class="r">${delBtn('revision', r.id)}</td></tr>`).join('')}</table></div>` : '<div class="sub">No corrections yet.</div>'}
+  ${p.revisions.length ? `<div class="tw"><table><tr><th>#</th><th>Date</th><th>Done by</th><th>What changed</th><th>File</th><th></th></tr>${p.revisions.map((r, i) => rowOr('revision', r, 6, `<tr><td>R${i + 1}</td><td class="num">${fd(r.rdate)}</td><td>${esc(r.done_by || '')}</td><td>${esc(r.changes)}</td><td>${fileChips(p.files.revision[r.id], isAdmin())}</td><td class="r">${acts('revision', r.id)}</td></tr>`)).join('')}</table></div>` : '<div class="sub">No corrections yet.</div>'}
   <form class="inset" data-add="revision" style="margin-top:10px"><div class="grid g3"><label class="f">Date<input type="date" name="rdate" value="${B.today}" required></label><label class="f">Done by<input name="done_by"></label><label class="f">What changed *<input name="changes" required></label></div>
    <div class="row" style="margin-top:8px"><label class="up">⬆ Attach file<input type="file" name="file" multiple></label><button class="btn ghost sm">+ Add correction</button></div></form>
   <div class="grid" style="margin-top:18px"><div><h3 style="margin-bottom:8px">Final design</h3><div class="row">${upBtn('final', p.id)}${fileChips(p.files.final, isAdmin())}</div></div>
@@ -296,7 +320,7 @@ PT.order = p => { const c = calcBill(p); return `<div class="grid">${PF(p, 'offe
    <label class="f wide">Details<input data-pf="rejection_note" value="${esc(p.rejection_note)}"></label>
    ${p.rejected_by === 'us' && !+p.client.dnq && isAdmin() ? `<div class="sub wide">Want to stop future quotes to this client? <a href="#client-${p.client.id}">Mark them “Do not quote”</a>.</div>` : ''}</div>` : ''}
   <h3 style="margin:18px 0 8px">Quote versions sent to client</h3>
-  ${p.quotes.length ? `<div class="tw"><table><tr><th>Ver.</th><th>Date</th><th class="r">Amount</th><th>Approved by</th><th>Notes</th><th>PDF</th><th></th></tr>${p.quotes.map(q => `<tr><td>V${q.version}</td><td class="num">${fd(q.qdate)}</td><td class="r num">${inr(q.amount)}</td><td>${q.approved_by ? esc(q.approved_by) : '<span class="pill p-pending">pending</span>'}</td><td class="sub">${esc(q.notes || '')}</td><td>${fileChips(p.files.quote[q.id], isAdmin())}${upBtn('quote', q.id, 'Add')}</td><td class="r">${delBtn('quote', q.id)}</td></tr>`).join('')}</table></div>` : '<div class="sub">No quote sent yet.</div>'}
+  ${p.quotes.length ? `<div class="tw"><table><tr><th>Ver.</th><th>Date</th><th class="r">Amount</th><th>Approved by</th><th>Notes</th><th>PDF</th><th></th></tr>${p.quotes.map(q => rowOr('quote', q, 7, `<tr><td>V${q.version}</td><td class="num">${fd(q.qdate)}</td><td class="r num">${inr(q.amount)}</td><td>${q.approved_by ? esc(q.approved_by) : '<span class="pill p-pending">pending</span>'}</td><td class="sub">${esc(q.notes || '')}</td><td>${fileChips(p.files.quote[q.id], isAdmin())}${upBtn('quote', q.id, 'Add')}</td><td class="r">${acts('quote', q.id)}</td></tr>`)).join('')}</table></div>` : '<div class="sub">No quote sent yet.</div>'}
   <form class="inset" data-add="quote" style="margin-top:10px"><div class="grid g3"><label class="f">Date<input type="date" name="qdate" value="${B.today}" required></label><label class="f">Amount (₹) *<input type="number" name="amount" required></label><label class="f">Approved by (Zest)<input name="approved_by"></label><label class="f">What changed<input name="notes"></label></div>
    <div class="row" style="margin-top:8px"><label class="up">⬆ Attach quote PDF<input type="file" name="file" multiple accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"></label><button class="btn ghost sm">+ Add quote version</button></div></form>`; };
 // Same maths as the server (lib/calc.php), used to update totals while typing
@@ -308,25 +332,27 @@ function calcBill(p, over = {}) {
   return { gst, total: base + ext + gst, ext };
 }
 PT.vendors = p => { const min = p.vquotes.length ? Math.min(...p.vquotes.map(v => +v.amount)) : 0; return `<p class="sub" style="margin-top:0">Collect quotes from all vendors. L1 (lowest) is marked automatically; choose the vendor you finally went with.</p>
-  ${p.vquotes.length ? `<div class="tw"><table><tr><th>Vendor</th><th class="r">Quote</th><th>Quality note</th><th>File</th><th>Chosen</th><th></th></tr>${p.vquotes.map(v => `<tr><td>${esc(v.vendor)}${+v.amount === min ? '<span class="l1">L1</span>' : ''}</td><td class="r num">${inr(v.amount)}</td><td>${esc(v.note || '')}</td><td>${fileChips(p.files.vquote[v.id], isAdmin())}${upBtn('vquote', v.id, 'Add')}</td><td><input type="radio" name="vqsel" data-vqsel="${v.id}" ${+v.selected ? 'checked' : ''} aria-label="Choose ${esc(v.vendor)}"></td><td class="r">${delBtn('vquote', v.id)}</td></tr>`).join('')}</table></div>` : '<div class="sub">No vendor quotes yet.</div>'}
+  ${p.vquotes.length ? `<div class="tw"><table><tr><th>Vendor</th><th class="r">Quote</th><th>Quality note</th><th>File</th><th>Chosen</th><th></th></tr>${p.vquotes.map(v => rowOr('vquote', v, 6, `<tr><td>${esc(v.vendor)}${+v.amount === min ? '<span class="l1">L1</span>' : ''}</td><td class="r num">${inr(v.amount)}</td><td>${esc(v.note || '')}</td><td>${fileChips(p.files.vquote[v.id], isAdmin())}${upBtn('vquote', v.id, 'Add')}</td><td><input type="radio" name="vqsel" data-vqsel="${v.id}" ${+v.selected ? 'checked' : ''} aria-label="Choose ${esc(v.vendor)}"></td><td class="r">${acts('vquote', v.id)}</td></tr>`)).join('')}</table></div>` : '<div class="sub">No vendor quotes yet.</div>'}
   <form class="inset" data-add="vquote" style="margin-top:10px"><div class="grid g3"><label class="f">Vendor *<select name="vendor_id" required>${vendorOpts()}</select></label><label class="f">Quote (₹) *<input type="number" name="amount" required></label><label class="f">Quality note<input name="note"></label></div>
    <div class="row" style="margin-top:8px"><label class="up">⬆ Attach vendor quote<input type="file" name="file" multiple></label><button class="btn ghost sm">+ Add vendor quote</button></div></form>`; };
 PT.extras = p => { const tot = p.extras.reduce((s, x) => s + x.rate * x.qty, 0); return `<p class="sub" style="margin-top:0">Items taken during the expo. They are added to the bill total automatically.</p>
-  ${p.extras.length ? `<div class="tw"><table><tr><th>Item</th><th class="r">Unit rate</th><th class="r">Qty</th><th class="r">Amount</th><th></th></tr>${p.extras.map(x => `<tr><td>${esc(x.item)}</td><td class="r num">${inr(x.rate)}</td><td class="r num">${num(x.qty)}</td><td class="r num">${inr(x.rate * x.qty)}</td><td class="r">${delBtn('extra', x.id)}</td></tr>`).join('')}<tr><td><b>Total extras</b></td><td></td><td></td><td class="r num"><b>${inr(tot)}</b></td><td></td></tr></table></div>` : '<div class="sub">No extras.</div>'}
+  ${p.extras.length ? `<div class="tw"><table><tr><th>Item</th><th class="r">Unit rate</th><th class="r">Qty</th><th class="r">Amount</th><th></th></tr>${p.extras.map(x => rowOr('extra', x, 5, `<tr><td>${esc(x.item)}</td><td class="r num">${inr(x.rate)}</td><td class="r num">${num(x.qty)}</td><td class="r num">${inr(x.rate * x.qty)}</td><td class="r">${acts('extra', x.id)}</td></tr>`)).join('')}<tr><td><b>Total extras</b></td><td></td><td></td><td class="r num"><b>${inr(tot)}</b></td><td></td></tr></table></div>` : '<div class="sub">No extras.</div>'}
   <form class="inset" data-add="extra" style="margin-top:10px"><div class="grid g3"><label class="f">Item name *<input name="item" required placeholder="e.g. Extra spotlight"></label><label class="f">Unit rate (₹) *<input type="number" name="rate" required></label><label class="f">Qty<input type="number" name="qty" value="1" step="0.01"></label></div>
    <div class="row" style="margin-top:8px"><button class="btn ghost sm">+ Add extra item</button></div></form>`; };
 PT.money = p => `<h3 style="margin-bottom:8px">Received from client</h3>
-  ${p.payments.length ? `<div class="tw"><table><tr><th>Date</th><th>Mode</th><th>Reference</th><th class="r">Amount</th><th></th></tr>${p.payments.map(x => `<tr><td class="num">${fd(x.pdate)}</td><td>${esc(x.mode)}</td><td class="sub">${esc(x.reference || '')}</td><td class="r num">${inr(x.amount)}</td><td class="r">${canDelMoney() ? delBtn('payment', x.id) : ''}</td></tr>`).join('')}</table></div>` : '<div class="sub">Nothing received yet.</div>'}
+  ${p.payments.length ? `<div class="tw"><table><tr><th>Date</th><th>Mode</th><th>Reference</th><th class="r">Amount</th><th></th></tr>${p.payments.map(x => rowOr('payment', x, 5, `<tr><td class="num">${fd(x.pdate)}</td><td>${esc(x.mode)}</td><td class="sub">${esc(x.reference || '')}</td><td class="r num">${inr(x.amount)}</td><td class="r">${acts('payment', x.id, canDelMoney())}</td></tr>`)).join('')}</table></div>` : '<div class="sub">Nothing received yet.</div>'}
   <form class="inset" data-add="payment" style="margin-top:8px"><div class="grid g3"><label class="f">Date *<input type="date" name="pdate" value="${B.today}" required></label><label class="f">Mode<select name="mode"><option>Bank</option><option>Cash</option><option>UPI</option><option>Cheque</option></select></label><label class="f">Reference / UTR<input name="reference"></label><label class="f">Amount (₹) *<input type="number" name="amount" required step="0.01"></label></div><div class="row" style="margin-top:8px"><button class="btn ghost sm">+ Add client payment</button></div></form>
   <h3 style="margin:22px 0 8px">Paid to vendors</h3>
-  ${p.vpayments.length ? `<div class="tw"><table><tr><th>Date</th><th>Vendor</th><th>Mode</th><th class="r">Amount</th><th></th></tr>${p.vpayments.map(x => `<tr><td class="num">${fd(x.pdate)}</td><td>${esc(x.vendor)}</td><td>${esc(x.mode)}</td><td class="r num">${inr(x.amount)}</td><td class="r">${canDelMoney() ? delBtn('vpayment', x.id) : ''}</td></tr>`).join('')}</table></div>` : '<div class="sub">No vendor payments yet.</div>'}
+  ${p.vpayments.length ? `<div class="tw"><table><tr><th>Date</th><th>Vendor</th><th>Mode</th><th class="r">Amount</th><th></th></tr>${p.vpayments.map(x => rowOr('vpayment', x, 5, `<tr><td class="num">${fd(x.pdate)}</td><td>${esc(x.vendor)}</td><td>${esc(x.mode)}</td><td class="r num">${inr(x.amount)}</td><td class="r">${acts('vpayment', x.id, canDelMoney())}</td></tr>`)).join('')}</table></div>` : '<div class="sub">No vendor payments yet.</div>'}
   <form class="inset" data-add="vpayment" style="margin-top:8px"><div class="grid g3"><label class="f">Date *<input type="date" name="pdate" value="${B.today}" required></label><label class="f">Vendor *<select name="vendor_id" required>${vendorOpts()}</select></label><label class="f">Mode<select name="mode"><option>Bank</option><option>Cash</option><option>UPI</option><option>Cheque</option></select></label><label class="f">Amount (₹) *<input type="number" name="amount" required step="0.01"></label></div><div class="row" style="margin-top:8px"><button class="btn ghost sm">+ Add vendor payment</button></div></form>
   <h3 style="margin:22px 0 8px">Project expenses <span class="sub">(flights, hotel, commute…)</span></h3>
-  ${p.expenses.length ? `<div class="tw"><table><tr><th>Date</th><th>Type</th><th>Details</th><th class="r">Amount</th><th></th></tr>${p.expenses.map(x => `<tr><td class="num">${fd(x.edate)}</td><td>${esc(x.category)}</td><td>${esc(x.description || '')}</td><td class="r num">${inr(x.amount)}</td><td class="r">${delBtn('expense', x.id)}</td></tr>`).join('')}</table></div>` : '<div class="sub">No expenses.</div>'}
+  ${p.expenses.length ? `<div class="tw"><table><tr><th>Date</th><th>Type</th><th>Details</th><th class="r">Amount</th><th></th></tr>${p.expenses.map(x => rowOr('expense', x, 5, `<tr><td class="num">${fd(x.edate)}</td><td>${esc(x.category)}</td><td>${esc(x.description || '')}</td><td class="r num">${inr(x.amount)}</td><td class="r">${acts('expense', x.id)}</td></tr>`)).join('')}</table></div>` : '<div class="sub">No expenses.</div>'}
   <form class="inset" data-add="expense" style="margin-top:8px"><div class="grid g3"><label class="f">Date *<input type="date" name="edate" value="${B.today}" required></label><label class="f">Type *<select name="category"><option>Flight</option><option>Train</option><option>Hotel</option><option>Commute</option><option>Food</option><option>Courier</option><option>Other</option></select></label><label class="f">Details<input name="description"></label><label class="f">Amount (₹) *<input type="number" name="amount" required step="0.01"></label></div><div class="row" style="margin-top:8px"><button class="btn ghost sm">+ Add expense</button></div></form>
   <h3 style="margin:22px 0 8px">Losses</h3>
-  ${p.losses.length ? `<div class="tw"><table><tr><th>Date</th><th>Type</th><th>Note</th><th class="r">Amount</th><th></th></tr>${p.losses.map(x => `<tr><td class="num">${fd(x.ldate)}</td><td>${esc(x.ltype)}</td><td>${esc(x.note || '')}</td><td class="r num">${inr(x.amount)}</td><td class="r">${delBtn('loss', x.id)}</td></tr>`).join('')}</table></div>` : '<div class="sub">No losses recorded.</div>'}
-  <form class="inset" data-add="loss" style="margin-top:8px"><div class="grid g3"><label class="f">Date *<input type="date" name="ldate" value="${B.today}" required></label><label class="f">Type *<select name="ltype"><option>Client paid less</option><option>Vendor overpaid by mistake</option><option>Damage</option><option>Other</option></select></label><label class="f">Note<input name="note"></label><label class="f">Amount (₹) *<input type="number" name="amount" required step="0.01"></label></div><div class="row" style="margin-top:8px"><button class="btn ghost sm">+ Add loss</button></div></form>`;
+  ${p.losses.length ? `<div class="tw"><table><tr><th>Date</th><th>Type</th><th>Note</th><th class="r">Amount</th><th></th></tr>${p.losses.map(x => rowOr('loss', x, 5, `<tr><td class="num">${fd(x.ldate)}</td><td>${esc(x.ltype)}</td><td>${esc(x.note || '')}</td><td class="r num">${inr(x.amount)}</td><td class="r">${acts('loss', x.id)}</td></tr>`)).join('')}</table></div>` : '<div class="sub">No losses recorded.</div>'}
+  <form class="inset" data-add="loss" style="margin-top:8px"><div class="grid g3"><label class="f">Date *<input type="date" name="ldate" value="${B.today}" required></label><label class="f">Type *<select name="ltype"><option>Client paid less</option><option>Vendor overpaid by mistake</option><option>Damage</option><option>Other</option></select></label><label class="f">Note<input name="note"></label><label class="f">Amount (₹) *<input type="number" name="amount" required step="0.01"></label></div><div class="row" style="margin-top:8px"><button class="btn ghost sm">+ Add loss</button></div></form>
+  ${p.history && p.history.length ? `<details class="inset" style="margin-top:22px"><summary><b>Change history</b> <span class="sub">(${p.history.length} correction${p.history.length === 1 ? '' : 's'})</span></summary><div class="tw" style="margin-top:8px"><table><tr><th>When</th><th>By</th><th>Entry</th><th>Change</th></tr>${p.history.map(h => { const b = JSON.parse(h.before_json || '{}'), a = JSON.parse(h.after_json || 'null'); const fmt = (k, v) => /amount|rate/.test(k) ? inr(v) : esc(v); return `<tr><td class="num">${fd(h.at)} ${h.at.slice(11, 16)}</td><td>${esc(h.by)}</td><td>${esc(KIND_NAMES[h.kind] || h.kind)}</td><td>${h.action === 'delete' ? `<span class="dnq">Deleted</span> ${b.amount ? inr(b.amount) : esc(b.item || b.changes || '')}` : Object.keys(a || {}).map(k => `${esc(k.replace('_id', '').replace('_', ' '))}: <s>${fmt(k, b[k])}</s> → <b>${fmt(k, a[k])}</b>`).join('<br>')}</td></tr>`; }).join('')}</table></div></details>` : ''}`;
+const KIND_NAMES = { revision: 'Design correction', quote: 'Quote version', vquote: 'Vendor quote', extra: 'Extra item', payment: 'Client payment', vpayment: 'Vendor payment', expense: 'Expense', loss: 'Loss' };
 
 // ---------- DAILY REPORT ----------
 function fieldInput(f, i, v) {
@@ -464,11 +490,13 @@ routes.account = async () => {
 
 // ---------- EVENTS ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
+  const t = e.target.closest('[data-go],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
   if (!t) return;
   const ds = t.dataset;
   try {
     if (ds.go) { if (e.target.closest('a,button,input,select,label')) return; location.hash = '#' + ds.go; return; }
+    if (ds.editchild) { C.editing = ds.editchild; await refresh(); const f = document.querySelector(`form[data-edit="${ds.editchild}"] input, form[data-edit="${ds.editchild}"] select`); if (f) f.focus(); return; }
+    if (ds.canceledit) { C.editing = null; return refresh(); }
     if (ds.delchild) { const [kind, id] = ds.delchild.split(':'); if (!confirm('Delete this entry?')) return; await act(() => api('child_del', { kind, id }), 'Deleted'); return refresh(); }
     if (ds.delfile) { if (!confirm('Remove this file?')) return; await act(() => api('file_del', { id: ds.delfile }), 'File removed'); return refresh(); }
     if (ds.delcontact) { if (!confirm('Remove this person?')) return; await act(() => api('contact_del', { id: ds.delcontact })); return refresh(); }
@@ -564,6 +592,11 @@ document.addEventListener('change', async e => {
 
 document.addEventListener('submit', async e => {
   const f = e.target;
+  if (f.dataset.edit && C.project) {
+    e.preventDefault(); const [kind, id] = f.dataset.edit.split(':');
+    try { await act(() => api('child_update', { kind, id, data: Object.fromEntries(new FormData(f)) }), 'Updated'); C.editing = null; refresh(); } catch {}
+    return;
+  }
   if (f.dataset.add && C.project) {
     e.preventDefault();
     const fdta = new FormData(f); const files = fdta.getAll('file').filter(x => x && x.size); fdta.delete('file');
