@@ -1,0 +1,3 @@
+# Files are only served through file.php (login + permission check)
+Require all denied
+Deny from all
