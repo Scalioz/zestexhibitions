@@ -1,10 +1,13 @@
 Options -Indexes
 DirectoryIndex index.php
-# Force HTTPS
+# Force HTTPS (skipped when opened by IP address, e.g. a test server)
+<IfModule mod_rewrite.c>
 RewriteEngine On
 RewriteCond %{HTTPS} off
 RewriteCond %{HTTP:X-Forwarded-Proto} !https
+RewriteCond %{HTTP_HOST} !^[0-9.]+(:[0-9]+)?$
 RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+</IfModule>
 # Never serve config, git, or notes
 <FilesMatch "^(config\.php|.*\.md|\.git.*|\.env.*)$">
   Require all denied
