@@ -23,6 +23,12 @@ $in = $isUpload ? $_POST : (json_decode(file_get_contents('php://input'), true) 
 $A = $_GET['a'] ?? '';
 $ADMIN = $me['role'] === 'admin';
 $MID = (int) $me['id'];
+// Client & order records are for admin + departments the admin allows (default: Sales). Others only do daily reports.
+$RECORDS = $ADMIN || in_array($me['department'], setting('record_depts', ['Sales']), true);
+$RECORD_ACTIONS = ['clients', 'client', 'client_save', 'dup', 'dnq', 'contact_add', 'contact_del', 'project_create', 'project', 'project_save',
+  'child_add', 'child_del', 'vq_select', 'file_del', 'vendor_add'];
+if (in_array($A, $RECORD_ACTIONS, true) && !$RECORDS) fail('Your department does not have access to client records.', 403);
+if ($A === 'upload' && !$RECORDS && ($in['entity'] ?? '') !== 'ritem') fail('Your department does not have access to client records.', 403);
 
 // ---------- helpers ----------
 function need_admin() { global $ADMIN; if (!$ADMIN) fail('Only admin can do this.', 403); }
@@ -92,12 +98,21 @@ case 'boot':
     'vendors' => all('SELECT id, name, phone, email, city FROM ' . T('vendors') . ' WHERE active = 1 ORDER BY name'),
     'users' => all('SELECT id, name, role, designation, department, active FROM ' . T('users') . ' ORDER BY name'),
     'today' => today(),
+    'records' => $RECORDS,
+    'record_depts' => setting('record_depts', ['Sales']),
   ]);
 
 // ----- HOME / DASHBOARD -----
 case 'home':
   $yday = date('Y-m-d', strtotime('-1 day'));
   if (!$ADMIN) {
+    if (!$RECORDS) out([
+      'missing' => missing_days($me, $yday),
+      'today_done' => (bool) val('SELECT COUNT(*) FROM ' . T('reports') . ' WHERE user_id = ? AND rdate = ?', [$MID, today()]),
+      'today_working' => is_working_day(today()),
+      'reports_month' => (int) val('SELECT COUNT(*) FROM ' . T('reports') . ' WHERE user_id = ? AND rdate >= ?', [$MID, date('Y-m-01')]),
+      'entries_month' => (int) val('SELECT COUNT(*) FROM ' . T('report_items') . ' i JOIN ' . T('reports') . ' r ON r.id = i.report_id WHERE r.user_id = ? AND r.rdate >= ?', [$MID, date('Y-m-01')]),
+    ]);
     $ps = visible_projects(); $b = bills_for($ps);
     $won = array_filter($ps, fn($p) => is_won($p['status']));
     foreach ($ps as &$p) $p['bill'] = $b[$p['id']]; unset($p);
@@ -532,6 +547,7 @@ case 'settings_save':
     }
     set_setting('templates', $clean);
   }
+  if (isset($in['record_depts'])) set_setting('record_depts', array_values(array_intersect(array_map('strval', (array) $in['record_depts']), setting('departments', []))));
   if (isset($in['track_from']) && d($in['track_from'])) set_setting('track_from', d($in['track_from']));
   out(['ok' => true]);
 
