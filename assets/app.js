@@ -283,8 +283,11 @@ PT.design = p => `<div class="grid">${PF(p, 'designed_by', 'Designed by')}${PF(p
    <div class="row" style="margin-top:8px"><label class="up">⬆ Attach file<input type="file" name="file" multiple></label><button class="btn ghost sm">+ Add correction</button></div></form>
   <div class="grid" style="margin-top:18px"><div><h3 style="margin-bottom:8px">Final design</h3><div class="row">${upBtn('final', p.id)}${fileChips(p.files.final, isAdmin())}</div></div>
   <div><h3 style="margin-bottom:8px">Working drawing <span class="sub">(if order executed)</span></h3><div class="row">${upBtn('wd', p.id)}${fileChips(p.files.wd, isAdmin())}</div></div></div>`;
-PT.order = p => `<div class="grid">${PF(p, 'offered', 'Offered price (₹)', 'number')}${PF(p, 'agreed', 'Agreed price (₹)', 'number')}
-  ${PF(p, 'gst_rate', 'GST rate (%)', 'number')}<label class="f">GST charged on (₹) <span class="sub" style="font-weight:400">blank = full amount</span><input data-pf="gst_on" type="number" value="${num(p.gst_on)}"></label>
+PT.order = p => { const c = calcBill(p); return `<div class="grid">${PF(p, 'offered', 'Offered price (₹)', 'number')}${PF(p, 'agreed', 'Agreed price (₹)', 'number')}
+  ${PF(p, 'gst_rate', 'GST rate (%)', 'number')}
+  <label class="f">GST amount (auto)<input id="calc-gst" readonly tabindex="-1" value="${inr(c.gst)}"></label>
+  <label class="f">Total incl. GST (auto)<input id="calc-total" readonly tabindex="-1" value="${inr(c.total)}" style="font-weight:700"></label>
+  <label class="f">GST only on part amount (₹) <span class="sub" style="font-weight:400">optional · blank = GST on full amount</span><input data-pf="gst_on" type="number" value="${num(p.gst_on)}"></label>
   ${PF(p, 'approved_by', 'Quote approved by (Zest)')}
   <label class="f">Order status<select data-pf="status">${['enquiry', 'quoted', 'won', 'rejected', 'completed'].map(s => `<option value="${s}" ${p.status === s ? 'selected' : ''}>${cap(s)}</option>`).join('')}</select></label>
   ${PF(p, 'invoice_no', 'Invoice no.')}${PF(p, 'invoice_date', 'Invoice date', 'date')}</div>
@@ -295,7 +298,15 @@ PT.order = p => `<div class="grid">${PF(p, 'offered', 'Offered price (₹)', 'nu
   <h3 style="margin:18px 0 8px">Quote versions sent to client</h3>
   ${p.quotes.length ? `<div class="tw"><table><tr><th>Ver.</th><th>Date</th><th class="r">Amount</th><th>Approved by</th><th>Notes</th><th>PDF</th><th></th></tr>${p.quotes.map(q => `<tr><td>V${q.version}</td><td class="num">${fd(q.qdate)}</td><td class="r num">${inr(q.amount)}</td><td>${q.approved_by ? esc(q.approved_by) : '<span class="pill p-pending">pending</span>'}</td><td class="sub">${esc(q.notes || '')}</td><td>${fileChips(p.files.quote[q.id], isAdmin())}${upBtn('quote', q.id, 'Add')}</td><td class="r">${delBtn('quote', q.id)}</td></tr>`).join('')}</table></div>` : '<div class="sub">No quote sent yet.</div>'}
   <form class="inset" data-add="quote" style="margin-top:10px"><div class="grid g3"><label class="f">Date<input type="date" name="qdate" value="${B.today}" required></label><label class="f">Amount (₹) *<input type="number" name="amount" required></label><label class="f">Approved by (Zest)<input name="approved_by"></label><label class="f">What changed<input name="notes"></label></div>
-   <div class="row" style="margin-top:8px"><label class="up">⬆ Attach quote PDF<input type="file" name="file" multiple accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"></label><button class="btn ghost sm">+ Add quote version</button></div></form>`;
+   <div class="row" style="margin-top:8px"><label class="up">⬆ Attach quote PDF<input type="file" name="file" multiple accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"></label><button class="btn ghost sm">+ Add quote version</button></div></form>`; };
+// Same maths as the server (lib/calc.php), used to update totals while typing
+function calcBill(p, over = {}) {
+  const v = k => (k in over ? over[k] : p[k]);
+  const base = +v('agreed') || 0, ext = p.extras.reduce((s, x) => s + x.rate * x.qty, 0);
+  const on = v('gst_on'), taxable = on !== null && on !== '' && on !== undefined ? +on : base + ext;
+  const gst = Math.round(taxable * (+v('gst_rate') || 0)) / 100;
+  return { gst, total: base + ext + gst, ext };
+}
 PT.vendors = p => { const min = p.vquotes.length ? Math.min(...p.vquotes.map(v => +v.amount)) : 0; return `<p class="sub" style="margin-top:0">Collect quotes from all vendors. L1 (lowest) is marked automatically; choose the vendor you finally went with.</p>
   ${p.vquotes.length ? `<div class="tw"><table><tr><th>Vendor</th><th class="r">Quote</th><th>Quality note</th><th>File</th><th>Chosen</th><th></th></tr>${p.vquotes.map(v => `<tr><td>${esc(v.vendor)}${+v.amount === min ? '<span class="l1">L1</span>' : ''}</td><td class="r num">${inr(v.amount)}</td><td>${esc(v.note || '')}</td><td>${fileChips(p.files.vquote[v.id], isAdmin())}${upBtn('vquote', v.id, 'Add')}</td><td><input type="radio" name="vqsel" data-vqsel="${v.id}" ${+v.selected ? 'checked' : ''} aria-label="Choose ${esc(v.vendor)}"></td><td class="r">${delBtn('vquote', v.id)}</td></tr>`).join('')}</table></div>` : '<div class="sub">No vendor quotes yet.</div>'}
   <form class="inset" data-add="vquote" style="margin-top:10px"><div class="grid g3"><label class="f">Vendor *<select name="vendor_id" required>${vendorOpts()}</select></label><label class="f">Quote (₹) *<input type="number" name="amount" required></label><label class="f">Quality note<input name="note"></label></div>
@@ -512,6 +523,10 @@ document.addEventListener('input', e => {
   if (ds.ncc !== undefined) newClient.contacts[+ds.ncc][ds.k] = t.value;
   if (ds.nce && newClient) newClient.expo[ds.nce] = t.value;
   if (ds.ri !== undefined && ds.ri !== 'pv' && draft) draft.items[+ds.ri][ds.k] = t.value;
+  if (['agreed', 'gst_rate', 'gst_on'].includes(ds.pf) && C.project && $('#calc-total')) {
+    const over = {}; ['agreed', 'gst_rate', 'gst_on'].forEach(k => { const el = document.querySelector(`[data-pf="${k}"]`); if (el) over[k] = el.value; });
+    const c = calcBill(C.project, over); $('#calc-gst').value = inr(c.gst); $('#calc-total').value = inr(c.total);
+  }
 });
 
 document.addEventListener('change', async e => {
