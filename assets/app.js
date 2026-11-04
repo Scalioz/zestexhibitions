@@ -176,7 +176,7 @@ routes.dnq = async () => {
 };
 
 routes.newclient = async () => {
-  const n = newClient || (newClient = { company: '', email: '', phone: '', person: '', designation: '', city: '', location: '', gst_no: '', notes: '', owner_id: '', contacts: [], cards: [], briefs: [], expo: { expo: '', location: '', start_date: '', area_sqm: '', space_type: '', stall_no: '' } });
+  const n = newClient || (newClient = { company: '', email: '', phone: '', person: '', designation: '', city: '', location: '', gst_no: '', notes: '', owner_id: '', contacts: [], cards: [], briefs: [], gstcert: [], expo: { expo: '', location: '', start_date: '', area_sqm: '', space_type: '', stall_no: '' } });
   const F = (k, l, t = 'text') => `<label class="f">${l}<input data-nc="${k}" type="${t}" value="${esc(n[k])}"></label>`;
   view().innerHTML = `
   <div class="head"><div><h1>New client</h1><p>As you type the company, email or phone, the CRM checks every past record, including other employees' clients.</p></div></div>
@@ -184,6 +184,7 @@ routes.newclient = async () => {
    <div class="grid">${F('company', 'Company name *')}${F('email', 'Email', 'email')}${F('phone', 'Phone', 'tel')}${F('person', 'Contact person')}${F('designation', 'Designation')}${F('city', 'City')}${F('gst_no', 'GSTIN')}
    ${isAdmin() ? `<label class="f">Handled by<select data-nc="owner_id"><option value="">Me</option>${B.users.filter(u => +u.active).map(u => `<option value="${u.id}" ${+n.owner_id === +u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>` : ''}</div>
    <div class="grid" style="margin-top:12px"><label class="f">Company location / address<textarea data-nc="location">${esc(n.location)}</textarea></label><label class="f">Notes<textarea data-nc="notes">${esc(n.notes)}</textarea></label></div>
+   <div class="row" style="margin-top:12px"><span class="sub"><b>GST certificate</b></span><label class="up">⬆ Upload GST certificate (PDF / image)<input type="file" id="nc-gst" accept=".pdf,.jpg,.jpeg,.png,.webp"></label>${n.gstcert.map(f => `<span class="chip">📎 <span>${esc(f.name)}</span></span>`).join('')}</div>
    <div id="dup" style="margin-top:12px"></div>
   </div>
   <div class="panel"><h2>Expo enquiry</h2><p class="sub" style="margin-top:0">The expo this client is talking to us about. This creates their first expo order.</p>
@@ -238,6 +239,7 @@ routes.client = async ({ id }) => {
     ${c.contacts.length ? `<div class="tw"><table>${c.contacts.map(o => `<tr><td><b>${esc(o.name)}</b><div class="sub">${esc(o.designation || '')}</div></td><td class="sub">${esc(o.phone || '')}<br>${esc(o.email || '')}</td><td class="r"><button class="btn link" data-delcontact="${o.id}" aria-label="Remove">✕</button></td></tr>`).join('')}</table></div>` : '<div class="sub">Nobody added.</div>'}
     <form class="grid g3" id="ct-form" style="margin-top:10px"><label class="f">Name<input name="name" required></label><label class="f">Designation<input name="designation"></label><label class="f">Phone<input name="phone"></label><div style="align-self:end"><button class="btn ghost sm">+ Add</button></div></form>
    </div>
+   <div class="panel"><h3>GST certificate</h3><div class="row">${upBtn('gstcert', c.id, 'Upload GST certificate')}${fileChips(c.gstcert, isAdmin())}</div>${c.gst_no ? `<p class="sub" style="margin-bottom:0">GSTIN ${esc(c.gst_no)}</p>` : ''}</div>
    <div class="panel"><h3>Client brief / requirements</h3><div class="row">${upBtn('brief', c.id, 'Upload brief')}${fileChips(c.briefs, isAdmin())}</div><p class="sub" style="margin-bottom:0">PDF, image, Word, Excel or PowerPoint.</p></div>
    <div class="panel"><h3>Business cards</h3><div class="row">${upBtn('card', c.id, 'Add card')}${fileChips(c.cards, isAdmin())}</div></div>
   </div>`;
@@ -435,7 +437,7 @@ async function loadFull(id) {
      <div class="inset"><h3 style="margin-bottom:6px">Client</h3><div>${esc(c.person || '—')}${c.designation ? ' · ' + esc(c.designation) : ''}</div><div class="sub">${esc(c.email || '')} ${esc(c.phone || '')}</div><div class="sub">${esc(c.location || '')}</div>${c.gst_no ? `<div class="sub">GSTIN ${esc(c.gst_no)}</div>` : ''}
       <div class="sub" style="margin-top:6px">Handled by <b>${esc(c.owner)}</b> · added ${fd(c.created_at)} by ${esc(c.created_by_name)}</div>
       ${c.contacts.length ? `<div style="margin-top:8px"><b class="sub">Others in the deal</b>${c.contacts.map(o => `<div class="sub">${esc(o.name)}${o.designation ? ' · ' + esc(o.designation) : ''} ${esc(o.phone || '')}</div>`).join('')}</div>` : ''}
-      <div style="margin-top:8px">${c.briefs.length ? '<b class="sub">Briefs</b>' + fileChips(c.briefs) : ''}${c.cards.length ? '<b class="sub">Business cards</b>' + fileChips(c.cards) : ''}</div></div>
+      <div style="margin-top:8px">${c.briefs.length ? '<b class="sub">Briefs</b>' + fileChips(c.briefs) : ''}${c.cards.length ? '<b class="sub">Business cards</b>' + fileChips(c.cards) : ''}${c.gstcert.length ? '<b class="sub">GST certificate</b>' + fileChips(c.gstcert) : ''}</div></div>
      <div class="inset"><h3 style="margin-bottom:6px">Who followed up</h3>${c.followups.length ? `<div class="tw"><table>${c.followups.slice(0, 15).map(x => `<tr><td class="num">${fd(x.date)}</td><td><b>${esc(x.by)}</b><div class="sub">${esc(x.dept)}</div></td><td class="sub">${esc(x.what)}</td></tr>`).join('')}</table></div>` : '<div class="sub">No daily-report entries mention this client.</div>'}</div></div>
     ${c.orders.map(o => { const b = o.bill; return `<div class="inset" style="margin-top:12px"><div class="ph"><h3>${esc(o.expo)}${o.location ? ', ' + esc(o.location) : ''} ${pill(o.status)}</h3><a class="btn ghost sm" href="#project-${o.id}">Open order</a></div>
       <div class="grid g3 sub">
@@ -564,10 +566,11 @@ document.addEventListener('click', async e => {
         const n = newClient; if (!n.company.trim()) return toast('Enter the company name', true);
         if (Object.values(n.expo).some(v => String(v).trim()) && !n.expo.expo.trim()) return toast('Enter the expo name', true);
         t.disabled = true;
-        const r = await act(() => api('client_save', { ...n, cards: undefined, briefs: undefined })).catch(() => null);
+        const r = await act(() => api('client_save', { ...n, cards: undefined, briefs: undefined, gstcert: undefined })).catch(() => null);
         if (!r) { t.disabled = false; return; }
         if (n.cards.length) await act(() => uploadAll('card', r.id, n.cards)).catch(() => {});
         if (n.briefs.length) await act(() => uploadAll('brief', r.id, n.briefs)).catch(() => {});
+        if (n.gstcert.length) await act(() => uploadAll('gstcert', r.id, n.gstcert)).catch(() => {});
         newClient = null; toast(n.expo.expo.trim() ? 'Client and expo order saved' : 'Client saved'); location.hash = '#client-' + r.id; return;
       }
       case 'dnq-open': $('#dnq-form').innerHTML = `<form class="panel" id="dnqf"><h3>Mark as “Do not quote”</h3><div class="grid"><label class="f">Reason<select name="reason" required>${B.reasons.map(r => `<option>${esc(r.label)}</option>`).join('')}</select></label><label class="f">What happened?<input name="note"></label></div><div class="row" style="margin-top:8px"><button class="btn danger">Confirm flag</button></div></form>`;
@@ -620,6 +623,7 @@ document.addEventListener('change', async e => {
     if (ds.upload && t.files.length) { const files = [...t.files]; toast('Uploading…'); await act(() => uploadAll(ds.upload, ds.eid, files), `${files.length} file(s) uploaded`); return refresh(); }
     if (t.id === 'nc-cards') { newClient.cards.push(...t.files); return refresh(); }
     if (t.id === 'nc-brief') { newClient.briefs.push(...t.files); return refresh(); }
+    if (t.id === 'nc-gst') { newClient.gstcert = [...t.files]; return refresh(); }
     if (ds.rfile !== undefined) { draft.files[+ds.rfile].push(...t.files); return refresh(); }
     if (ds.woff !== undefined) { const i = +ds.woff; const w = t.checked ? [...B.weekly_off, i] : B.weekly_off.filter(x => x !== i); await act(() => api('settings_save', { weekly_off: w }), 'Weekly off saved'); await reboot(); return; }
     if (t.id === 'fm-dept') { C.fmDept = t.value; return refresh(); }
