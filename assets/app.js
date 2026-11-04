@@ -257,7 +257,7 @@ routes.project = async ({ id, tab }) => {
 const PF = (p, k, l, t = 'text', extra = '') => `<label class="f">${l}<input data-pf="${k}" type="${t}" value="${esc(t === 'number' ? num(p[k]) : p[k])}" ${extra}></label>`;
 const delBtn = (kind, id) => `<button class="btn link" data-delchild="${kind}:${id}" aria-label="Delete entry" title="Delete">✕</button>`;
 const canDelMoney = () => isAdmin();
-const vendorOpts = () => B.vendors.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('') + '<option value="__new">+ Add new vendor…</option>';
+const vendorOpts = () => '<option value="">Select vendor</option>' + B.vendors.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('') + '<option value="__new">+ Add new vendor…</option>';
 const PT = {};
 PT.expo = p => `<div class="grid">${PF(p, 'expo', 'Expo name')}${PF(p, 'location', 'Location')}${PF(p, 'start_date', 'Start date', 'date')}${PF(p, 'end_date', 'End date', 'date')}${PF(p, 'area_sqm', 'Area (sqm)', 'number', 'step="0.01"')}<label class="f">Space type<select data-pf="space_type"><option value="">Select</option>${['Bare space', 'Shell scheme'].map(o => `<option ${p.space_type === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label>${PF(p, 'stall_no', 'Stall no.')}
   ${isAdmin() ? `<label class="f">Handled by<select data-pf="owner_id">${B.users.filter(u => +u.active).map(u => `<option value="${u.id}" ${+u.id === +p.owner_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>` : ''}</div>
@@ -514,10 +514,12 @@ document.addEventListener('change', async e => {
     if (ds.rfile !== undefined) { draft.files[+ds.rfile].push(...t.files); return refresh(); }
     if (ds.woff !== undefined) { const i = +ds.woff; const w = t.checked ? [...B.weekly_off, i] : B.weekly_off.filter(x => x !== i); await act(() => api('settings_save', { weekly_off: w }), 'Weekly off saved'); await reboot(); return; }
     if (t.id === 'fm-dept') { C.fmDept = t.value; return refresh(); }
-    if (t.tagName === 'SELECT' && t.name === 'vendor_id' && t.value === '__new') {
-      const nm = prompt('New vendor name'); if (!nm) { t.selectedIndex = 0; return; }
-      const r = await act(() => api('vendor_add', { name: nm }), 'Vendor added'); await reboot();
-      t.innerHTML = vendorOpts(); t.value = r.id; return;
+    if (t.tagName === 'SELECT' && t.name === 'vendor_id') {
+      // "+ Add new vendor…" shows a name box right under the dropdown
+      const form = t.closest('form'), box = form.querySelector('.nv');
+      if (t.value === '__new' && !box) { t.closest('label').insertAdjacentHTML('afterend', '<label class="f nv">New vendor name *<input name="new_vendor" required placeholder="e.g. Metro Exhibits"></label>'); form.querySelector('[name=new_vendor]').focus(); }
+      if (t.value !== '__new' && box) box.remove();
+      return;
     }
   } catch (err) { /* shown */ }
 });
@@ -528,9 +530,12 @@ document.addEventListener('submit', async e => {
     e.preventDefault();
     const fdta = new FormData(f); const files = fdta.getAll('file').filter(x => x && x.size); fdta.delete('file');
     const data = Object.fromEntries(fdta);
-    if (data.vendor_id === '__new') return toast('Pick a vendor', true);
     const btn = f.querySelector('button:not([type=button])'); btn.disabled = true;
     try {
+      if (data.vendor_id === '__new') {   // create the vendor first, then use it
+        const v = await act(() => api('vendor_add', { name: (data.new_vendor || '').trim() }));
+        data.vendor_id = v.id; delete data.new_vendor; await reboot();
+      }
       const r = await act(() => api('child_add', { project_id: C.project.id, kind: f.dataset.add, data }), 'Added');
       if (files.length) await act(() => uploadAll(f.dataset.add, r.id, files));
       refresh();
