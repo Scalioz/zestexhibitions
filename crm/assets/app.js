@@ -139,7 +139,7 @@ async function adminHome(r) {
 function projTable(ps, showOwner, showClient = true) {
   if (!ps || !ps.length) return blank('No orders yet.');
   return `<div class="tw"><table><tr>${showClient ? '<th>Client</th>' : ''}<th>Expo</th><th>Dates</th><th class="r">Area</th><th>Status</th>${showOwner ? '<th>Handled by</th>' : ''}<th class="r">Bill total</th><th class="r">Balance</th></tr>
-  ${ps.map(p => { const b = p.bill || {}; return `<tr class="click" data-go="project-${p.id}">${showClient ? `<td>${esc(p.company)}</td>` : ''}<td>${esc(p.expo)}<div class="sub">${esc(p.location || '')}</div></td><td class="num">${fd(p.start_date)}</td><td class="r num">${p.area_sqm ? num(p.area_sqm) + ' sqm' : '—'}</td><td>${pill(p.status)}</td>${showOwner ? `<td>${esc(p.owner || userName(p.owner_id))}</td>` : ''}<td class="r num">${b.base ? inr(b.total) : '—'}</td><td class="r num">${b.base ? inr(b.balance) : '—'}</td></tr>`; }).join('')}</table></div>`;
+  ${ps.map(p => { const b = p.bill || {}; return `<tr class="click" data-go="project-${p.id}">${showClient ? `<td>${esc(p.company)}</td>` : ''}<td>${esc(p.expo)}<div class="sub">${esc(p.location || '')}</div></td><td class="num">${fd(p.start_date)}</td><td class="r num">${p.area_sqm ? num(p.area_sqm) + ' sqm' : '—'}${p.space_type ? `<div class="sub">${esc(p.space_type)}</div>` : ''}</td><td>${pill(p.status)}</td>${showOwner ? `<td>${esc(p.owner || userName(p.owner_id))}</td>` : ''}<td class="r num">${b.base ? inr(b.total) : '—'}</td><td class="r num">${b.base ? inr(b.balance) : '—'}</td></tr>`; }).join('')}</table></div>`;
 }
 
 // ---------- CLIENTS ----------
@@ -162,7 +162,7 @@ routes.dnq = async () => {
 };
 
 routes.newclient = async () => {
-  const n = newClient || (newClient = { company: '', email: '', phone: '', person: '', designation: '', city: '', location: '', gst_no: '', notes: '', owner_id: '', contacts: [], cards: [], briefs: [] });
+  const n = newClient || (newClient = { company: '', email: '', phone: '', person: '', designation: '', city: '', location: '', gst_no: '', notes: '', owner_id: '', contacts: [], cards: [], briefs: [], expo: { expo: '', location: '', start_date: '', area_sqm: '', space_type: '', stall_no: '' } });
   const F = (k, l, t = 'text') => `<label class="f">${l}<input data-nc="${k}" type="${t}" value="${esc(n[k])}"></label>`;
   view().innerHTML = `
   <div class="head"><div><h1>New client</h1><p>As you type the company, email or phone, the CRM checks every past record, including other employees' clients.</p></div></div>
@@ -172,6 +172,9 @@ routes.newclient = async () => {
    <div class="grid" style="margin-top:12px"><label class="f">Company location / address<textarea data-nc="location">${esc(n.location)}</textarea></label><label class="f">Notes<textarea data-nc="notes">${esc(n.notes)}</textarea></label></div>
    <div id="dup" style="margin-top:12px"></div>
   </div>
+  <div class="panel"><h2>Expo enquiry</h2><p class="sub" style="margin-top:0">The expo this client is talking to us about. This creates their first expo order.</p>
+   <div class="grid g3">${[['expo', 'Expo name *'], ['location', 'Expo location / city'], ['start_date', 'Expo start date', 'date'], ['area_sqm', 'Area chosen (sqm)', 'number'], ['stall_no', 'Stall no.']].map(([k, l, t]) => `<label class="f">${l}<input data-nce="${k}" type="${t || 'text'}" value="${esc(n.expo[k])}"></label>`).join('')}
+   <label class="f">Space type<select data-nce="space_type"><option value="">Select</option>${['Bare space', 'Shell scheme'].map(o => `<option ${n.expo.space_type === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label></div></div>
   <div class="panel"><div class="ph"><h2>Others involved in the deal</h2><button class="btn ghost sm" id="nc-addc">+ Add person</button></div>
    ${n.contacts.length ? n.contacts.map((o, i) => `<div class="grid g3" style="margin-bottom:8px">${['name', 'designation', 'phone', 'email'].map(k => `<label class="f">${cap(k)}<input data-ncc="${i}" data-k="${k}" value="${esc(o[k])}"></label>`).join('')}</div>`).join('') : '<div class="sub">Purchase head, director, consultant — anyone else in the decision.</div>'}
   </div>
@@ -206,7 +209,7 @@ routes.client = async ({ id }) => {
    <div class="row"><a class="btn ghost" href="ledger.php?client=${c.id}" target="_blank" rel="noopener">Ledger</a>${+c.dnq ? '' : '<button class="btn ghost" id="dnq-open">Mark “Do not quote”</button>'}<button class="btn" id="np-open">+ New expo order</button></div></div>
   ${+c.dnq ? `<div class="alert bad"><b>⛔ Do not quote</b><span class="m">Since ${fd(c.dnq_on)} · ${esc(c.dnq_reason)}${c.dnq_note ? ' — ' + esc(c.dnq_note) : ''} · flagged by ${esc(c.dnq_by)}</span>${isAdmin() ? '<div><button class="btn sm ghost" id="dnq-off">Remove flag</button></div>' : ''}</div>` : ''}
   <div id="dnq-form"></div>
-  <form class="panel" id="np-form" hidden><h3>New expo order</h3><div class="grid g3"><label class="f">Expo name *<input name="expo" required></label><label class="f">Location<input name="location"></label><label class="f">Start date<input type="date" name="start_date"></label></div><div class="row" style="margin-top:10px"><button class="btn">Create order</button><button type="button" class="btn ghost" id="np-cancel">Cancel</button></div></form>
+  <form class="panel" id="np-form" hidden><h3>New expo order</h3><div class="grid g3"><label class="f">Expo name *<input name="expo" required></label><label class="f">Location<input name="location"></label><label class="f">Start date<input type="date" name="start_date"></label><label class="f">Area chosen (sqm)<input type="number" step="0.01" name="area_sqm"></label><label class="f">Space type<select name="space_type"><option value="">Select</option><option>Bare space</option><option>Shell scheme</option></select></label><label class="f">Stall no.<input name="stall_no"></label></div><div class="row" style="margin-top:10px"><button class="btn">Create order</button><button type="button" class="btn ghost" id="np-cancel">Cancel</button></div></form>
   <div class="kpis"><div class="kpi"><span>Orders</span><b>${won.length} won / ${c.projects.length}</b></div><div class="kpi hl"><span>Total business</span><b>${inr(T.t)}</b></div><div class="kpi"><span>Received</span><b>${inr(T.r)}</b></div><div class="kpi"><span>Outstanding</span><b style="color:${T.b > 0.5 ? 'var(--bad)' : 'var(--ok)'}">${inr(T.b)}</b></div></div>
   <div class="panel"><h2>Orders</h2>${projTable(c.projects.map(p => ({ ...p, company: c.company })), isAdmin(), false)}</div>
   <div class="grid">
@@ -234,7 +237,7 @@ routes.project = async ({ id, tab }) => {
   const b = p.bill;
   view().innerHTML = `
   <div class="head"><div><div class="crumb"><a href="#client-${p.client.id}">← ${esc(p.client.company)}</a>${+p.client.dnq ? ' <span class="dnq">⛔ DO NOT QUOTE</span>' : ''}</div>
-   <h1>${esc(p.expo)}${p.location ? ', ' + esc(p.location) : ''}</h1><p>${fd(p.start_date)} – ${fd(p.end_date)}${p.area_sqm ? ' · ' + num(p.area_sqm) + ' sqm' : ''}${p.stall_no ? ' · Stall ' + esc(p.stall_no) : ''} · ${esc(p.owner)}</p></div>${pill(p.status)}</div>
+   <h1>${esc(p.expo)}${p.location ? ', ' + esc(p.location) : ''}</h1><p>${fd(p.start_date)} – ${fd(p.end_date)}${p.area_sqm ? ' · ' + num(p.area_sqm) + ' sqm' : ''}${p.space_type ? ' · ' + esc(p.space_type) : ''}${p.stall_no ? ' · Stall ' + esc(p.stall_no) : ''} · ${esc(p.owner)}</p></div>${pill(p.status)}</div>
   <div class="split"><div class="panel" style="padding-top:4px"><div class="tabs">${TABS.map(([k, l]) => `<a href="#project-${p.id}-${k}" class="${tab === k ? 'on' : ''}">${l}</a>`).join('')}</div><div style="padding-top:16px">${PT[tab](p)}</div></div>
   <aside class="panel sum"><h3>Bill summary</h3>
    <div class="l"><span>Stall fabrication (agreed)</span><span class="num">${inr(b.base)}</span></div>
@@ -256,7 +259,7 @@ const delBtn = (kind, id) => `<button class="btn link" data-delchild="${kind}:${
 const canDelMoney = () => isAdmin();
 const vendorOpts = () => B.vendors.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('') + '<option value="__new">+ Add new vendor…</option>';
 const PT = {};
-PT.expo = p => `<div class="grid">${PF(p, 'expo', 'Expo name')}${PF(p, 'location', 'Location')}${PF(p, 'start_date', 'Start date', 'date')}${PF(p, 'end_date', 'End date', 'date')}${PF(p, 'area_sqm', 'Area (sqm)', 'number', 'step="0.01"')}${PF(p, 'stall_no', 'Stall no.')}
+PT.expo = p => `<div class="grid">${PF(p, 'expo', 'Expo name')}${PF(p, 'location', 'Location')}${PF(p, 'start_date', 'Start date', 'date')}${PF(p, 'end_date', 'End date', 'date')}${PF(p, 'area_sqm', 'Area (sqm)', 'number', 'step="0.01"')}<label class="f">Space type<select data-pf="space_type"><option value="">Select</option>${['Bare space', 'Shell scheme'].map(o => `<option ${p.space_type === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label>${PF(p, 'stall_no', 'Stall no.')}
   ${isAdmin() ? `<label class="f">Handled by<select data-pf="owner_id">${B.users.filter(u => +u.active).map(u => `<option value="${u.id}" ${+u.id === +p.owner_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>` : ''}</div>
   <h3 style="margin:18px 0 8px">Client brief for this expo</h3><div class="row">${upBtn('pbrief', p.id, 'Upload brief (PDF / image / Word / Excel / PPT)')}${fileChips(p.files.pbrief, isAdmin())}</div>
   <h3 style="margin:18px 0 8px">Floor plan</h3><div class="row">${upBtn('floor', p.id, 'Upload floor plan (JPG / PDF)')}${fileChips(p.files.floor, isAdmin())}</div>`;
@@ -454,12 +457,13 @@ document.addEventListener('click', async e => {
       case 'nc-addc': newClient.contacts.push({ name: '', designation: '', phone: '', email: '' }); return refresh();
       case 'nc-save': {
         const n = newClient; if (!n.company.trim()) return toast('Enter the company name', true);
+        if (Object.values(n.expo).some(v => String(v).trim()) && !n.expo.expo.trim()) return toast('Enter the expo name', true);
         t.disabled = true;
         const r = await act(() => api('client_save', { ...n, cards: undefined, briefs: undefined })).catch(() => null);
         if (!r) { t.disabled = false; return; }
         if (n.cards.length) await act(() => uploadAll('card', r.id, n.cards)).catch(() => {});
         if (n.briefs.length) await act(() => uploadAll('brief', r.id, n.briefs)).catch(() => {});
-        newClient = null; toast('Client saved'); location.hash = '#client-' + r.id; return;
+        newClient = null; toast(n.expo.expo.trim() ? 'Client and expo order saved' : 'Client saved'); location.hash = '#client-' + r.id; return;
       }
       case 'dnq-open': $('#dnq-form').innerHTML = `<form class="panel" id="dnqf"><h3>Mark as “Do not quote”</h3><div class="grid"><label class="f">Reason<select name="reason" required>${B.reasons.map(r => `<option>${esc(r.label)}</option>`).join('')}</select></label><label class="f">What happened?<input name="note"></label></div><div class="row" style="margin-top:8px"><button class="btn danger">Confirm flag</button></div></form>`;
         $('#dnqf').onsubmit = async ev => { ev.preventDefault(); await act(() => api('dnq', { id: C.client.id, on: 1, ...Object.fromEntries(new FormData(ev.target)) }), 'Flagged: do not quote'); refresh(); }; return;
@@ -490,6 +494,7 @@ document.addEventListener('input', e => {
   const t = e.target, ds = t.dataset;
   if (ds.nc && newClient) { newClient[ds.nc] = t.value; if (['company', 'email', 'phone'].includes(ds.nc)) dupCheck(); }
   if (ds.ncc !== undefined) newClient.contacts[+ds.ncc][ds.k] = t.value;
+  if (ds.nce && newClient) newClient.expo[ds.nce] = t.value;
   if (ds.ri !== undefined && ds.ri !== 'pv' && draft) draft.items[+ds.ri][ds.k] = t.value;
 });
 

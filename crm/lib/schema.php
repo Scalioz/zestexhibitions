@@ -26,7 +26,7 @@ function create_schema($driver) {
 "CREATE INDEX zc_contacts_client ON {$t('contacts')} (client_id)",
 "CREATE TABLE IF NOT EXISTS {$t('projects')} (
   id $PK, client_id $FK NOT NULL, owner_id $FK NOT NULL,
-  expo VARCHAR(200) NOT NULL, location VARCHAR(120), start_date DATE, end_date DATE, area_sqm DECIMAL(10,2), stall_no VARCHAR(40),
+  expo VARCHAR(200) NOT NULL, location VARCHAR(120), start_date DATE, end_date DATE, area_sqm DECIMAL(10,2), space_type VARCHAR(20), stall_no VARCHAR(40),
   designed_by VARCHAR(120), assigned_on DATE, design_approved_by VARCHAR(120),
   status VARCHAR(12) NOT NULL DEFAULT 'enquiry', offered $M, agreed $M, gst_rate DECIMAL(5,2) NOT NULL DEFAULT 18, gst_on $M,
   approved_by VARCHAR(120), invoice_no VARCHAR(40), invoice_date DATE, rejected_by VARCHAR(10), reason VARCHAR(160), rejection_note TEXT,
@@ -53,6 +53,15 @@ function create_schema($driver) {
   }
 }
 
+// Upgrades older databases in place. Each step runs once.
+function migrate() {
+  $v = (int) setting('schema_v', 1);
+  if ($v < 2) {
+    try { db()->exec('ALTER TABLE ' . T('projects') . ' ADD COLUMN space_type VARCHAR(20)'); } catch (PDOException $e) { /* already there */ }
+    set_setting('schema_v', 2);
+  }
+}
+
 function seed_defaults() {
   if (!val('SELECT COUNT(*) FROM ' . T('reasons'))) {
     foreach (['Payment history issue / dues pending','Unreasonable price expectation','Difficult to work with','Timeline not feasible',
@@ -60,6 +69,7 @@ function seed_defaults() {
               'Design not approved','No response from client','Other'] as $r) ins('reasons', ['label' => $r]);
   }
   if (setting('departments') === null) set_setting('departments', ['Sales','Telecalling','Design','Data Research','Operations','Accounts']);
+  if (setting('schema_v') === null) set_setting('schema_v', 2);
   if (setting('weekly_off') === null) set_setting('weekly_off', [0]);
   if (setting('track_from') === null) set_setting('track_from', today());
   if (setting('templates') === null) set_setting('templates', default_templates());
