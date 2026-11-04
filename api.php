@@ -2,6 +2,7 @@
 // JSON API for the Zest CRM app. Every call: POST, logged-in, CSRF header.
 require_once __DIR__ . '/lib/auth.php';
 require_once __DIR__ . '/lib/calc.php';
+require_once __DIR__ . '/lib/schema.php';
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
@@ -15,6 +16,7 @@ $me = current_user();
 if (!$me) fail('Please sign in again.', 401);
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail('POST only', 405);
 if (!hash_equals($_SESSION['csrf'], $_SERVER['HTTP_X_CSRF'] ?? '')) fail('Page expired. Reload the page.', 419);
+migrate();
 
 $isUpload = str_starts_with($_SERVER['CONTENT_TYPE'] ?? '', 'multipart/form-data');
 $in = $isUpload ? $_POST : (json_decode(file_get_contents('php://input'), true) ?: []);
@@ -51,6 +53,12 @@ function visible_projects($where = '1=1', $p = []) {
   if (!$ADMIN) { $where .= ' AND p.owner_id = ?'; $p[] = $MID; }
   return all('SELECT p.*, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . " c ON c.id = p.client_id WHERE $where ORDER BY COALESCE(p.start_date, p.created_at) DESC", $p);
 }
+function create_project($clientId, $ownerId, $in) {
+  $st = s($in['space_type'] ?? null); if (!in_array($st, ['Bare space', 'Shell scheme'], true)) $st = null;
+  return ins('projects', ['client_id' => $clientId, 'owner_id' => (int) $ownerId, 'expo' => s($in['expo'] ?? null, 200), 'location' => s($in['location'] ?? null),
+    'start_date' => d($in['start_date'] ?? null), 'area_sqm' => n($in['area_sqm'] ?? null), 'space_type' => $st, 'stall_no' => s($in['stall_no'] ?? null, 40),
+    'status' => 'enquiry', 'gst_rate' => 18, 'created_at' => now()]);
+}
 function users_map() { $m = []; foreach (all('SELECT id, name FROM ' . T('users')) as $u) $m[$u['id']] = $u['name']; return $m; }
 
 // child tables that hang off a project: kind => [table, allowed fields, required fields]
@@ -65,7 +73,7 @@ $KINDS = [
   'loss' => ['losses', ['ldate' => 'd', 'ltype' => 's', 'note' => 's', 'amount' => 'n'], ['ldate', 'ltype', 'amount']],
 ];
 $ADMIN_DELETE_ONLY = ['payment', 'vpayment'];
-$PROJECT_FIELDS = ['expo' => 's', 'location' => 's', 'start_date' => 'd', 'end_date' => 'd', 'area_sqm' => 'n', 'stall_no' => 's',
+$PROJECT_FIELDS = ['expo' => 's', 'location' => 's', 'start_date' => 'd', 'end_date' => 'd', 'area_sqm' => 'n', 'space_type' => 's', 'stall_no' => 's',
   'designed_by' => 's', 'assigned_on' => 'd', 'design_approved_by' => 's', 'status' => 's', 'offered' => 'n', 'agreed' => 'n',
   'gst_rate' => 'n', 'gst_on' => 'n', 'approved_by' => 's', 'invoice_no' => 's', 'invoice_date' => 'd', 'rejected_by' => 's', 'reason' => 's', 'rejection_note' => 's'];
 $CLIENT_FIELDS = ['company', 'email', 'phone', 'person', 'designation', 'location', 'city', 'gst_no', 'notes'];
@@ -196,7 +204,11 @@ case 'client_save':
     if (empty($data['company'])) fail('Enter the company name.');
     $data['owner_id'] = ($ADMIN && !empty($in['owner_id'])) ? (int) $in['owner_id'] : $MID;
     $data['created_by'] = $MID; $data['created_at'] = now();
+    $ex = (array) ($in['expo'] ?? []);
+    $hasExpo = array_filter(array_map(fn($x) => trim((string) $x), $ex));
+    if ($hasExpo && !s($ex['expo'] ?? null)) fail('Enter the expo name (or clear the expo details).');
     $id = ins('clients', $data);
+    if ($hasExpo) create_project($id, $data['owner_id'], $ex);
     foreach ((array) ($in['contacts'] ?? []) as $ct) if (s($ct['name'] ?? null)) ins('contacts', ['client_id' => $id, 'name' => s($ct['name']), 'designation' => s($ct['designation'] ?? null), 'phone' => s($ct['phone'] ?? null), 'email' => s($ct['email'] ?? null)]);
     out(['id' => $id]);
   }
@@ -259,10 +271,8 @@ case 'contact_del':
 // ----- PROJECTS (expo orders) -----
 case 'project_create':
   $c = client_row($in['client_id'] ?? 0);
-  $expo = s($in['expo'] ?? null, 200); if (!$expo) fail('Enter the expo name.');
-  $id = ins('projects', ['client_id' => $c['id'], 'owner_id' => (int) $c['owner_id'], 'expo' => $expo, 'location' => s($in['location'] ?? null),
-    'start_date' => d($in['start_date'] ?? null), 'status' => 'enquiry', 'gst_rate' => 18, 'created_at' => now()]);
-  out(['id' => $id]);
+  if (!s($in['expo'] ?? null)) fail('Enter the expo name.');
+  out(['id' => create_project($c['id'], (int) $c['owner_id'], $in)]);
 
 case 'project':
   $p = project_row($in['id'] ?? 0);

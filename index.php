@@ -4,7 +4,7 @@ if (!cfg()) { header('Location: install.php'); exit; }
 $me = current_user();
 if (!$me) { header('Location: login.php'); exit; }
 $h = fn($s) => htmlspecialchars($s ?? '', ENT_QUOTES);
-$initials = strtoupper(implode('', array_map(fn($w) => mb_substr($w, 0, 1), array_slice(preg_split('/\s+/', trim($me['name'])), 0, 2))));
+$initials = strtoupper(implode('', array_map(fn($w) => mb_substr($w, 0, 1), array_slice(preg_split('/\s+/', trim(preg_replace('/[^\p{L}\s]/u', '', $me['name']))), 0, 2))));
 $v = filemtime(__DIR__ . '/assets/app.js') . filemtime(__DIR__ . '/assets/app.css');
 ?><!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
