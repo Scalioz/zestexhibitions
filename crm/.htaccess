@@ -1,0 +1,16 @@
+Options -Indexes
+DirectoryIndex index.php
+# Force HTTPS
+RewriteEngine On
+RewriteCond %{HTTPS} off
+RewriteCond %{HTTP:X-Forwarded-Proto} !https
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+# Never serve config, git, or notes
+<FilesMatch "^(config\.php|.*\.md|\.git.*|\.env.*)$">
+  Require all denied
+</FilesMatch>
+# Allow larger uploads (Hostinger may cap these in hPanel → PHP settings)
+<IfModule mod_php.c>
+  php_value upload_max_filesize 25M
+  php_value post_max_size 30M
+</IfModule>

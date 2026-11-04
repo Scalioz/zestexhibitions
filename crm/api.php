@@ -1,0 +1,528 @@
+<?php
+// JSON API for the Zest CRM app. Every call: POST, logged-in, CSRF header.
+require_once __DIR__ . '/lib/auth.php';
+require_once __DIR__ . '/lib/calc.php';
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store');
+
+function out($d) { echo json_encode($d, JSON_UNESCAPED_UNICODE); exit; }
+function fail($msg, $code = 400) { http_response_code($code); out(['error' => $msg]); }
+
+set_exception_handler(function ($e) { error_log('[zestcrm] ' . $e->getMessage()); fail('Something went wrong on the server. Please try again.', 500); });
+
+if (!cfg()) fail('Not installed', 503);
+$me = current_user();
+if (!$me) fail('Please sign in again.', 401);
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail('POST only', 405);
+if (!hash_equals($_SESSION['csrf'], $_SERVER['HTTP_X_CSRF'] ?? '')) fail('Page expired. Reload the page.', 419);
+
+$isUpload = str_starts_with($_SERVER['CONTENT_TYPE'] ?? '', 'multipart/form-data');
+$in = $isUpload ? $_POST : (json_decode(file_get_contents('php://input'), true) ?: []);
+$A = $_GET['a'] ?? '';
+$ADMIN = $me['role'] === 'admin';
+$MID = (int) $me['id'];
+
+// ---------- helpers ----------
+function need_admin() { global $ADMIN; if (!$ADMIN) fail('Only admin can do this.', 403); }
+function s($v, $max = 2000) { $v = trim((string) ($v ?? '')); return $v === '' ? null : mb_substr($v, 0, $max); }
+function d($v) { $v = trim((string) ($v ?? '')); return preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) ? $v : null; }
+function n($v) { if ($v === null || $v === '') return null; if (!is_numeric($v)) fail('Please enter a valid number.'); return round((float) $v, 2); }
+function client_row($id) {
+  global $ADMIN, $MID;
+  $c = one('SELECT * FROM ' . T('clients') . ' WHERE id = ?', [(int) $id]);
+  if (!$c || (!$ADMIN && (int) $c['owner_id'] !== $MID)) fail('Client not found or not yours.', 404);
+  return $c;
+}
+function project_row($id) {
+  global $ADMIN, $MID;
+  $p = one('SELECT * FROM ' . T('projects') . ' WHERE id = ?', [(int) $id]);
+  if (!$p || (!$ADMIN && (int) $p['owner_id'] !== $MID)) fail('Order not found or not yours.', 404);
+  return $p;
+}
+function files_of($entity, $ids) {
+  $ids = array_filter(array_map('intval', (array) $ids));
+  if (!$ids) return [];
+  $g = [];
+  foreach (all('SELECT id, entity_id, orig_name, size, created_at FROM ' . T('files') . ' WHERE entity = ? AND entity_id IN (' . implode(',', $ids) . ') ORDER BY id', [$entity]) as $f) $g[$f['entity_id']][] = $f;
+  return $g;
+}
+function visible_projects($where = '1=1', $p = []) {
+  global $ADMIN, $MID;
+  if (!$ADMIN) { $where .= ' AND p.owner_id = ?'; $p[] = $MID; }
+  return all('SELECT p.*, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . " c ON c.id = p.client_id WHERE $where ORDER BY COALESCE(p.start_date, p.created_at) DESC", $p);
+}
+function users_map() { $m = []; foreach (all('SELECT id, name FROM ' . T('users')) as $u) $m[$u['id']] = $u['name']; return $m; }
+
+// child tables that hang off a project: kind => [table, allowed fields, required fields]
+$KINDS = [
+  'revision' => ['revisions', ['rdate' => 'd', 'done_by' => 's', 'changes' => 's'], ['rdate', 'changes']],
+  'quote' => ['quotes', ['qdate' => 'd', 'amount' => 'n', 'approved_by' => 's', 'notes' => 's'], ['qdate', 'amount']],
+  'vquote' => ['vendor_quotes', ['vendor_id' => 'i', 'amount' => 'n', 'note' => 's', 'qdate' => 'd'], ['vendor_id', 'amount']],
+  'extra' => ['extras', ['item' => 's', 'rate' => 'n', 'qty' => 'n', 'added_on' => 'd'], ['item', 'rate']],
+  'payment' => ['client_payments', ['pdate' => 'd', 'amount' => 'n', 'mode' => 's', 'reference' => 's'], ['pdate', 'amount']],
+  'vpayment' => ['vendor_payments', ['vendor_id' => 'i', 'pdate' => 'd', 'amount' => 'n', 'mode' => 's', 'reference' => 's'], ['vendor_id', 'pdate', 'amount']],
+  'expense' => ['expenses', ['edate' => 'd', 'category' => 's', 'description' => 's', 'amount' => 'n'], ['edate', 'category', 'amount']],
+  'loss' => ['losses', ['ldate' => 'd', 'ltype' => 's', 'note' => 's', 'amount' => 'n'], ['ldate', 'ltype', 'amount']],
+];
+$ADMIN_DELETE_ONLY = ['payment', 'vpayment'];
+$PROJECT_FIELDS = ['expo' => 's', 'location' => 's', 'start_date' => 'd', 'end_date' => 'd', 'area_sqm' => 'n', 'stall_no' => 's',
+  'designed_by' => 's', 'assigned_on' => 'd', 'design_approved_by' => 's', 'status' => 's', 'offered' => 'n', 'agreed' => 'n',
+  'gst_rate' => 'n', 'gst_on' => 'n', 'approved_by' => 's', 'invoice_no' => 's', 'invoice_date' => 'd', 'rejected_by' => 's', 'reason' => 's', 'rejection_note' => 's'];
+$CLIENT_FIELDS = ['company', 'email', 'phone', 'person', 'designation', 'location', 'city', 'gst_no', 'notes'];
+function clean($type, $v) { return match ($type) { 'd' => d($v), 'n' => n($v), 'i' => ($v === null || $v === '') ? null : (int) $v, default => s($v) }; }
+
+// ---------- actions ----------
+switch ($A) {
+
+case 'boot':
+  out([
+    'me' => $me,
+    'departments' => setting('departments', []),
+    'weekly_off' => setting('weekly_off', [0]),
+    'templates' => setting('templates', []),
+    'reasons' => all('SELECT id, label FROM ' . T('reasons') . ' WHERE active = 1 ORDER BY id'),
+    'vendors' => all('SELECT id, name, phone FROM ' . T('vendors') . ' WHERE active = 1 ORDER BY name'),
+    'users' => all('SELECT id, name, role, designation, department, active FROM ' . T('users') . ' ORDER BY name'),
+    'today' => today(),
+  ]);
+
+// ----- HOME / DASHBOARD -----
+case 'home':
+  $yday = date('Y-m-d', strtotime('-1 day'));
+  if (!$ADMIN) {
+    $ps = visible_projects(); $b = bills_for($ps);
+    $won = array_filter($ps, fn($p) => is_won($p['status']));
+    foreach ($ps as &$p) $p['bill'] = $b[$p['id']]; unset($p);
+    out([
+      'missing' => missing_days($me, $yday),
+      'today_done' => (bool) val('SELECT COUNT(*) FROM ' . T('reports') . ' WHERE user_id = ? AND rdate = ?', [$MID, today()]),
+      'today_working' => is_working_day(today()),
+      'clients' => (int) val('SELECT COUNT(*) FROM ' . T('clients') . ' WHERE owner_id = ?', [$MID]),
+      'won' => count($won), 'won_total' => array_sum(array_map(fn($p) => $b[$p['id']]['total'], $won)),
+      'open' => count(array_filter($ps, fn($p) => in_array($p['status'], ['enquiry', 'quoted']))),
+      'due' => array_sum(array_map(fn($p) => $b[$p['id']]['balance'], $won)),
+      'projects' => array_values(array_filter($ps, fn($p) => $p['status'] !== 'completed' || $b[$p['id']]['balance'] > 0)),
+    ]);
+  }
+  $from = d($in['from'] ?? null); $to = d($in['to'] ?? null);
+  $w = '1=1'; $prm = [];
+  if ($from) { $w .= ' AND COALESCE(p.start_date, DATE(p.created_at)) >= ?'; $prm[] = $from; }
+  if ($to) { $w .= ' AND COALESCE(p.start_date, DATE(p.created_at)) <= ?'; $prm[] = $to; }
+  $ps = visible_projects($w, $prm); $b = bills_for($ps);
+  $won = array_values(array_filter($ps, fn($p) => is_won($p['status'])));
+  $lost = array_values(array_filter($ps, fn($p) => $p['status'] === 'rejected'));
+  $sumk = fn($list, $k) => array_sum(array_map(fn($p) => $b[$p['id']][$k], $list));
+  // vendors
+  $vend = [];
+  if ($ps) {
+    $in_ids = implode(',', array_map('intval', array_column($ps, 'id')));
+    $vend = all('SELECT v.name, SUM(vp.amount) AS paid, COUNT(DISTINCT vp.project_id) AS jobs FROM ' . T('vendor_payments') . ' vp JOIN ' . T('vendors') . " v ON v.id = vp.vendor_id WHERE vp.project_id IN ($in_ids) GROUP BY v.name ORDER BY paid DESC");
+  }
+  // employees
+  $emps = [];
+  foreach (all('SELECT * FROM ' . T('users') . " WHERE active = 1 AND role = 'employee' ORDER BY name") as $u) {
+    $mine = array_filter($ps, fn($p) => (int) $p['owner_id'] === (int) $u['id']);
+    $mw = array_filter($mine, fn($p) => is_won($p['status']));
+    $ml = array_filter($mine, fn($p) => $p['status'] === 'rejected');
+    $emps[] = ['id' => $u['id'], 'name' => $u['name'], 'designation' => $u['designation'], 'department' => $u['department'],
+      'clients' => (int) val('SELECT COUNT(*) FROM ' . T('clients') . ' WHERE owner_id = ?', [$u['id']]),
+      'orders' => count($mine), 'won' => count($mw), 'business' => $sumk($mw, 'total'),
+      'missed' => array_sum(array_map(fn($p) => (float) $p['offered'], $ml)), 'collected' => $sumk($mine, 'received'),
+      'reports_month' => (int) val('SELECT COUNT(*) FROM ' . T('reports') . ' WHERE user_id = ? AND rdate >= ?', [$u['id'], date('Y-m-01')]),
+      'missing' => missing_days($u, $yday)];
+  }
+  // customers
+  $cust = [];
+  foreach ($won as $p) {
+    $k = $p['client_id'];
+    $cust[$k] = $cust[$k] ?? ['id' => $k, 'company' => $p['company'], 'orders' => 0, 'total' => 0, 'received' => 0];
+    $cust[$k]['orders']++; $cust[$k]['total'] += $b[$p['id']]['total']; $cust[$k]['received'] += $b[$p['id']]['received'];
+  }
+  usort($cust, fn($a, $c) => $c['total'] <=> $a['total']);
+  foreach ($lost as &$p) $p['bill'] = $b[$p['id']]; unset($p);
+  $recent = array_slice($ps, 0, 25); foreach ($recent as &$p) $p['bill'] = $b[$p['id']]; unset($p);
+  $um = users_map(); foreach ($recent as &$p) $p['owner'] = $um[$p['owner_id']] ?? '—'; unset($p);
+  out([
+    'captured' => $sumk($won, 'total'), 'captured_n' => count($won),
+    'missed' => array_sum(array_map(fn($p) => (float) $p['offered'], $lost)), 'missed_n' => count($lost),
+    'received' => $sumk($ps, 'received'), 'outstanding' => $sumk($won, 'balance'),
+    'gst_billed' => $sumk($won, 'gst'), 'gst_received' => $sumk($ps, 'gst_received'),
+    'vendor_paid' => $sumk($ps, 'vendor_paid'), 'expenses' => $sumk($ps, 'expenses'), 'losses' => $sumk($ps, 'losses'),
+    'profit' => $sumk($won, 'profit'),
+    'vendors' => $vend, 'employees' => $emps, 'customers' => array_slice($cust, 0, 15),
+    'lost' => $lost, 'recent' => $recent,
+  ]);
+
+// ----- CLIENTS -----
+case 'clients':
+  $qs = s($in['q'] ?? null, 100);
+  $w = '1=1'; $p = [];
+  if (!$ADMIN) { $w .= ' AND owner_id = ?'; $p[] = $MID; }
+  if (!empty($in['dnq'])) $w .= ' AND dnq = 1';
+  if ($qs) { $w .= ' AND (company LIKE ? OR person LIKE ? OR city LIKE ? OR email LIKE ? OR phone LIKE ?)'; array_push($p, "%$qs%", "%$qs%", "%$qs%", "%$qs%", "%$qs%"); }
+  $cs = all('SELECT id, company, person, designation, city, email, phone, owner_id, dnq, dnq_reason, dnq_note, dnq_on, dnq_by FROM ' . T('clients') . " WHERE $w ORDER BY company LIMIT 500", $p);
+  if ($cs) {
+    $ids = implode(',', array_map('intval', array_column($cs, 'id')));
+    $ps = all('SELECT * FROM ' . T('projects') . " WHERE client_id IN ($ids)"); $b = bills_for($ps);
+    $agg = [];
+    foreach ($ps as $pr) {
+      $a = &$agg[$pr['client_id']]; $a = $a ?? ['orders' => 0, 'won' => 0, 'business' => 0, 'due' => 0];
+      $a['orders']++;
+      if (is_won($pr['status'])) { $a['won']++; $a['business'] += $b[$pr['id']]['total']; $a['due'] += $b[$pr['id']]['balance']; }
+      unset($a);
+    }
+    $um = users_map();
+    foreach ($cs as &$c) { $c += $agg[$c['id']] ?? ['orders' => 0, 'won' => 0, 'business' => 0, 'due' => 0]; $c['owner'] = $um[$c['owner_id']] ?? '—'; } unset($c);
+  }
+  out(['clients' => $cs]);
+
+case 'client':
+  $c = client_row($in['id'] ?? 0);
+  $c['contacts'] = all('SELECT * FROM ' . T('contacts') . ' WHERE client_id = ? ORDER BY id', [$c['id']]);
+  $c['cards'] = files_of('card', [$c['id']])[$c['id']] ?? [];
+  $ps = all('SELECT * FROM ' . T('projects') . ' WHERE client_id = ? ORDER BY COALESCE(start_date, created_at) DESC', [$c['id']]);
+  if (!$ADMIN) $ps = array_values(array_filter($ps, fn($p) => (int) $p['owner_id'] === $MID));
+  $b = bills_for($ps); $um = users_map();
+  foreach ($ps as &$p) { $p['bill'] = $b[$p['id']]; $p['owner'] = $um[$p['owner_id']] ?? '—'; } unset($p);
+  $c['projects'] = $ps; $c['owner'] = $um[$c['owner_id']] ?? '—';
+  out(['client' => $c]);
+
+case 'client_save':
+  $data = [];
+  foreach ($CLIENT_FIELDS as $f) if (array_key_exists($f, $in)) $data[$f] = s($in[$f]);
+  if (isset($data['email']) && $data['email']) $data['email'] = strtolower($data['email']);
+  if (empty($in['id'])) {
+    if (empty($data['company'])) fail('Enter the company name.');
+    $data['owner_id'] = ($ADMIN && !empty($in['owner_id'])) ? (int) $in['owner_id'] : $MID;
+    $data['created_by'] = $MID; $data['created_at'] = now();
+    $id = ins('clients', $data);
+    foreach ((array) ($in['contacts'] ?? []) as $ct) if (s($ct['name'] ?? null)) ins('contacts', ['client_id' => $id, 'name' => s($ct['name']), 'designation' => s($ct['designation'] ?? null), 'phone' => s($ct['phone'] ?? null), 'email' => s($ct['email'] ?? null)]);
+    out(['id' => $id]);
+  }
+  $c = client_row($in['id']);
+  if (array_key_exists('company', $data) && !$data['company']) fail('Company name cannot be empty.');
+  if ($ADMIN && !empty($in['owner_id'])) {
+    $data['owner_id'] = (int) $in['owner_id'];
+    if (!empty($in['move_orders'])) q('UPDATE ' . T('projects') . ' SET owner_id = ? WHERE client_id = ?', [$data['owner_id'], $c['id']]);
+  }
+  upd('clients', $c['id'], $data);
+  out(['ok' => true]);
+
+case 'dup':
+  $name = s($in['company'] ?? null, 200); $email = strtolower(s($in['email'] ?? null, 160) ?? ''); $ph = substr(preg_replace('/\D/', '', $in['phone'] ?? ''), -10);
+  $w = []; $p = [];
+  if ($name && mb_strlen($name) >= 3) {
+    // match on the first meaningful word too, so "Alucraft LLP" finds "Alucraft Manufacturing"
+    $w[] = 'company LIKE ?'; $p[] = '%' . $name . '%';
+    $word = preg_split('/\s+/', preg_replace('/\b(pvt|private|ltd|limited|llp|inc|co|company|the|and|&)\b/i', ' ', $name), -1, PREG_SPLIT_NO_EMPTY)[0] ?? '';
+    if (mb_strlen($word) >= 4) { $w[] = 'company LIKE ?'; $p[] = '%' . $word . '%'; }
+  }
+  if ($email) { $w[] = 'LOWER(email) = ?'; $p[] = $email; }
+  if (strlen($ph) === 10) { $w[] = 'phone LIKE ?'; $p[] = '%' . substr($ph, -6); }
+  if (!$w) out(['matches' => []]);
+  $rows = all('SELECT id, company, phone, owner_id, dnq, dnq_reason, dnq_note, dnq_on, dnq_by FROM ' . T('clients') . ' WHERE ' . implode(' OR ', $w) . ' ORDER BY dnq DESC LIMIT 8', $p);
+  $um = users_map(); $res = [];
+  foreach ($rows as $r) {
+    $nameHit = $name && mb_strlen($name) >= 3 && (stripos($r['company'], $name) !== false || (isset($word) && mb_strlen($word) >= 4 && stripos($r['company'], $word) !== false));
+    $emailHit = $email && strtolower((string) one('SELECT email FROM ' . T('clients') . ' WHERE id = ?', [$r['id']])['email']) === $email;
+    $phoneHit = strlen($ph) === 10 && substr(preg_replace('/\D/', '', $r['phone'] ?? ''), -10) === $ph;
+    if (!$nameHit && !$emailHit && !$phoneHit) continue;
+    $last = one('SELECT expo, status FROM ' . T('projects') . ' WHERE client_id = ? ORDER BY id DESC', [$r['id']]);
+    $res[] = ['id' => $r['id'], 'company' => $r['company'], 'owner' => $um[$r['owner_id']] ?? '—', 'mine' => $ADMIN || (int) $r['owner_id'] === $MID,
+      'dnq' => (int) $r['dnq'], 'dnq_reason' => $r['dnq_reason'], 'dnq_note' => $r['dnq_note'], 'dnq_on' => $r['dnq_on'], 'dnq_by' => $r['dnq_by'],
+      'orders' => (int) val('SELECT COUNT(*) FROM ' . T('projects') . ' WHERE client_id = ?', [$r['id']]), 'last' => $last];
+  }
+  out(['matches' => $res]);
+
+case 'dnq':
+  $c = client_row($in['id'] ?? 0);
+  if (!empty($in['on'])) {
+    if (!s($in['reason'] ?? null)) fail('Pick a reason.');
+    upd('clients', $c['id'], ['dnq' => 1, 'dnq_reason' => s($in['reason']), 'dnq_note' => s($in['note'] ?? null), 'dnq_on' => today(), 'dnq_by' => $me['name']]);
+  } else { need_admin(); upd('clients', $c['id'], ['dnq' => 0, 'dnq_reason' => null, 'dnq_note' => null, 'dnq_on' => null, 'dnq_by' => null]); }
+  out(['ok' => true]);
+
+case 'contact_add':
+  $c = client_row($in['client_id'] ?? 0);
+  if (!s($in['name'] ?? null)) fail('Enter the name.');
+  ins('contacts', ['client_id' => $c['id'], 'name' => s($in['name']), 'designation' => s($in['designation'] ?? null), 'phone' => s($in['phone'] ?? null), 'email' => s($in['email'] ?? null)]);
+  out(['ok' => true]);
+
+case 'contact_del':
+  $ct = one('SELECT * FROM ' . T('contacts') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]);
+  if (!$ct) fail('Not found', 404);
+  client_row($ct['client_id']);
+  q('DELETE FROM ' . T('contacts') . ' WHERE id = ?', [$ct['id']]);
+  out(['ok' => true]);
+
+// ----- PROJECTS (expo orders) -----
+case 'project_create':
+  $c = client_row($in['client_id'] ?? 0);
+  $expo = s($in['expo'] ?? null, 200); if (!$expo) fail('Enter the expo name.');
+  $id = ins('projects', ['client_id' => $c['id'], 'owner_id' => (int) $c['owner_id'], 'expo' => $expo, 'location' => s($in['location'] ?? null),
+    'start_date' => d($in['start_date'] ?? null), 'status' => 'enquiry', 'gst_rate' => 18, 'created_at' => now()]);
+  out(['id' => $id]);
+
+case 'project':
+  $p = project_row($in['id'] ?? 0);
+  $id = $p['id']; $tb = fn($t, $o = 'id') => all('SELECT * FROM ' . T($t) . " WHERE project_id = ? ORDER BY $o", [$id]);
+  $vn = []; foreach (all('SELECT id, name FROM ' . T('vendors')) as $v) $vn[$v['id']] = $v['name'];
+  $p['revisions'] = $tb('revisions', 'rdate, id');
+  $p['quotes'] = $tb('quotes', 'version');
+  $p['vquotes'] = $tb('vendor_quotes', 'amount');
+  $p['extras'] = $tb('extras');
+  $p['payments'] = $tb('client_payments', 'pdate, id');
+  $p['vpayments'] = $tb('vendor_payments', 'pdate, id');
+  $p['expenses'] = $tb('expenses', 'edate, id');
+  $p['losses'] = $tb('losses', 'ldate, id');
+  foreach (['vquotes', 'vpayments'] as $k) foreach ($p[$k] as &$r) { $r['vendor'] = $vn[$r['vendor_id']] ?? '—'; } unset($r);
+  $p['files'] = [
+    'floor' => files_of('floor', [$id])[$id] ?? [], 'final' => files_of('final', [$id])[$id] ?? [], 'wd' => files_of('wd', [$id])[$id] ?? [],
+    'quote' => files_of('quote', array_column($p['quotes'], 'id')), 'vquote' => files_of('vquote', array_column($p['vquotes'], 'id')),
+    'revision' => files_of('revision', array_column($p['revisions'], 'id')),
+  ];
+  $p['bill'] = project_bill($p, $p['extras'], $p['payments'], $p['vpayments'], $p['expenses'], $p['losses']);
+  $c = one('SELECT id, company, dnq FROM ' . T('clients') . ' WHERE id = ?', [$p['client_id']]);
+  $p['client'] = $c; $p['owner'] = users_map()[$p['owner_id']] ?? '—';
+  out(['project' => $p]);
+
+case 'project_save':
+  $p = project_row($in['id'] ?? 0);
+  $data = [];
+  foreach ((array) ($in['fields'] ?? []) as $k => $v) if (isset($PROJECT_FIELDS[$k])) $data[$k] = clean($PROJECT_FIELDS[$k], $v);
+  if (array_key_exists('expo', $data) && !$data['expo']) fail('Expo name cannot be empty.');
+  if (isset($data['status']) && !in_array($data['status'], ['enquiry', 'quoted', 'won', 'rejected', 'completed'], true)) fail('Unknown status.');
+  if (isset($data['rejected_by']) && !in_array($data['rejected_by'], ['us', 'client'], true)) $data['rejected_by'] = null;
+  if ($ADMIN && !empty($in['fields']['owner_id'])) $data['owner_id'] = (int) $in['fields']['owner_id'];
+  upd('projects', $p['id'], $data);
+  out(['ok' => true]);
+
+case 'child_add':
+  $p = project_row($in['project_id'] ?? 0);
+  $k = $in['kind'] ?? ''; if (!isset($KINDS[$k])) fail('Unknown entry type.');
+  [$table, $fields, $req] = $KINDS[$k];
+  $row = ['project_id' => $p['id']];
+  foreach ($fields as $f => $type) $row[$f] = clean($type, $in['data'][$f] ?? null);
+  foreach ($req as $f) if ($row[$f] === null || $row[$f] === '') fail('Please fill: ' . str_replace('_', ' ', $f));
+  if ($k === 'quote') $row['version'] = (int) val('SELECT COALESCE(MAX(version),0)+1 FROM ' . T('quotes') . ' WHERE project_id = ?', [$p['id']]);
+  if ($k === 'extra' && !$row['qty']) $row['qty'] = 1;
+  if ($k === 'extra' && !$row['added_on']) $row['added_on'] = today();
+  if ($k === 'vquote' && !$row['qdate']) $row['qdate'] = today();
+  if (in_array($k, ['payment', 'vpayment']) && !$row['mode']) $row['mode'] = 'Bank';
+  $id = ins($table, $row);
+  if ($k === 'quote') { // latest quote = offered price; enquiry becomes quoted
+    $upd = ['offered' => $row['amount']]; if ($p['status'] === 'enquiry') $upd['status'] = 'quoted';
+    upd('projects', $p['id'], $upd);
+  }
+  out(['id' => $id]);
+
+case 'child_del':
+  $k = $in['kind'] ?? ''; if (!isset($KINDS[$k])) fail('Unknown entry type.');
+  if (in_array($k, $ADMIN_DELETE_ONLY, true)) need_admin();
+  $table = $KINDS[$k][0];
+  $r = one('SELECT * FROM ' . T($table) . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]); if (!$r) fail('Not found', 404);
+  project_row($r['project_id']);
+  q('DELETE FROM ' . T($table) . ' WHERE id = ?', [$r['id']]);
+  out(['ok' => true]);
+
+case 'vq_select':
+  $r = one('SELECT * FROM ' . T('vendor_quotes') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]); if (!$r) fail('Not found', 404);
+  project_row($r['project_id']);
+  q('UPDATE ' . T('vendor_quotes') . ' SET selected = CASE WHEN id = ? THEN 1 ELSE 0 END WHERE project_id = ?', [$r['id'], $r['project_id']]);
+  out(['ok' => true]);
+
+// ----- FILES -----
+case 'upload':
+  $ent = $in['entity'] ?? ''; $eid = (int) ($in['entity_id'] ?? 0);
+  switch ($ent) {
+    case 'card': client_row($eid); break;
+    case 'floor': case 'final': case 'wd': project_row($eid); break;
+    case 'quote': case 'vquote': case 'revision':
+      $tbl = ['quote' => 'quotes', 'vquote' => 'vendor_quotes', 'revision' => 'revisions'][$ent];
+      $r = one('SELECT project_id FROM ' . T($tbl) . ' WHERE id = ?', [$eid]); if (!$r) fail('Not found', 404); project_row($r['project_id']); break;
+    case 'ritem':
+      $r = one('SELECT r.user_id, r.submitted_at FROM ' . T('report_items') . ' i JOIN ' . T('reports') . ' r ON r.id = i.report_id WHERE i.id = ?', [$eid]);
+      if (!$r || (int) $r['user_id'] !== $MID || strtotime($r['submitted_at']) < time() - 900) fail('This report is locked.', 403); break;
+    default: fail('Unknown upload type.');
+  }
+  $f = $_FILES['file'] ?? null;
+  if (!$f || $f['error'] !== UPLOAD_ERR_OK) fail($f && in_array($f['error'], [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE]) ? 'File is too large.' : 'Upload failed. Try again.');
+  if ($f['size'] > 25 * 1024 * 1024) fail('File is too large (max 25 MB).');
+  $ext = strtolower(pathinfo($f['name'], PATHINFO_EXTENSION));
+  $ok = ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'gif', 'xlsx', 'xls', 'csv', 'doc', 'docx', 'ppt', 'pptx', 'dwg', 'dxf', 'skp', 'zip', 'txt'];
+  if (!in_array($ext, $ok, true)) fail('This file type is not allowed.');
+  $dir = __DIR__ . '/uploads/' . date('Y/m');
+  if (!is_dir($dir)) mkdir($dir, 0755, true);
+  $stored = date('Y/m/') . bin2hex(random_bytes(12)) . '.' . $ext;
+  if (!move_uploaded_file($f['tmp_name'], __DIR__ . '/uploads/' . $stored)) fail('Could not save the file.');
+  $mime = (new finfo(FILEINFO_MIME_TYPE))->file(__DIR__ . '/uploads/' . $stored) ?: 'application/octet-stream';
+  $id = ins('files', ['entity' => $ent, 'entity_id' => $eid, 'orig_name' => mb_substr(basename($f['name']), 0, 250), 'stored_name' => $stored,
+    'mime' => $mime, 'size' => (int) $f['size'], 'uploaded_by' => $MID, 'created_at' => now()]);
+  out(['id' => $id, 'name' => $f['name']]);
+
+case 'file_del':
+  $f = one('SELECT * FROM ' . T('files') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]); if (!$f) fail('Not found', 404);
+  if ($f['entity'] === 'ritem') fail('Report files cannot be removed.', 403);
+  if (!$ADMIN && !((int) $f['uploaded_by'] === $MID && substr($f['created_at'], 0, 10) === today())) fail('Only admin can remove older files.', 403);
+  q('DELETE FROM ' . T('files') . ' WHERE id = ?', [$f['id']]);
+  @unlink(__DIR__ . '/uploads/' . $f['stored_name']);
+  out(['ok' => true]);
+
+// ----- DAILY REPORTS -----
+case 'report_mine':
+  $tpl = setting('templates', [])[$me['department']] ?? (setting('templates', [])['Operations'] ?? []);
+  $rs = all('SELECT * FROM ' . T('reports') . ' WHERE user_id = ? ORDER BY rdate DESC LIMIT 30', [$MID]);
+  $items = []; if ($rs) foreach (all('SELECT * FROM ' . T('report_items') . ' WHERE report_id IN (' . implode(',', array_map('intval', array_column($rs, 'id'))) . ') ORDER BY sl') as $it) $items[$it['report_id']][] = $it;
+  $allItems = array_merge([], ...array_values($items)); $fl = files_of('ritem', array_column($allItems, 'id'));
+  foreach ($rs as &$r) { $r['fields'] = json_decode($r['fields_json'], true); unset($r['fields_json']);
+    $r['items'] = array_map(fn($it) => json_decode($it['data_json'], true) + ['_files' => $fl[$it['id']] ?? []], $items[$r['id']] ?? []); } unset($r);
+  out(['template' => $tpl, 'reports' => $rs, 'missing' => missing_days($me, date('Y-m-d', strtotime('-1 day'))), 'today' => today(), 'today_working' => is_working_day(today())]);
+
+case 'report_submit':
+  if (val('SELECT COUNT(*) FROM ' . T('reports') . ' WHERE user_id = ? AND rdate = ?', [$MID, today()])) fail("Today's report is already submitted.");
+  $tpl = setting('templates', [])[$me['department']] ?? (setting('templates', [])['Operations'] ?? []);
+  $items = (array) ($in['items'] ?? []);
+  if (!$items) fail('Add at least one entry.');
+  if (count($items) > 200) fail('Too many entries.');
+  $first = $tpl[0]['k'] ?? 'company';
+  $clean = [];
+  foreach ($items as $i => $it) {
+    $row = [];
+    foreach ($tpl as $f) { if ($f['t'] === 'file') continue; $row[$f['k']] = $f['t'] === 'date' ? d($it[$f['k']] ?? null) : s($it[$f['k']] ?? null, 4000); }
+    if (!$row[$first]) fail('Entry ' . ($i + 1) . ': please fill ' . ($tpl[0]['l'] ?? 'the first field') . '.');
+    $clean[] = $row;
+  }
+  db()->beginTransaction();
+  $rid = ins('reports', ['user_id' => $MID, 'rdate' => today(), 'dept' => $me['department'], 'fields_json' => json_encode($tpl), 'submitted_at' => now()]);
+  $ids = [];
+  foreach ($clean as $i => $row) $ids[] = ins('report_items', ['report_id' => $rid, 'sl' => $i + 1, 'data_json' => json_encode($row, JSON_UNESCAPED_UNICODE)]);
+  db()->commit();
+  out(['id' => $rid, 'item_ids' => $ids]);
+
+case 'report_log':
+  need_admin();
+  $to = d($in['to'] ?? null) ?? today(); $from = d($in['from'] ?? null) ?? date('Y-m-d', strtotime($to . ' -13 days'));
+  if ($from > $to) [$from, $to] = [$to, $from];
+  if ((strtotime($to) - strtotime($from)) / 86400 > 92) $from = date('Y-m-d', strtotime($to . ' -92 days'));
+  $uw = "active = 1 AND role = 'employee'"; $up = [];
+  if (!empty($in['user_id'])) { $uw .= ' AND id = ?'; $up[] = (int) $in['user_id']; }
+  $users = all('SELECT id, name, department, designation, joined_on FROM ' . T('users') . " WHERE $uw ORDER BY name", $up);
+  $rs = all('SELECT * FROM ' . T('reports') . ' WHERE rdate BETWEEN ? AND ?', [$from, $to]);
+  $items = []; if ($rs) foreach (all('SELECT * FROM ' . T('report_items') . ' WHERE report_id IN (' . implode(',', array_map('intval', array_column($rs, 'id'))) . ') ORDER BY sl') as $it) $items[$it['report_id']][] = $it;
+  $allItems = $items ? array_merge(...array_values($items)) : []; $fl = files_of('ritem', array_column($allItems, 'id'));
+  $byKey = []; foreach ($rs as $r) $byKey[$r['user_id'] . '|' . $r['rdate']] = $r;
+  $off = setting('weekly_off', [0]); $hol = []; foreach (all('SELECT hdate, reason FROM ' . T('holidays') . ' WHERE hdate BETWEEN ? AND ?', [$from, $to]) as $h) $hol[$h['hdate']] = $h['reason'];
+  $track = setting('track_from', today());
+  $days = [];
+  for ($dd = $to; $dd >= $from; $dd = date('Y-m-d', strtotime($dd . ' -1 day'))) {
+    $isOff = in_array((int) date('w', strtotime($dd)), $off, true);
+    $day = ['date' => $dd, 'off' => $isOff ? 'Week off' : ($hol[$dd] ?? null), 'rows' => []];
+    foreach ($users as $u) {
+      $r = $byKey[$u['id'] . '|' . $dd] ?? null;
+      if ($r) {
+        $day['rows'][] = ['user' => $u, 'status' => 'received', 'at' => substr($r['submitted_at'], 11, 5), 'fields' => json_decode($r['fields_json'], true),
+          'items' => array_map(fn($it) => json_decode($it['data_json'], true) + ['_files' => $fl[$it['id']] ?? []], $items[$r['id']] ?? [])];
+      } elseif (!$day['off'] && $dd >= $u['joined_on'] && $dd >= $track) {
+        $day['rows'][] = ['user' => $u, 'status' => $dd === today() ? 'pending' : 'missing'];
+      }
+    }
+    $days[] = $day;
+  }
+  out(['from' => $from, 'to' => $to, 'days' => $days]);
+
+case 'report_delete':  // admin only: in case an employee submitted wrong data and must redo
+  need_admin();
+  $r = one('SELECT * FROM ' . T('reports') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]); if (!$r) fail('Not found', 404);
+  q('DELETE FROM ' . T('report_items') . ' WHERE report_id = ?', [$r['id']]);
+  q('DELETE FROM ' . T('reports') . ' WHERE id = ?', [$r['id']]);
+  out(['ok' => true]);
+
+// ----- TEAM -----
+case 'users':
+  need_admin();
+  out(['users' => all('SELECT id, name, email, role, designation, department, phone, active, joined_on FROM ' . T('users') . ' ORDER BY active DESC, name')]);
+
+case 'user_save':
+  need_admin();
+  $data = ['name' => s($in['name'] ?? null, 120), 'designation' => s($in['designation'] ?? null, 120), 'department' => s($in['department'] ?? null, 60), 'phone' => s($in['phone'] ?? null, 30)];
+  $role = ($in['role'] ?? 'employee') === 'admin' ? 'admin' : 'employee';
+  if (!$data['name']) fail('Enter the name.');
+  if (!$data['department']) fail('Pick a department.');
+  if (empty($in['id'])) {
+    $email = strtolower(s($in['email'] ?? null, 160) ?? '');
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) fail('Enter a valid email.');
+    if (val('SELECT COUNT(*) FROM ' . T('users') . ' WHERE email = ?', [$email])) fail('This email already has a login.');
+    if (strlen($in['password'] ?? '') < 8) fail('Password must be at least 8 characters.');
+    $id = ins('users', $data + ['email' => $email, 'role' => $role, 'pass_hash' => password_hash($in['password'], PASSWORD_DEFAULT), 'active' => 1,
+      'joined_on' => d($in['joined_on'] ?? null) ?? today(), 'created_at' => now()]);
+    out(['id' => $id]);
+  }
+  $id = (int) $in['id'];
+  if ($id === $MID && ($role !== 'admin' || isset($in['active']) && !$in['active'])) fail('You cannot remove your own admin access.');
+  $data['role'] = $role;
+  if (isset($in['active'])) $data['active'] = $in['active'] ? 1 : 0;
+  if (!empty($in['password'])) { if (strlen($in['password']) < 8) fail('Password must be at least 8 characters.'); $data['pass_hash'] = password_hash($in['password'], PASSWORD_DEFAULT); }
+  upd('users', $id, $data);
+  out(['ok' => true]);
+
+case 'password':
+  $u = one('SELECT pass_hash FROM ' . T('users') . ' WHERE id = ?', [$MID]);
+  if (!password_verify($in['old'] ?? '', $u['pass_hash'])) fail('Current password is wrong.');
+  if (strlen($in['new'] ?? '') < 8) fail('New password must be at least 8 characters.');
+  upd('users', $MID, ['pass_hash' => password_hash($in['new'], PASSWORD_DEFAULT)]);
+  out(['ok' => true]);
+
+// ----- SETTINGS -----
+case 'settings':
+  need_admin();
+  out(['holidays' => all('SELECT * FROM ' . T('holidays') . ' ORDER BY hdate DESC'), 'track_from' => setting('track_from')]);
+
+case 'settings_save':
+  need_admin();
+  if (isset($in['weekly_off'])) set_setting('weekly_off', array_values(array_unique(array_map('intval', array_filter((array) $in['weekly_off'], fn($x) => $x >= 0 && $x <= 6)))));
+  if (isset($in['departments'])) { $dp = array_values(array_unique(array_filter(array_map(fn($x) => s($x, 60), (array) $in['departments'])))); if (!$dp) fail('Keep at least one department.'); set_setting('departments', $dp); }
+  if (isset($in['templates'])) {
+    $clean = [];
+    foreach ((array) $in['templates'] as $dept => $fields) {
+      $fs = [];
+      foreach ((array) $fields as $f) {
+        $t = in_array($f['t'] ?? '', ['text', 'long', 'number', 'date', 'select', 'file'], true) ? $f['t'] : 'text';
+        $x = ['k' => preg_replace('/[^a-z0-9_]/i', '', $f['k'] ?? '') ?: 'f' . bin2hex(random_bytes(3)), 'l' => s($f['l'] ?? null, 80) ?? 'Field', 't' => $t];
+        if (!empty($f['req'])) $x['req'] = 1;
+        if ($t === 'select') $x['o'] = array_values(array_filter(array_map(fn($o) => s($o, 60), (array) ($f['o'] ?? []))));
+        $fs[] = $x;
+      }
+      if ($fs) { $fs[0]['req'] = 1; $clean[s($dept, 60)] = $fs; }
+    }
+    set_setting('templates', $clean);
+  }
+  if (isset($in['track_from']) && d($in['track_from'])) set_setting('track_from', d($in['track_from']));
+  out(['ok' => true]);
+
+case 'holiday_add':
+  need_admin();
+  $hd = d($in['hdate'] ?? null); $rs = s($in['reason'] ?? null, 160);
+  if (!$hd || !$rs) fail('Enter date and reason.');
+  if (val('SELECT COUNT(*) FROM ' . T('holidays') . ' WHERE hdate = ?', [$hd])) fail('That date is already a holiday.');
+  ins('holidays', ['hdate' => $hd, 'reason' => $rs]); out(['ok' => true]);
+
+case 'holiday_del':
+  need_admin(); q('DELETE FROM ' . T('holidays') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]); out(['ok' => true]);
+
+case 'reason_add':
+  need_admin(); $l = s($in['label'] ?? null, 160); if (!$l) fail('Enter the reason.'); ins('reasons', ['label' => $l]); out(['ok' => true]);
+
+case 'reason_del':
+  need_admin(); q('UPDATE ' . T('reasons') . ' SET active = 0 WHERE id = ?', [(int) ($in['id'] ?? 0)]); out(['ok' => true]);
+
+case 'vendor_add':
+  $nm = s($in['name'] ?? null, 160); if (!$nm) fail('Enter the vendor name.');
+  if ($ex = val('SELECT id FROM ' . T('vendors') . ' WHERE LOWER(name) = LOWER(?)', [$nm])) { q('UPDATE ' . T('vendors') . ' SET active = 1 WHERE id = ?', [$ex]); out(['id' => (int) $ex]); }
+  out(['id' => ins('vendors', ['name' => $nm, 'phone' => s($in['phone'] ?? null, 40)])]);
+
+case 'vendor_del':
+  need_admin(); q('UPDATE ' . T('vendors') . ' SET active = 0 WHERE id = ?', [(int) ($in['id'] ?? 0)]); out(['ok' => true]);
+
+default:
+  fail('Unknown action', 404);
+}
