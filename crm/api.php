@@ -287,12 +287,13 @@ case 'client_del':  // admin only: removes a client with all its orders, payment
   foreach ($files as $f) @unlink(__DIR__ . '/uploads/' . $f['stored_name']);
   out(['ok' => true]);
 
-case 'dnq':
+case 'dnq':  // strategic call: admin only (sales see the flag but cannot set or remove it)
+  need_admin();
   $c = client_row($in['id'] ?? 0);
   if (!empty($in['on'])) {
     if (!s($in['reason'] ?? null)) fail('Pick a reason.');
     upd('clients', $c['id'], ['dnq' => 1, 'dnq_reason' => s($in['reason']), 'dnq_note' => s($in['note'] ?? null), 'dnq_on' => today(), 'dnq_by' => $me['name']]);
-  } else { need_admin(); upd('clients', $c['id'], ['dnq' => 0, 'dnq_reason' => null, 'dnq_note' => null, 'dnq_on' => null, 'dnq_by' => null]); }
+  } else { upd('clients', $c['id'], ['dnq' => 0, 'dnq_reason' => null, 'dnq_note' => null, 'dnq_on' => null, 'dnq_by' => null]); }
   out(['ok' => true]);
 
 case 'contact_add':
