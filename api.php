@@ -41,6 +41,11 @@ function ini_mb($k) { $v = trim((string) ini_get($k)); if ($v === '' || $v === '
 function upload_limit_mb() { return max(1, min(UPLOAD_MAX_MB, ini_mb('upload_max_filesize'), ini_mb('post_max_size') - 1)); }   // what this server really accepts
 
 // ---------- helpers ----------
+function ref_hist($r, $text) { $h = json_decode($r['history'] ?? '', true) ?: []; $h[] = ['at' => now(), 'text' => $text]; return json_encode($h, JSON_UNESCAPED_UNICODE); }
+function ref_targets() {   // who a referral can go to: sales people and admins
+  $mods = setting('dept_modules', default_dept_modules());
+  return array_values(array_filter(all('SELECT id, name, role, department, designation FROM ' . T('users') . ' WHERE active = 1 ORDER BY role, name'), fn($u) => $u['role'] === 'admin' || ($mods[$u['department']] ?? '') === 'records'));
+}
 function touch_activity() {   // marks today as a working day with work logged
   global $ADMIN, $MID; if ($ADMIN) return;
   if (!val('SELECT COUNT(*) FROM ' . T('activity') . ' WHERE user_id = ? AND adate = ?', [$MID, today()])) { try { ins('activity', ['user_id' => $MID, 'adate' => today()]); } catch (PDOException $e) { /* already marked */ } }
@@ -125,6 +130,8 @@ case 'boot':
     'dept_modules' => setting('dept_modules', default_dept_modules()),
     'furniture_items' => setting('furniture_items', default_furniture()),
     'acc' => $ACC,
+    'ref_new' => (int) val('SELECT COUNT(*) FROM ' . T('referrals') . " WHERE assigned_to = ? AND status = 'new'", [$MID]),
+    'ref_open' => (int) val('SELECT COUNT(*) FROM ' . T('referrals') . " WHERE assigned_to = ? AND status IN ('new','seen')", [$MID]),
     'claims_attention' => (int) val('SELECT COUNT(*) FROM ' . T('claims') . " WHERE user_id = ? AND status IN ('on_hold','rejected')", [$MID]),
     'claims_waiting' => $ACC ? (int) val('SELECT COUNT(*) FROM ' . T('claims') . " WHERE status = 'submitted'") : 0,
     'inv_todo' => $ACC ? (int) val('SELECT COUNT(*) FROM ' . T('invoices') . " WHERE status IN ('requested','on_hold','rejected')") : 0,
@@ -341,6 +348,11 @@ case 'client_save':
     tx();   // all-or-nothing: no half-saved client if something fails
     $id = ins('clients', $data);
     if ($hasExpo) create_project($id, $data['owner_id'], $ex);
+    if (!empty($in['ref_id'])) {   // this client came from a referral lead
+      $rf = lock_row('referrals', $in['ref_id']);
+      if ($rf && ((int) $rf['assigned_to'] === $MID || $ADMIN) && in_array($rf['status'], ['new', 'seen'], true))
+        upd('referrals', $rf['id'], ['status' => 'converted', 'client_id' => $id, 'converted_at' => now(), 'seen_at' => $rf['seen_at'] ?: now(), 'history' => ref_hist($rf, 'Added as client by ' . $me['name'])]);
+    }
     foreach ((array) ($in['contacts'] ?? []) as $ct) if (s($ct['name'] ?? null)) ins('contacts', ['client_id' => $id, 'name' => s($ct['name']), 'designation' => s($ct['designation'] ?? null), 'phone' => s($ct['phone'] ?? null), 'email' => s($ct['email'] ?? null)]);
     db()->commit();
     out(['id' => $id]);
@@ -721,6 +733,52 @@ case 'password':
   out(['ok' => true]);
 
 // ----- SETTINGS -----
+// ----- referral leads -----
+case 'ref_list':   // admin: everything; others: what was handed to me
+  $um = users_map(); $w = $ADMIN && ($in['scope'] ?? '') !== 'mine' ? '1=1' : 'r.assigned_to = ' . $MID;
+  if (in_array($in['status'] ?? '', ['new', 'seen', 'converted', 'closed'], true)) { $w .= ' AND r.status = ?'; $pp = [$in['status']]; } else $pp = [];
+  $rows = all('SELECT r.*, c.company AS client_company FROM ' . T('referrals') . " r LEFT JOIN " . T('clients') . " c ON c.id = r.client_id WHERE $w ORDER BY (r.status IN ('new','seen')) DESC, r.id DESC LIMIT 500", $pp);
+  foreach ($rows as &$r) { $r['to_name'] = $um[$r['assigned_to']] ?? '—'; $r['by_name'] = $um[$r['referred_by']] ?? '—'; $r['history'] = json_decode($r['history'] ?? '', true) ?: []; } unset($r);
+  $cnt = []; foreach (all('SELECT status, COUNT(*) AS n FROM ' . T('referrals') . ($ADMIN ? '' : ' WHERE assigned_to = ' . $MID) . ' GROUP BY status') as $x) $cnt[$x['status']] = (int) $x['n'];
+  out(['rows' => $rows, 'counts' => $cnt, 'targets' => $ADMIN ? ref_targets() : []]);
+
+case 'ref_save':   // admin: refer a new lead, or hand an open one to someone else
+  need_admin();
+  $to = (int) ($in['assigned_to'] ?? 0); $tu = null; foreach (ref_targets() as $u) if ((int) $u['id'] === $to) $tu = $u;
+  if (!$tu) fail('Pick the sales person or admin who should handle this lead.');
+  if (!empty($in['id'])) {
+    $r = lock_row('referrals', $in['id']) ?? fail('Not found', 404);
+    if (!in_array($r['status'], ['new', 'seen'], true)) fail('This lead is already ' . $r['status'] . '.');
+    if ((int) $r['assigned_to'] === $to) fail('It is already with ' . $tu['name'] . '.');
+    upd('referrals', $r['id'], ['assigned_to' => $to, 'assigned_at' => now(), 'status' => 'new', 'seen_at' => null, 'history' => ref_hist($r, 'Handed to ' . $tu['name'] . ' by ' . $me['name'] . (s($in['note'] ?? null) ? ' — ' . s($in['note'], 500) : ''))]);
+    out(['ok' => true]);
+  }
+  $row = ['name' => s($in['name'] ?? null, 120) ?? fail('Enter the name of the person.'), 'phone' => s($in['phone'] ?? null, 40) ?? fail('Enter the contact number.'),
+    'company' => s($in['company'] ?? null, 200) ?? fail('Enter the company name.'), 'area' => s($in['area'] ?? null, 60), 'note' => s($in['note'] ?? null, 2000)];
+  if (strlen(preg_replace('/\D/', '', $row['phone'])) < 8) fail('The contact number looks too short.');
+  $id = ins('referrals', $row + ['referred_by' => $MID, 'assigned_to' => $to, 'assigned_at' => now(), 'status' => 'new', 'created_at' => now(), 'history' => json_encode([['at' => now(), 'text' => 'Referred by ' . $me['name'] . ' to ' . $tu['name']]], JSON_UNESCAPED_UNICODE)]);
+  out(['id' => $id]);
+
+case 'ref_seen':
+  $r = one('SELECT * FROM ' . T('referrals') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]);
+  if ($r && (int) $r['assigned_to'] === $MID && $r['status'] === 'new') upd('referrals', $r['id'], ['status' => 'seen', 'seen_at' => now()]);
+  out(['ok' => true]);
+
+case 'ref_close':   // the person handling it: not workable (with reason) · admin: can close any
+  $r = lock_row('referrals', $in['id'] ?? 0) ?? fail('Not found', 404);
+  if ((int) $r['assigned_to'] !== $MID && !$ADMIN) fail('This lead is not with you.', 403);
+  if (!in_array($r['status'], ['new', 'seen'], true)) fail('This lead is already ' . $r['status'] . '.');
+  $why = s($in['reason'] ?? null, 1000) ?? fail('Write why it cannot be taken up.');
+  upd('referrals', $r['id'], ['status' => 'closed', 'closed_reason' => $why, 'closed_at' => now(), 'history' => ref_hist($r, 'Closed by ' . $me['name'] . ' — ' . $why)]);
+  out(['ok' => true]);
+
+case 'ref_reopen':
+  need_admin();
+  $r = lock_row('referrals', $in['id'] ?? 0) ?? fail('Not found', 404);
+  if ($r['status'] !== 'closed') fail('Only a closed lead can be reopened.');
+  upd('referrals', $r['id'], ['status' => 'new', 'seen_at' => null, 'closed_reason' => null, 'closed_at' => null, 'assigned_at' => now(), 'history' => ref_hist($r, 'Reopened by ' . $me['name'])]);
+  out(['ok' => true]);
+
 case 'settings':
   need_admin();
   require_once __DIR__ . '/lib/quote.php';

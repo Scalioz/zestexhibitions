@@ -118,6 +118,16 @@ function migrate() {
     set_setting('company', $c);
     set_setting('schema_v', 13);
   }
+  if ($v < 14) { create_referrals_table(); set_setting('schema_v', 14); }
+}
+function create_referrals_table() {   // leads admin gets from his contacts and hands to a sales person / another admin
+  $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
+  $PK = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT UNSIGNED AUTO_INCREMENT PRIMARY KEY';
+  $E = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+  foreach (['CREATE TABLE IF NOT EXISTS ' . T('referrals') . " (id $PK, name VARCHAR(120) NOT NULL, phone VARCHAR(40) NOT NULL, company VARCHAR(200) NOT NULL, area VARCHAR(60), note TEXT,
+      referred_by INT NOT NULL, assigned_to INT NOT NULL, assigned_at DATETIME NOT NULL, status VARCHAR(12) NOT NULL DEFAULT 'new', seen_at DATETIME, client_id INT, converted_at DATETIME,
+      closed_reason TEXT, closed_at DATETIME, history TEXT, created_at DATETIME NOT NULL)$E",
+    'CREATE INDEX zc_ref_to ON ' . T('referrals') . ' (assigned_to, status)'] as $q) { try { db()->exec($q); } catch (PDOException $e) { if (stripos($q, 'CREATE INDEX') !== 0) throw $e; } }
 }
 
 // ---------- ACCOUNTS (double entry) ----------
