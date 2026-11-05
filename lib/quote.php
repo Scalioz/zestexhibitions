@@ -63,7 +63,7 @@ function quote_prefill($p, $c, $me) {
       ['l' => 'Stall No', 'v' => (string) $p['stall_no']], ['l' => 'Stall Area', 'v' => $area ? "$area Sq. mts." : ''],
       ['l' => 'Dimensions', 'v' => $len && $wid ? "$len x $wid" : ''], ['l' => 'Stall Type', 'v' => $sides],
       ['l' => 'Wall Height', 'v' => q_dim($ops['wall_h'] ?? null)], ['l' => 'Stall Height', 'v' => ''],
-      ['l' => 'Stall Status', 'v' => ['bare' => 'Raw Space', 'shell' => 'Shell Scheme'][$p['space_type'] ?? ''] ?? ''], ['l' => 'Scope of Work', 'v' => $D['scope']],
+      ['l' => 'Stall Status', 'v' => ['bare' => 'Raw Space', 'bare space' => 'Raw Space', 'shell' => 'Shell Scheme', 'shell scheme' => 'Shell Scheme'][strtolower((string) $p['space_type'])] ?? (string) $p['space_type']], ['l' => 'Scope of Work', 'v' => $D['scope']],
     ],
     'items' => $items, 'show_rates' => 0,
     'total' => (float) ($p['agreed'] ?: $p['offered'] ?: 0), 'discount' => 0, 'gst_rate' => (float) ($p['gst_rate'] ?: 18), 'gst_mode' => $same ? 'cgst_sgst' : 'igst',

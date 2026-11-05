@@ -1,13 +1,14 @@
 <?php
-// Test-server only: creates a fresh SQLite database with logins and sample data.
+// Test-server only: sets up the database with logins (and sample data unless --empty).
 if (php_sapi_name() !== 'cli') exit;
 $root = dirname(__DIR__);
 require "$root/lib/db.php"; require "$root/lib/schema.php";
-create_schema('sqlite'); seed_defaults();
+create_schema(cfg()['driver'] ?? 'mysql'); seed_defaults(); migrate();
 if (val('SELECT COUNT(*) FROM ' . T('users'))) { echo "Already seeded\n"; exit; }
 set_setting('track_from', today());
 $u = fn($n, $e, $p, $r, $d, $dep) => ins('users', ['name' => $n, 'email' => $e, 'pass_hash' => password_hash($p, PASSWORD_DEFAULT), 'role' => $r, 'designation' => $d, 'department' => $dep, 'active' => 1, 'joined_on' => today(), 'created_at' => now()]);
 $u('Osman', 'admin@zest.test', 'ZestAdmin@2026', 'admin', 'Business Head', 'Operations');
+if (in_array('--empty', $argv, true)) { echo "Ready — admin login only\n"; exit; }
 $ravi = $u('Ravi (test)', 'sales@zest.test', 'ZestSales@2026', 'employee', 'Sales Executive', 'Sales');
 // Sample: Alucraft's 3 real orders
 $cid = ins('clients', ['company' => 'Alucraft Manufacturing And Marketing LLP', 'city' => 'Bengaluru', 'owner_id' => $ravi, 'created_by' => 1, 'created_at' => now()]);

@@ -63,7 +63,7 @@ function card_read($abs) {
     $ph = array_values(array_unique(array_filter(array_map(fn($x) => mb_substr(trim(preg_replace('/[^\d+\-() ]/', '', (string) $x)), 0, 30), (array) ($c['phones'] ?? [])), fn($x) => strlen(preg_replace('/\D/', '', $x)) >= 6)));
     $em = array_values(array_unique(array_filter(array_map(fn($x) => strtolower(trim((string) $x)), (array) ($c['emails'] ?? [])), fn($x) => (bool) filter_var($x, FILTER_VALIDATE_EMAIL))));
     $row = ['name' => $t('name', 120), 'designation' => $t('designation', 120), 'company' => $t('company'), 'phone' => $ph[0] ?? '', 'phone2' => implode(', ', array_slice($ph, 1, 3)),
-      'email' => $em[0] ?? '', 'email2' => implode(', ', array_slice($em, 1, 3)), 'website' => $t('website', 160), 'city' => $t('city', 80), 'address' => $t('address', 400)];
+      'email' => $em[0] ?? '', 'email2' => mb_substr(implode(', ', array_slice($em, 1, 3)), 0, 250), 'website' => $t('website', 160), 'city' => $t('city', 80), 'address' => $t('address', 400)];
     if ($row['name'] === '' && $row['company'] === '' && $row['phone'] === '' && $row['email'] === '') continue;
     $clean[] = $row;
   }
