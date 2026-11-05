@@ -82,6 +82,21 @@ function migrate() {
     if (setting('furniture_items') === null) set_setting('furniture_items', default_furniture());
     set_setting('schema_v', 6);
   }
+  if ($v < 7) { create_approvals_table(); set_setting('schema_v', 7); }
+}
+
+// Design and quote versions that sales send to admin for approval before they go to the customer
+function create_approvals_table() {
+  $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
+  $PK = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT UNSIGNED AUTO_INCREMENT PRIMARY KEY';
+  $E = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+  foreach ([
+    'CREATE TABLE IF NOT EXISTS ' . T('approvals') . " (id $PK, project_id INT NOT NULL, kind VARCHAR(10) NOT NULL, version INT NOT NULL, amount DECIMAL(14,2), note TEXT,
+      requested_by INT NOT NULL, requested_at DATETIME NOT NULL, status VARCHAR(10) NOT NULL DEFAULT 'pending', decided_by VARCHAR(120), decided_at DATETIME, admin_note TEXT,
+      sent_on DATE, sent_by VARCHAR(120), sent_at DATETIME)$E",
+    'CREATE INDEX zc_appr_project ON ' . T('approvals') . ' (project_id)',
+    'CREATE INDEX zc_appr_status ON ' . T('approvals') . ' (status)',
+  ] as $q) { try { db()->exec($q); } catch (PDOException $e) { if (stripos($q, 'CREATE INDEX') !== 0) throw $e; } }
 }
 
 // What each department works on. records = clients & orders; leads = expo data research; calls = telecalling;
@@ -119,6 +134,7 @@ function create_audit_table() {
 function seed_defaults() {
   create_audit_table();
   create_work_tables();
+  create_approvals_table();
   if (setting('dept_modules') === null) set_setting('dept_modules', default_dept_modules());
   if (setting('furniture_items') === null) set_setting('furniture_items', default_furniture());
   if (!val('SELECT COUNT(*) FROM ' . T('reasons'))) {

@@ -73,7 +73,7 @@ async function route() {
   try { await fn(r); } catch (e) { if (e.message !== 'signed out') view().innerHTML = `<div class="alert bad"><b>Could not load this page</b><span class="m">${esc(e.message)}</span></div>`; }
   window.scrollTo(0, 0);
 }
-const ADMIN_ONLY = { clientlog: 1, leadlog: 1, jobs: 1, reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
+const ADMIN_ONLY = { clientlog: 1, saleslog: 1, leadlog: 1, jobs: 1, reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
 const RECORDS_ONLY = { clients: 1, client: 1, project: 1, newclient: 1 };
 const MODULE_ONLY = { leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
 async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); window.scrollTo(0, y); }
@@ -83,7 +83,7 @@ function renderNav(cur) {
   const on = map[cur] || cur;
   const L = (k, l, b) => `<a href="#${k}" class="${on === k ? 'on' : ''}">${l}${b ? `<span class="badge">${b}</span>` : ''}</a>`;
   $('#nav').innerHTML = isAdmin()
-    ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('leadlog', 'Expo data log')}${L('jobs', 'Design & production')}${L('reportlog', 'Daily reports', B.flags || '')}
+    ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('saleslog', 'Sales log', B.pending_approvals || '')}${L('leadlog', 'Expo data log')}${L('jobs', 'Design & production')}${L('reportlog', 'Daily reports', B.flags || '')}
        <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('dnq', 'Do-not-quote list')}
        <div class="sec">Admin</div>${L('team', 'Team')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
     : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('report', 'Daily report', B.flags || '')}`
@@ -119,6 +119,7 @@ async function empHome() {
    <div class="row"><a class="btn" href="#newclient">+ New client</a></div></div>
   ${d.missing.length ? `<div class="alert bad"><b>Daily report not submitted</b><span class="m">Missing for: ${d.missing.map(fd).join(', ')}. Admin can see this.</span></div>` : ''}
   ${!d.today_done && d.today_working ? `<div class="alert warn"><b>Today's report is pending</b><span class="m">Submit before you leave for the day. <a href="#report">Open daily report →</a></span></div>` : ''}
+  ${d.appr && d.appr.length ? `<div class="panel"><h2>My approvals</h2><div class="tw"><table>${d.appr.map(a => `<tr class="click" data-go="project-${a.project_id}-${a.kind === 'quote' ? 'order' : 'design'}"><td><b>${esc(a.company)}</b><div class="sub">${esc(a.expo)}</div></td><td><span class="pill ${a.kind === 'quote' ? 'p-enquiry' : 'p-off'}">${a.kind} V${a.version}</span></td><td>${stagePill(a)}</td><td class="sub">${a.status === 'approved' ? 'Approved — send it to the customer and mark it sent.' : a.status === 'rejected' ? 'Needs changes: ' + esc(a.admin_note || '') : 'Waiting for admin.'}</td></tr>`).join('')}</table></div></div>` : ''}
   <div class="kpis">
     <div class="kpi"><span>My clients</span><b>${d.clients}</b></div>
     <div class="kpi"><span>Orders won</span><b>${d.won}</b><small>${inr(d.won_total)} billed</small></div>
@@ -137,6 +138,7 @@ async function adminHome(r) {
   view().innerHTML = `
   <div class="head"><div><h1>Business dashboard</h1><p>${f.from || f.to ? `Expos from ${f.from ? fd(f.from) : 'start'} to ${f.to ? fd(f.to) : 'today'}` : 'All time · all employees'}</p></div>
    <form class="row" id="dashf"><label class="f">From<input type="date" name="from" value="${f.from}"></label><label class="f">To<input type="date" name="to" value="${f.to}"></label><button class="btn ghost sm" style="align-self:flex-end">Apply</button>${f.from || f.to ? '<button type="button" class="btn link" id="dashclear" style="align-self:flex-end">Clear</button>' : ''}</form></div>
+  ${B.pending_approvals ? `<div class="alert warn"><b>${B.pending_approvals} design / quote approval${B.pending_approvals > 1 ? 's' : ''} waiting</b><div><a class="btn sm" href="#saleslog">Open sales log</a></div></div>` : ''}
   ${flags.length ? `<div class="alert bad"><b>Daily reports not received</b><span class="m">${flags.map(e => `${esc(e.name)} — ${e.missing.slice(-5).map(fd).join(', ')}${e.missing.length > 5 ? ` (+${e.missing.length - 5} more)` : ''}`).join('<br>')}</span><div><a class="btn sm" href="#reportlog">Open report log</a></div></div>` : ''}
   <div class="kpis">
    <div class="kpi hl"><span>Business captured</span><b>${inr(d.captured)}</b><small>${d.captured_n} orders · incl. GST</small></div>
@@ -319,6 +321,7 @@ PT.design = p => `<div class="inset" style="margin-bottom:14px"><div class="grid
    <div class="sub"><b>Assigned by</b><br>${esc(p.design_assigned_by || '—')}${p.designer_id ? ' · ' + fd(p.assigned_on) : ''}</div>
    <div class="sub"><b>Design submitted</b><br>${p.design_submitted_on ? fd(p.design_submitted_on) : p.designer_id ? '<span class="pill p-pending">pending</span>' : '—'}</div></div>
    ${p.design_notes ? `<div class="sub" style="margin-top:8px"><b>Designer notes:</b> ${esc(p.design_notes)}</div>` : ''}</div>
+  ${apprPanel(p, 'design')}
   <div class="grid">${PF(p, 'designed_by', 'Designed by')}${PF(p, 'assigned_on', 'Design assigned on', 'date')}${PF(p, 'design_approved_by', 'Design approved by (Zest)')}</div>
   <h3 style="margin:18px 0 8px">Corrections</h3>
   ${p.revisions.length ? `<div class="tw"><table><tr><th>#</th><th>Date</th><th>Done by</th><th>What changed</th><th>File</th><th></th></tr>${p.revisions.map((r, i) => rowOr('revision', r, 6, `<tr><td>R${i + 1}</td><td class="num">${fd(r.rdate)}</td><td>${esc(r.done_by || '')}</td><td>${esc(r.changes)}</td><td>${fileChips(p.files.revision[r.id], isAdmin())}</td><td class="r">${acts('revision', r.id)}</td></tr>`)).join('')}</table></div>` : '<div class="sub">No corrections yet.</div>'}
@@ -345,10 +348,11 @@ PT.order = p => { const c = calcBill(p); return `<div class="grid">${PF(p, 'offe
    <label class="f">Reason<select data-pf="reason"><option value="">Select reason</option>${B.reasons.map(r => `<option ${p.reason === r.label ? 'selected' : ''}>${esc(r.label)}</option>`).join('')}${p.reason && !B.reasons.some(r => r.label === p.reason) ? `<option selected>${esc(p.reason)}</option>` : ''}</select></label>
    <label class="f wide">Details<input data-pf="rejection_note" value="${esc(p.rejection_note)}"></label>
    ${p.rejected_by === 'us' && !+p.client.dnq && isAdmin() ? `<div class="sub wide">Want to stop future quotes to this client? <a href="#client-${p.client.id}">Mark them “Do not quote”</a>.</div>` : ''}</div>` : ''}
+  <div style="margin-top:18px">${apprPanel(p, 'quote')}</div>
   <h3 style="margin:18px 0 8px">Quote versions sent to client</h3>
   ${p.quotes.length ? `<div class="tw"><table><tr><th>Ver.</th><th>Date</th><th class="r">Amount</th><th>Approved by</th><th>Notes</th><th>PDF</th><th></th></tr>${p.quotes.map(q => rowOr('quote', q, 7, `<tr><td>V${q.version}</td><td class="num">${fd(q.qdate)}</td><td class="r num">${inr(q.amount)}</td><td>${q.approved_by ? esc(q.approved_by) : '<span class="pill p-pending">pending</span>'}</td><td class="sub">${esc(q.notes || '')}</td><td>${fileChips(p.files.quote[q.id], isAdmin())}${upBtn('quote', q.id, 'Add')}</td><td class="r">${acts('quote', q.id)}</td></tr>`)).join('')}</table></div>` : '<div class="sub">No quote sent yet.</div>'}
-  <form class="inset" data-add="quote" style="margin-top:10px"><div class="grid g3"><label class="f">Date<input type="date" name="qdate" value="${B.today}" required></label><label class="f">Amount (₹) *<input type="number" name="amount" required></label><label class="f">Approved by (Zest)<input name="approved_by"></label><label class="f">What changed<input name="notes"></label></div>
-   <div class="row" style="margin-top:8px"><label class="up">⬆ Attach quote PDF<input type="file" name="file" multiple accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"></label><button class="btn ghost sm">+ Add quote version</button></div></form>`; };
+  ${isAdmin() ? `<details class="inset" style="margin-top:10px"><summary class="sub"><b>Admin: record a quote directly</b> (skips approval)</summary><form data-add="quote" style="margin-top:10px"><div class="grid g3"><label class="f">Date<input type="date" name="qdate" value="${B.today}" required></label><label class="f">Amount (₹) *<input type="number" name="amount" required></label><label class="f">Approved by (Zest)<input name="approved_by"></label><label class="f">What changed<input name="notes"></label></div>
+   <div class="row" style="margin-top:8px"><label class="up">⬆ Attach quote PDF<input type="file" name="file" multiple accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"></label><button class="btn ghost sm">+ Add quote version</button></div></form></details>` : ''}`; };
 // Same maths as the server (lib/calc.php), used to update totals while typing
 function calcBill(p, over = {}) {
   const v = k => (k in over ? over[k] : p[k]);
@@ -456,7 +460,7 @@ async function loadFull(id) {
   const box = document.querySelector(`[data-full="${id}"]`);
   try {
     const { client: c } = await api('client_full', { id });
-    const tag = { 'Payment in': 'p-ok', 'Vendor paid': 'p-quoted', 'Loss': 'p-bad', 'Expense': 'p-off', 'Do not quote': 'p-bad', 'Follow-up': 'p-enquiry' };
+    const tag = { 'Payment in': 'p-ok', 'Vendor paid': 'p-quoted', 'Loss': 'p-bad', 'Expense': 'p-off', 'Do not quote': 'p-bad', 'Follow-up': 'p-enquiry', 'Approval': 'p-pending', 'Approved': 'p-ok', 'Rejected': 'p-bad', 'Sent to customer': 'p-received' };
     box.innerHTML = `<div class="grid" style="margin-top:14px">
      <div class="inset"><h3 style="margin-bottom:6px">Client</h3><div>${esc(c.person || '—')}${c.designation ? ' · ' + esc(c.designation) : ''}</div><div class="sub">${esc(c.email || '')} ${esc(c.phone || '')}</div><div class="sub">${esc(c.location || '')}</div>${c.gst_no ? `<div class="sub">GSTIN ${esc(c.gst_no)}</div>` : ''}
       <div class="sub" style="margin-top:6px">Handled by <b>${esc(c.owner)}</b> · added ${fd(c.created_at)} by ${esc(c.created_by_name)}</div>
@@ -664,6 +668,68 @@ routes.jobs = async () => {
   $('#jobsf').onsubmit = e => { e.preventDefault(); C.jobsf = Object.fromEntries(new FormData(e.target)); refresh(); };
 };
 
+// ---------- APPROVALS (design + quote) ----------
+const STAGE = { pending: ['p-pending', 'waiting approval'], approved: ['p-ok', 'approved · to send'], rejected: ['p-bad', 'rejected'], sent: ['p-received', 'sent to customer'] };
+const stageOf = a => a.sent_on ? 'sent' : a.status;
+const stagePill = a => { const [c, l] = STAGE[stageOf(a)]; return `<span class="pill ${c}">${l}</span>`; };
+const dt = v => v ? `${fd(v)} <span class="sub">${String(v).slice(11, 16)}</span>` : '—';
+// one version's controls: approve/reject (admin), withdraw (requester), mark sent (sales/admin)
+function apprActions(a) {
+  const st = stageOf(a), mine = +a.requested_by === +B.me.id;
+  if (st === 'pending') return `${isAdmin() ? `<div class="row" style="flex-wrap:nowrap;gap:6px"><input data-anote="${a.id}" placeholder="Note (needed to reject)" style="min-width:160px">
+      <button class="btn sm" data-adec="approved:${a.id}">Approve</button><button class="btn sm danger" data-adec="rejected:${a.id}">Reject</button></div>` : ''}
+    ${mine || isAdmin() ? `<div class="row" style="margin-top:4px">${upBtn('appr', a.id, 'Add file')}<button class="btn link" data-acancel="${a.id}">Withdraw</button></div>` : ''}`;
+  if (st === 'approved' && (B.records || isAdmin())) return `<div class="row" style="flex-wrap:nowrap;gap:6px"><input type="date" data-sentdate="${a.id}" value="${B.today}" aria-label="Date sent to customer" style="max-width:150px"><button class="btn sm" data-asent="${a.id}">Mark sent to customer</button></div>`;
+  return '';
+}
+function apprTable(list, showAmount) {
+  return `<div class="tw"><table><tr><th>Ver.</th><th>Sent for approval</th>${showAmount ? '<th class="r">Amount</th>' : ''}<th>Files</th><th>Sales note</th><th>Admin decision</th><th>Sent to customer</th><th>Status</th><th></th></tr>
+  ${list.map(a => `<tr><td><b>V${a.version}</b></td><td class="num">${dt(a.requested_at)}<div class="sub">${esc(a.requested_by_name || '')}</div></td>${showAmount ? `<td class="r num">${inr(a.amount)}</td>` : ''}
+   <td>${fileChips(a.files, a.status === 'pending' && (isAdmin() || +a.requested_by === +B.me.id))}</td><td class="sub">${esc(a.note || '')}</td>
+   <td>${a.decided_at ? `<span class="num">${dt(a.decided_at)}</span><div class="sub">${esc(a.decided_by)}${a.admin_note ? ' — ' + esc(a.admin_note) : ''}</div>` : '—'}</td>
+   <td>${a.sent_on ? `<span class="num">${fd(a.sent_on)}</span><div class="sub">${esc(a.sent_by)}</div>` : '—'}</td><td>${stagePill(a)}</td><td>${apprActions(a)}</td></tr>`).join('')}</table></div>`;
+}
+function apprPanel(p, kind) {
+  const list = p.approvals.filter(a => a.kind === kind), q = kind === 'quote';
+  const pend = list.find(a => a.status === 'pending');
+  const reuse = q ? [] : [...p.files.final, ...p.files.wd];
+  return `<div class="inset" style="margin-bottom:16px"><h3 style="margin-bottom:6px">${q ? 'Quote approvals' : 'Design approvals'}</h3>
+   <p class="sub" style="margin-top:0">Every ${q ? 'quote' : 'design'} goes to admin for approval before it is sent to the customer. Each new version is numbered V1, V2, V3…</p>
+   ${list.length ? apprTable(list, q) : `<div class="sub">No ${q ? 'quote' : 'design'} sent for approval yet.</div>`}
+   ${B.records ? `<form data-areq="${kind}" style="margin-top:12px"><b class="sub">Send V${list.length + 1} for approval</b>${pend ? ` <span class="sub">· V${pend.version} is still waiting</span>` : ''}
+    <div class="grid g3" style="margin-top:6px">${q ? `<label class="f">Quote amount (₹) *<input type="number" step="any" name="amount" required value="${num(p.agreed || p.offered || '')}"></label>` : ''}
+     <label class="f wide">Note for admin <span class="sub" style="font-weight:400">(what changed in this version)</span><input name="note"></label></div>
+    ${reuse.length ? `<div class="row" style="margin-top:8px"><span class="sub">Use designer's file:</span>${reuse.map(f => `<label class="row" style="gap:4px"><input type="checkbox" name="reuse" value="${f.id}">${esc(f.orig_name)}</label>`).join('')}</div>` : ''}
+    <div class="row" style="margin-top:8px"><label class="up">⬆ ${q ? 'Attach quote (PDF)' : 'Attach design file'}<input type="file" name="file" multiple accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx,.pptx"></label><button class="btn sm">Send for approval</button></div></form>` : ''}</div>`;
+}
+
+routes.saleslog = async () => {
+  const f = C.slog || (C.slog = { status: 'pending', kind: '', user_id: '', q: '', from: '', to: '' });
+  const d = await api('sales_log', f);
+  B.pending_approvals = d.counts.pending; renderNav('saleslog');
+  const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
+  const tabs = [['pending', 'Waiting approval', d.counts.pending], ['approved', 'Approved · to send', d.counts.approved], ['rejected', 'Rejected', d.counts.rejected], ['sent', 'Sent to customer', d.counts.sent], ['all', 'All', '']];
+  const sales = d.people;
+  const ftag = { 'Sent for approval': 'p-pending', 'Approved': 'p-ok', 'Rejected': 'p-bad', 'Sent to customer': 'p-received', 'Client added': 'p-enquiry', 'Enquiry opened': 'p-off' };
+  view().innerHTML = `
+  <div class="head"><div><h1>Sales log</h1><p>Designs and quotes sent by sales for approval, every version with dates, and what each sales person is doing.</p></div><a class="btn" href="export_sales.php${qs ? '?' + qs : ''}">⬇ Export to Excel</a></div>
+  <div class="tabs" style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:0 8px">${tabs.map(([k, l, n]) => `<a href="#saleslog" data-slt="${k}" class="${f.status === k ? 'on' : ''}">${l}${n ? ` <span class="badge" style="${k === 'pending' ? '' : 'background:var(--navy-soft);color:var(--navy)'}">${n}</span>` : ''}</a>`).join('')}</div>
+  <form class="panel row" id="slogf" style="align-items:flex-end">
+   <label class="f" style="flex:1;min-width:180px">Search client / expo<input name="q" value="${esc(f.q)}"></label>
+   <label class="f">Type<select name="kind"><option value="">Design & quote</option><option value="design" ${f.kind === 'design' ? 'selected' : ''}>Design</option><option value="quote" ${f.kind === 'quote' ? 'selected' : ''}>Quote</option></select></label>
+   <label class="f">Sales person<select name="user_id"><option value="">Everyone</option>${sales.map(u => `<option value="${u.id}" ${+f.user_id === +u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>
+   <label class="f">Requested from<input type="date" name="from" value="${f.from}"></label><label class="f">to<input type="date" name="to" value="${f.to}"></label><input type="hidden" name="status" value="${f.status}">
+   <button class="btn ghost">Apply</button></form>
+  <div class="log">${d.rows.length ? d.rows.map(a => `<details ${f.status === 'pending' ? 'open' : ''}><summary><b>${esc(a.company)}</b><span class="sub">${esc(a.expo)}</span><span class="pill ${a.kind === 'quote' ? 'p-enquiry' : 'p-off'}">${a.kind} V${a.version}</span>${a.amount ? `<span class="num">${inr(a.amount)}</span>` : ''}
+      <span style="margin-left:auto" class="row"><span class="sub">${esc(a.requested_by_name)} · ${fd(a.requested_at)} ${String(a.requested_at).slice(11, 16)}</span>${stagePill(a)}</span></summary>
+     <div class="in"><div class="row" style="margin-bottom:8px"><a class="btn ghost sm" href="#project-${a.project_id}-${a.kind === 'quote' ? 'order' : 'design'}">Open order</a><span class="sub">All ${a.kind} versions for this order:</span></div>${apprTable(a.versions, a.kind === 'quote')}</div></details>`).join('')
+    : blank(f.status === 'pending' ? 'Nothing waiting for approval.' : 'Nothing in this view.')}</div>
+  ${sales.length ? `<div class="panel"><h2>Sales team</h2><div class="tw"><table><tr><th>Sales person</th><th class="r">Clients</th><th class="r">Added this month</th><th class="r">Orders</th><th class="r">Won</th><th class="r">Business</th><th class="r">Designs sent</th><th class="r">Quotes sent</th><th class="r">Waiting</th><th class="r">To send</th><th class="r">Rejected</th></tr>
+   ${sales.map(u => `<tr><td><b>${esc(u.name)}</b><div class="sub">${esc(u.dept)}</div></td><td class="r num">${u.clients}</td><td class="r num">${u.clients_month}</td><td class="r num">${u.orders}</td><td class="r num">${u.won}</td><td class="r num">${inr(u.business)}</td><td class="r num">${u.designs}</td><td class="r num">${u.quotes}</td><td class="r num">${u.pending || ''}</td><td class="r num">${u.to_send || ''}</td><td class="r num">${u.rejected || ''}</td></tr>`).join('')}</table></div></div>` : ''}
+  <div class="panel"><h2>Recent sales activity</h2>${d.feed.length ? `<div class="tw"><table>${d.feed.map(x => `<tr><td class="num" style="white-space:nowrap">${fd(x.at)} <span class="sub">${String(x.at).slice(11, 16)}</span></td><td><span class="pill ${ftag[x.type] || 'p-off'}">${esc(x.type)}</span></td><td><b>${esc(x.who || '—')}</b></td><td>${esc(x.text)}</td></tr>`).join('')}</table></div>` : '<div class="empty">No activity yet.</div>'}</div>`;
+  $('#slogf').onsubmit = e => { e.preventDefault(); C.slog = Object.fromEntries(new FormData(e.target)); refresh(); };
+};
+
 // ---------- TEAM ----------
 routes.team = async () => {
   const d = await api('users'); const ed = C.editUser ? d.users.find(u => +u.id === +C.editUser) : null;
@@ -758,11 +824,17 @@ routes.account = async () => {
 
 // ---------- EVENTS ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
+  const t = e.target.closest('[data-adec],[data-acancel],[data-asent],[data-slt],[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
   if (!t) return;
   const ds = t.dataset;
   try {
     if (ds.go) { if (e.target.closest('a,button,input,select,label')) return; location.hash = '#' + ds.go; return; }
+    if (ds.slt) { e.preventDefault(); C.slog = { ...(C.slog || {}), status: ds.slt }; return refresh(); }
+    if (ds.adec) { const [dec, id] = ds.adec.split(':'); const note = (document.querySelector(`[data-anote="${id}"]`) || {}).value || '';
+      if (dec === 'rejected' && !note.trim()) { toast('Write what needs to change in the note box, then click Reject', true); const n = document.querySelector(`[data-anote="${id}"]`); if (n) n.focus(); return; }
+      await act(() => api('appr_decide', { id, decision: dec, note }), dec === 'approved' ? 'Approved' : 'Rejected — sales will see your note'); await reboot(); return refresh(); }
+    if (ds.acancel) { if (!confirm('Withdraw this approval request?')) return; await act(() => api('appr_cancel', { id: ds.acancel }), 'Withdrawn'); return refresh(); }
+    if (ds.asent) { const on = (document.querySelector(`[data-sentdate="${ds.asent}"]`) || {}).value; await act(() => api('appr_sent', { id: ds.asent, sent_on: on }), 'Marked as sent to customer'); return refresh(); }
     if (ds.leditOpen) { C.leditId = +ds.leditOpen; await refresh(); const i = document.querySelector('form[data-ledit] [name=company]'); if (i) i.focus(); return; }
     if (ds.lcancel) { C.leditId = null; return refresh(); }
     if (ds.ldel) { if (!confirm('Delete this entry?')) return; await act(() => api('lead_del', { id: ds.ldel }), 'Deleted'); return refresh(); }
@@ -885,6 +957,17 @@ document.addEventListener('change', async e => {
 
 document.addEventListener('submit', async e => {
   const f = e.target;
+  if (f.dataset.areq && C.project) {
+    e.preventDefault(); const fdta = new FormData(f); const files = fdta.getAll('file').filter(x => x && x.size); const reuse = fdta.getAll('reuse');
+    if (!files.length && !reuse.length) return toast('Attach the ' + (f.dataset.areq === 'quote' ? 'quote' : 'design') + ' file first', true);
+    const btn = f.querySelector('button:not([type=button])'); btn.disabled = true;
+    try {
+      const r = await act(() => api('appr_request', { project_id: C.project.id, kind: f.dataset.areq, amount: fdta.get('amount'), note: fdta.get('note'), reuse_file_ids: reuse }));
+      if (files.length) await act(() => uploadAll('appr', r.id, files));
+      toast(`V${r.version} sent to admin for approval`); refresh();
+    } catch { btn.disabled = false; }
+    return;
+  }
   if (f.id === 'lead-add') {
     e.preventDefault(); const btn = f.querySelector('button'); btn.disabled = true;
     const r = await act(() => api('lead_add', { expo_id: C.lexpo.expo.id, ...Object.fromEntries(new FormData(f)) }), 'Added').catch(() => null);
