@@ -133,3 +133,8 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--navy-soft)}
 }
 @media print{.top,nav{display:none}.shell{display:block}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+/* accounts reports */
+table.rep tr.rk-h td{background:var(--navy-soft);font-weight:700;color:var(--navy)}
+table.rep tr.rk-t td{font-weight:700;border-top:2px solid var(--line)}
+table.rep tr.rk-bad td{color:var(--bad);font-weight:700}
+table.rep tr.rk-good td{color:var(--ok);font-weight:700}

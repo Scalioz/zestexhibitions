@@ -66,6 +66,7 @@ async function route() {
   C.editing = null; C.leditId = null; C.lxu = '';
   if (isAdmin() && ({ leads: 'leadlog', mydesign: 'jobs', myops: 'jobs' })[r.name]) { location.hash = '#' + ({ leads: 'leadlog', mydesign: 'jobs', myops: 'jobs' })[r.name]; return; }
   if (!isAdmin() && MODULE_ONLY[r.name] && !MODULE_ONLY[r.name].includes(B.module)) { location.hash = '#home'; return; }
+  if (ACC_ROUTES[r.name] && !B.acc) { location.hash = '#home'; return; }
   renderNav(r.name);
   const fn = routes[r.name] || routes.home;
   if ((r.name in ADMIN_ONLY) && !isAdmin()) { location.hash = '#home'; return; }
@@ -75,23 +76,26 @@ async function route() {
 }
 const ADMIN_ONLY = { clientlog: 1, saleslog: 1, leadlog: 1, jobs: 1, reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
 const RECORDS_ONLY = { clients: 1, client: 1, project: 1, newclient: 1 };
-const MODULE_ONLY = { leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
+const ACC_ROUTES = { acc: 1, entry: 1, jv: 1, invoices: 1, invnew: 1, inv: 1, claims: 1, topost: 1, books: 1, coa: 1, accset: 1 };
+const MODULE_ONLY = { myexp: ['records', 'ops'],  leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
 async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); window.scrollTo(0, y); }
 
 function renderNav(cur) {
-  const map = { client: 'clients', project: 'clients', lexpo: isAdmin() ? 'leadlog' : 'leads', opsjob: isAdmin() ? 'jobs' : 'myops' };
+  const map = { jv: 'books', inv: 'invoices', invnew: 'invoices', acc: isAdmin() ? 'acc' : 'home', client: 'clients', project: 'clients', lexpo: isAdmin() ? 'leadlog' : 'leads', opsjob: isAdmin() ? 'jobs' : 'myops' };
   const on = map[cur] || cur;
   const L = (k, l, b) => `<a href="#${k}" class="${on === k ? 'on' : ''}">${l}${b ? `<span class="badge">${b}</span>` : ''}</a>`;
   $('#nav').innerHTML = isAdmin()
     ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('saleslog', 'Sales log', B.pending_approvals || '')}${L('leadlog', 'Expo data log')}${L('jobs', 'Design & production')}${L('reportlog', 'Daily reports', B.flags || '')}
        <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('dnq', 'Do-not-quote list')}
+       <div class="sec">Accounts</div>${L('acc', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}
        <div class="sec">Admin</div>${L('team', 'Team')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
-    : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('report', 'Daily report', B.flags || '')}`
-    : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') : ''}${L('report', 'Daily report', B.flags || '')}`;
+    : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('report', 'Daily report', B.flags || '')}`
+    : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('report', 'Daily report', B.flags || '')}`
+    : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('report', 'Daily report', B.flags || '')}`;
 }
 
 // ---------- HOME ----------
-routes.home = async () => isAdmin() ? adminHome() : empHome();
+routes.home = async () => isAdmin() ? adminHome() : B.module === 'accounts' ? routes.acc() : empHome();
 
 async function empHome() {
   const d = await api('home'); B.flags = d.missing.length; renderNav('home');
@@ -112,7 +116,7 @@ async function empHome() {
     ${!doneToday && d.today_working ? `<div class="alert warn"><b>${work ? 'Nothing logged today yet' : "Today's report is pending"}</b><span class="m">${work ? `Add today's work in <a href="${go[0]}">${go[1].replace('Open ', '')}</a> or submit a <a href="#report">daily report</a>.` : 'Submit before you leave for the day. <a href="#report">Open daily report →</a>'}</span></div>` : ''}
     ${doneToday ? `<div class="alert" style="background:var(--ok-bg);color:var(--ok)"><b>${d.today_done ? "Today's report is submitted" : "Today's work is logged"}</b></div>` : ''}
     <div class="kpis">${kpi}<div class="kpi"><span>Missed days</span><b>${d.missing.length}</b></div></div>`;
-    return;
+    claimAlert(); return;
   }
   view().innerHTML = `
   <div class="welcome">${PLAN}<div><h1>${greet}, ${esc(first)}</h1><p>${longDate(B.today)} · ${esc(B.me.department)}</p></div>
@@ -127,7 +131,9 @@ async function empHome() {
     <div class="kpi hl"><span>Balance to collect</span><b>${inr(d.due)}</b></div>
   </div>
   <div class="panel"><h2>My active orders & enquiries</h2>${projTable(d.projects)}</div>`;
+  claimAlert();
 }
+function claimAlert() { if (!B.claims_attention) return; const w = $('.welcome'); if (w) w.insertAdjacentHTML('afterend', `<div class="alert warn"><b>${B.claims_attention} expense claim${B.claims_attention > 1 ? 's need' : ' needs'} your attention</b><span class="m">Accounts rejected it or asked for more details. <a href="#myexp">Open my expenses →</a></span></div>`); }
 
 async function adminHome(r) {
   const f = C.dash || (C.dash = { from: '', to: '' });
@@ -730,6 +736,234 @@ routes.saleslog = async () => {
   $('#slogf').onsubmit = e => { e.preventDefault(); C.slog = Object.fromEntries(new FormData(e.target)); refresh(); };
 };
 
+// ================= ACCOUNTS =================
+const STATES = ['Andhra Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Odisha', 'Punjab', 'Rajasthan', 'Tamil Nadu', 'Telangana', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal', 'Chandigarh', 'Puducherry'];
+const inr2 = n => n === '' || n === null || n === undefined ? '' : inr(Math.round(+n * 100) / 100).replace(/^(−?₹[\d,]+)$/, '$1.00');
+async function accMeta(force) { if (!C.am || force) C.am = await api('acc_meta'); return C.am; }
+const accOpts = (list, sel, blankLabel) => (blankLabel ? `<option value="">${blankLabel}</option>` : '') + list.map(a => `<option value="${a.id}" ${+sel === +a.id ? 'selected' : ''}>${esc((a.code ? a.code + ' · ' : '') + a.name)}</option>`).join('');
+const moneyOf = m => m.accounts.filter(a => ['bank', 'cash', 'petty'].includes(a.sub));
+const expOf = m => m.accounts.filter(a => a.type === 'expense');
+const projOpts = (m, sel) => '<option value="">— none —</option>' + m.projects.map(p => `<option value="${p.id}" data-client="${p.client_id}" ${+sel === +p.id ? 'selected' : ''}>${esc(p.company + ' · ' + p.expo)}</option>`).join('');
+
+routes.acc = async () => {
+  const d = await api('acc_home'); B.claims_waiting = d.claims_waiting; renderNav('acc');
+  const vt = { Sales: 'p-ok', Receipt: 'p-ok', Payment: 'p-quoted', Expense: 'p-quoted', Claim: 'p-quoted', Salary: 'p-enquiry', Tax: 'p-bad', Contra: 'p-off', Journal: 'p-off', Reversal: 'p-bad' };
+  view().innerHTML = `
+  <div class="head"><div><h1>Accounts</h1><p>${longDate(B.today)}</p></div><div class="row"><a class="btn ghost" href="#invnew-proforma">+ Proforma</a><a class="btn ghost" href="#invnew-tax">+ Tax invoice</a><a class="btn" href="#entry">+ New entry</a></div></div>
+  ${d.claims_waiting ? `<div class="alert warn"><b>${d.claims_waiting} expense claim${d.claims_waiting > 1 ? 's' : ''} waiting for approval</b><div><a class="btn sm" href="#claims">Review claims</a></div></div>` : ''}
+  ${d.to_post ? `<div class="alert warn"><b>${d.to_post} payment${d.to_post > 1 ? 's' : ''} / expense${d.to_post > 1 ? 's' : ''} recorded in orders are not in the books yet</b><div><a class="btn sm" href="#topost">Post them</a></div></div>` : ''}
+  <div class="kpis">${d.money.map(a => `<div class="kpi ${a.sub === 'bank' ? 'hl' : ''}"><span>${esc(a.name)}</span><b>${inr2(a.balance)}</b></div>`).join('')}
+   <div class="kpi"><span>Receivable from clients</span><b>${inr2(d.receivable)}</b></div><div class="kpi"><span>Payable to vendors</span><b>${inr2(d.payable)}</b></div>
+   <div class="kpi"><span>Payable to staff</span><b>${inr2(d.staff)}</b><small>expense reimbursements</small></div>
+   <div class="kpi"><span>GST payable</span><b>${inr2(d.gst_net)}</b><small>TDS payable ${inr2(d.tds)}</small></div>
+   <div class="kpi"><span>This month</span><b>${inr2(d.income_month - d.expense_month)}</b><small>income ${inr2(d.income_month)} · expenses ${inr2(d.expense_month)}</small></div></div>
+  <div class="panel"><div class="ph"><h2>Latest entries</h2><a class="btn ghost sm" href="#books">Books & reports</a></div>${d.recent.length ? `<div class="tw"><table><tr><th>Date</th><th>Voucher</th><th>Type</th><th>Narration</th><th class="r">Amount</th></tr>
+   ${d.recent.map(j => `<tr class="click" data-go="jv-${j.id}"><td class="num">${fd(j.jdate)}</td><td class="num">${esc(j.vno)}</td><td><span class="pill ${vt[j.vtype] || 'p-off'}">${esc(j.vtype)}</span>${j.reversed_by ? ' <span class="sub">reversed</span>' : ''}</td><td>${esc(j.narration)}</td><td class="r num">${inr2(j.amount)}</td></tr>`).join('')}</table></div>` : blank('No entries yet. Start with <a href="#coa">opening balances</a>, then <a href="#entry">add entries</a>.')}</div>`;
+};
+
+// ---------- new entry ----------
+const ENTRY_KINDS = [['expense', 'Expense'], ['vendor_pay', 'Vendor payment'], ['receipt', 'Receipt'], ['salary', 'Salary'], ['reimburse', 'Staff reimbursement'], ['contra', 'Bank / cash transfer'], ['tax_gst', 'GST payment'], ['tax_tds', 'TDS payment'], ['journal', 'Journal']];
+routes.entry = async ({ tab }) => {
+  const m = await accMeta(); const k = ENTRY_KINDS.some(x => x[0] === tab) ? tab : (C.ek || 'expense'); C.ek = k;
+  const money = moneyOf(m), D = `<label class="f">Date *<input type="date" name="date" required value="${B.today}"></label>`;
+  const PAY = (l = 'Paid from *') => `<label class="f">${l}<select name="paid_from" required>${accOpts(money)}</select></label>`;
+  const NAR = `<label class="f wide">Narration<input name="narration" placeholder="What is this for?"></label>`;
+  const AMT = (l = 'Amount (₹) *') => `<label class="f">${l}<input type="number" step="any" name="amount" required></label>`;
+  const ORD = `<label class="f">Order (optional)<select name="project_id">${projOpts(m)}</select></label>`;
+  const staffSel = `<label class="f">Employee *<select name="user_id" required>${m.staff.map(u => `<option value="${u.id}">${esc(u.name)} · ${esc(u.department)}</option>`).join('')}</select></label>`;
+  const F = {
+    expense: `${D}<label class="f">Expense head *<select name="account_id" required>${accOpts(expOf(m))}</select></label>${AMT('Amount before GST (₹) *')}<label class="f">GST amount (₹)<input type="number" step="any" name="gst"></label>
+      <label class="f">GST type<select name="gst_mode"><option value="cgst_sgst">CGST + SGST</option><option value="igst">IGST</option></select></label><label class="row f" style="align-self:end;gap:6px"><input type="checkbox" name="gst_credit" value="1" checked> Claim GST input credit</label>
+      <label class="f">Paid from<select name="paid_from">${accOpts(money)}<option value="">Not paid yet — owed to vendor</option></select></label><label class="f">Vendor (if not paid yet)<select name="vendor_id"><option value="">—</option>${m.vendors.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('')}</select></label>${ORD}${NAR}`,
+    vendor_pay: `${D}<label class="f">Vendor *<select name="vendor_id" required>${m.vendors.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('')}</select></label>${ORD}${AMT('Amount paid (₹) *')}<label class="f">TDS deducted (₹)<input type="number" step="any" name="tds"></label>${PAY()}
+      <label class="f">Expense head<select name="account_id">${accOpts(expOf(m), m.accounts.find(a => a.sub === 'fab')?.id)}</select></label><label class="f">Reference / UTR<input name="reference"></label>${NAR}`,
+    receipt: `${D}<label class="f">Order (optional)<select name="project_id" id="rcp-proj">${projOpts(m)}</select></label><label class="f">Client<select name="client_id" id="rcp-client"><option value="">— other income —</option>${m.clients.map(c => `<option value="${c.id}">${esc(c.company)}</option>`).join('')}</select></label>
+      <label class="f">Income head (if no client)<select name="account_id">${accOpts(m.accounts.filter(a => a.type === 'income'))}</select></label>${AMT('Amount received (₹) *')}<label class="f">TDS deducted by client (₹)<input type="number" step="any" name="tds"></label>${PAY('Received into *')}<label class="f">Reference / UTR<input name="reference"></label>${NAR}`,
+    salary: `${D.replace('Date *', 'Paid on *')}${staffSel}<label class="f">Salary month *<input type="month" name="month" required value="${B.today.slice(0, 7)}"></label><label class="f">Gross salary (₹) *<input type="number" step="any" name="gross" required data-sal></label>
+      <label class="f">Deductions (₹) <span class="sub" style="font-weight:400">PF / ESI / advance</span><input type="number" step="any" name="deductions" data-sal></label><label class="f">Deduction details<input name="deduction_note" placeholder="e.g. PF 1,800"></label><label class="f">TDS (₹)<input type="number" step="any" name="tds" data-sal></label>
+      <label class="f">Net pay<input id="sal-net" readonly tabindex="-1"></label>${PAY()}${NAR}`,
+    reimburse: `${D}${staffSel}${AMT()}${PAY()}${NAR}`,
+    contra: `${D}<label class="f">From *<select name="from_id" required>${accOpts(money)}</select></label><label class="f">To *<select name="to_id" required>${accOpts(money, money[1]?.id)}</select></label>${AMT()}${NAR}`,
+    tax_gst: `${D}<label class="f">Period<input name="period" placeholder="e.g. Oct 2026"></label>${AMT('GST paid in cash (₹)')}${PAY()}${NAR}<div class="sub wide">Input credit is set off against output GST automatically; enter only the amount actually paid to the government. See <a href="#books-gst">GST & TDS report</a> for the payable amount.</div>`,
+    tax_tds: `${D}<label class="f">Period<input name="period" placeholder="e.g. Oct 2026"></label>${AMT('TDS deposited (₹) *')}${PAY()}${NAR}`,
+    journal: `${D}${NAR}<div class="wide"><div class="tw"><table id="jl"><tr><th>Account</th><th class="r">Debit (₹)</th><th class="r">Credit (₹)</th><th>Memo</th></tr>
+      ${[0, 1].map(() => `<tr><td><select data-jl="account_id">${accOpts(m.accounts, '', 'Pick account')}</select></td><td><input type="number" step="any" data-jl="dr"></td><td><input type="number" step="any" data-jl="cr"></td><td><input data-jl="memo"></td></tr>`).join('')}</table></div>
+      <div class="row" style="margin-top:6px"><button type="button" class="btn ghost sm" id="jl-add">+ Add line</button><span class="sub" id="jl-tot"></span></div></div>`,
+  };
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#acc">← Accounts</a></div><h1>New entry</h1><p>Each entry is posted to the books with a voucher number.</p></div></div>
+  <div class="panel" style="padding-top:4px"><div class="tabs">${ENTRY_KINDS.map(([x, l]) => `<a href="#entry-0-${x}" class="${k === x ? 'on' : ''}">${l}</a>`).join('')}</div>
+   <form id="accentry" data-kind="${k}" style="padding-top:16px"><div class="grid g3">${F[k]}</div>
+    <div class="row" style="margin-top:12px"><label class="up">⬆ Attach bill / proof<input type="file" name="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.xlsx,.xls,.csv,.doc,.docx"></label><button class="btn">Post entry</button></div></form></div>`;
+};
+
+routes.jv = async ({ id }) => {
+  const { journal: j } = await api('acc_journal', { id });
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#books">← Books</a></div><h1>${esc(j.vno)} · ${esc(j.vtype)}</h1><p>${fd(j.jdate)} · entered by ${esc(j.by)} on ${fd(j.created_at)}</p></div>
+   ${j.reversed_by ? `<a class="pill p-bad" href="#jv-${j.reversed_by}">reversed — open reversal</a>` : j.vtype !== 'Reversal' && !['invoice', 'claim'].includes(j.ref_type) ? '<button class="btn ghost" id="jv-rev-open">Reverse this entry</button>' : ''}</div>
+  <div class="panel"><p style="margin-top:0">${esc(j.narration)}</p><div class="tw"><table><tr><th>Account</th><th class="r">Debit (₹)</th><th class="r">Credit (₹)</th><th>Memo</th></tr>
+   ${j.lines.map(l => `<tr><td>${esc(l.name)}</td><td class="r num">${+l.dr ? inr2(l.dr) : ''}</td><td class="r num">${+l.cr ? inr2(l.cr) : ''}</td><td class="sub">${esc(l.memo || '')}</td></tr>`).join('')}</table></div>
+   <div class="row" style="margin-top:12px"><span class="sub">Bills / proof:</span>${fileChips(j.files)}${upBtn('voucher', j.id, 'Attach')}</div>
+   <form id="jv-rev" class="inset" hidden style="margin-top:12px"><div class="grid g3"><label class="f">Reversal date<input type="date" name="date" value="${B.today}"></label><label class="f wide">Reason *<input name="reason" required></label></div><div style="margin-top:8px"><button class="btn danger sm">Post reversal</button></div></form></div>`;
+  C.jv = j;
+};
+
+// ---------- invoices ----------
+routes.invoices = async () => {
+  const f = C.invf || (C.invf = { kind: '', status: '', q: '' });
+  const d = await api('inv_list', f);
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#acc">← Accounts</a></div><h1>Invoices</h1><p>Proforma invoices don't touch the books. Issuing a tax invoice posts the sale and GST.</p></div><div class="row"><a class="btn ghost" href="#invnew-proforma">+ Proforma</a><a class="btn" href="#invnew-tax">+ Tax invoice</a></div></div>
+  <form class="panel row" id="invf" style="align-items:flex-end"><label class="f" style="flex:1">Search client / number<input name="q" value="${esc(f.q)}"></label><label class="f">Kind<select name="kind"><option value="">All</option><option value="proforma" ${f.kind === 'proforma' ? 'selected' : ''}>Proforma</option><option value="tax" ${f.kind === 'tax' ? 'selected' : ''}>Tax invoice</option></select></label>
+   <label class="f">Status<select name="status"><option value="">All</option>${['draft', 'issued', 'cancelled'].map(s => `<option value="${s}" ${f.status === s ? 'selected' : ''}>${cap(s)}</option>`).join('')}</select></label><button class="btn ghost">Apply</button></form>
+  <div class="panel">${d.invoices.length ? `<div class="tw"><table><tr><th>Number</th><th>Kind</th><th>Date</th><th>Client · expo</th><th class="r">Taxable</th><th class="r">GST</th><th class="r">Total</th><th>Status</th><th></th></tr>
+   ${d.invoices.map(i => `<tr><td class="num"><b>${esc(i.inv_no || 'Draft')}</b></td><td>${i.kind === 'tax' ? 'Tax invoice' : 'Proforma'}</td><td class="num">${fd(i.inv_date)}</td><td>${esc(i.company)}<div class="sub">${esc(i.expo || '')}</div></td><td class="r num">${inr2(i.taxable)}</td><td class="r num">${inr2(i.gst)}</td><td class="r num"><b>${inr2(i.total)}</b></td>
+    <td><span class="pill ${i.status === 'issued' ? 'p-ok' : i.status === 'draft' ? 'p-pending' : 'p-bad'}">${i.status}</span></td>
+    <td class="r" style="white-space:nowrap"><a class="btn ghost sm" href="invoice.php?id=${i.id}" target="_blank" rel="noopener">View / print</a>${i.status === 'draft' ? `<a class="btn ghost sm" href="#inv-${i.id}">Edit</a><button class="btn sm" data-invissue="${i.id}">Issue</button>` : ''}${i.status === 'issued' && i.kind === 'proforma' ? `<button class="btn ghost sm" data-invconv="${i.id}">Make tax invoice</button>` : ''}${i.status !== 'cancelled' ? `<button class="btn link" data-invcancel="${i.id}" data-st="${i.status}">${i.status === 'draft' ? 'Delete' : 'Cancel'}</button>` : ''}</td></tr>`).join('')}</table></div>` : blank('No invoices yet.')}</div>`;
+  $('#invf').onsubmit = e => { e.preventDefault(); C.invf = Object.fromEntries(new FormData(e.target)); refresh(); };
+};
+routes.invnew = async () => routes.inv({ id: null, kind: location.hash.split('-')[1] || 'proforma' });
+routes.inv = async ({ id, kind }) => {
+  const m = await accMeta(true);
+  const i = id ? (await api('inv_get', { id })).invoice : { kind: kind === 'tax' ? 'tax' : 'proforma', inv_date: B.today, client_id: '', project_id: '', place_state: m.company.state || 'Delhi', gst_rate: 18, lines: [{ desc: '', sac: m.company.sac || '998596', qty: 1, rate: '', tax: 1 }], notes: '' };
+  if (i.status && i.status !== 'draft') { location.href = 'invoice.php?id=' + i.id; return; }
+  C.inv = i; drawInv();
+};
+function invCapture() { const f = $('#invform'); if (!f) return; const g = k => f.querySelector(`[name=${k}]`).value; Object.assign(C.inv, { inv_date: g('inv_date'), project_id: g('project_id'), client_id: g('client_id'), place_state: g('place_state'), gst_rate: g('gst_rate'), notes: g('notes'), lines: invLines() }); }
+function drawInv() {
+  const m = C.am, i = C.inv, id = i.id;
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#invoices">← Invoices</a></div><h1>${id ? 'Edit draft' : 'New'} ${i.kind === 'tax' ? 'tax invoice' : 'proforma invoice'}</h1><p>Number is given when you issue it.</p></div></div>
+  <form class="panel" id="invform"><div class="grid g3">
+   <label class="f">Date *<input type="date" name="inv_date" required value="${esc(i.inv_date)}"></label>
+   <label class="f">Order<select name="project_id" id="inv-proj">${projOpts(m, i.project_id)}</select></label>
+   <label class="f">Client *<select name="client_id" id="inv-client" required><option value="">Pick client</option>${m.clients.map(c => `<option value="${c.id}" ${+i.client_id === +c.id ? 'selected' : ''}>${esc(c.company)}</option>`).join('')}</select></label>
+   <label class="f">Place of supply (state) *<input name="place_state" list="states" required value="${esc(i.place_state)}"></label><datalist id="states">${STATES.map(x => `<option value="${x}">`).join('')}</datalist>
+   <label class="f">GST rate (%)<input type="number" step="any" name="gst_rate" value="${num(i.gst_rate)}" data-invcalc></label>
+   <div style="align-self:end"><button type="button" class="btn ghost sm" id="inv-fill">Fill lines from order</button></div></div>
+   <div class="tw" style="margin-top:14px"><table id="invlines"><tr><th>Description</th><th style="width:100px">SAC</th><th style="width:80px">Qty</th><th style="width:130px">Rate (₹)</th><th style="width:60px">GST</th><th class="r" style="width:130px">Amount</th><th></th></tr>
+    ${i.lines.map((l, k) => `<tr><td><input data-il="desc" value="${esc(l.desc)}"></td><td><input data-il="sac" value="${esc(l.sac || '')}"></td><td><input type="number" step="any" data-il="qty" value="${esc(l.qty)}" data-invcalc></td><td><input type="number" step="any" data-il="rate" value="${esc(l.rate)}" data-invcalc></td><td style="text-align:center"><input type="checkbox" data-il="tax" ${+l.tax || l.tax === undefined ? 'checked' : ''} data-invcalc></td><td class="r num" data-ilamt></td><td>${i.lines.length > 1 ? `<button type="button" class="btn link" data-ildel="${k}">✕</button>` : ''}</td></tr>`).join('')}</table></div>
+   <div class="row" style="margin-top:6px"><button type="button" class="btn ghost sm" id="inv-addline">+ Add line</button></div>
+   <div class="grid" style="margin-top:14px"><label class="f">Notes / terms on this invoice<textarea name="notes">${esc(i.notes || '')}</textarea></label><div class="inset" id="inv-tot"></div></div>
+   <div class="row" style="margin-top:12px"><button class="btn ghost" data-invsave="draft">Save draft</button><button class="btn" data-invsave="issue">Save & issue</button></div></form>`;
+  invCalc();
+}
+function invLines() { return [...document.querySelectorAll('#invlines tr')].slice(1).map(tr => { const g = k => tr.querySelector(`[data-il="${k}"]`); return { desc: g('desc').value, sac: g('sac').value, qty: g('qty').value, rate: g('rate').value, tax: g('tax').checked ? 1 : 0 }; }); }
+function invCalc() {
+  const box = $('#inv-tot'); if (!box) return;
+  const rate = +document.querySelector('#invform [name=gst_rate]').value || 0, st = (document.querySelector('#invform [name=place_state]').value || '').trim().toLowerCase();
+  const igst = st && st !== String((C.am?.company?.state) || '').trim().toLowerCase();
+  let tx = 0, non = 0; [...document.querySelectorAll('#invlines tr')].slice(1).forEach((tr, k) => { const l = invLines()[k]; const a = (+l.qty || 0) * (+l.rate || 0); tr.querySelector('[data-ilamt]').textContent = inr2(a); l.tax ? tx += a : non += a; });
+  const g = Math.round(tx * rate) / 100;
+  box.innerHTML = `<div class="sum"><div class="l"><span>Taxable value</span><span class="num">${inr2(tx)}</span></div>${non ? `<div class="l"><span>Without GST</span><span class="num">${inr2(non)}</span></div>` : ''}
+   ${igst ? `<div class="l"><span>IGST ${rate}%</span><span class="num">${inr2(g)}</span></div>` : `<div class="l"><span>CGST ${rate / 2}%</span><span class="num">${inr2(Math.round(g * 50) / 100)}</span></div><div class="l"><span>SGST ${rate / 2}%</span><span class="num">${inr2(g - Math.round(g * 50) / 100)}</span></div>`}
+   <div class="l tot big"><span>Grand total</span><span class="num">${inr2(tx + non + g)}</span></div><div class="sub">${igst ? 'Other state → IGST' : 'Same state as Zest → CGST + SGST'}</div></div>`;
+}
+
+// ---------- expense approvals (accounts) ----------
+const CLAIM_ST = { submitted: ['p-pending', 'waiting for accounts'], on_hold: ['p-quoted', 'more details needed'], approved: ['p-ok', 'approved'], rejected: ['p-bad', 'rejected'] };
+const claimPill = c => `<span class="pill ${CLAIM_ST[c.status][0]}">${CLAIM_ST[c.status][1]}</span>`;
+const claimThread = c => c.notes.filter(n => n.text).map(n => `<div class="sub" style="margin-top:4px"><b>${esc(n.by)}</b> · ${fd(n.at)} ${String(n.at).slice(11, 16)} · ${esc({ hold: 'asked for details', reply: 'replied', rejected: 'rejected', approved: 'approved', resubmitted: 'sent again' }[n.kind] || n.kind)}: ${esc(n.text)}</div>`).join('');
+routes.claims = async () => {
+  const f = C.clf || (C.clf = { status: 'submitted', q: '' });
+  const [d, m] = await Promise.all([api('acc_claims', f), accMeta()]); B.claims_waiting = d.counts.submitted; renderNav('claims');
+  const money = moneyOf(m);
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#acc">← Accounts</a></div><h1>Expense approvals</h1><p>Claims from sales and production. Approving posts the expense to the books.</p></div><a class="btn ghost" href="acc_export.php?r=claims&from=${m.company.books_from || ''}&to=${B.today}">⬇ Export claims</a></div>
+  <div class="tabs" style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:0 8px">${[['submitted', 'Waiting'], ['on_hold', 'On hold'], ['approved', 'Approved'], ['rejected', 'Rejected'], ['all', 'All']].map(([k, l]) => `<a href="#claims" data-clt="${k}" class="${f.status === k ? 'on' : ''}">${l}${d.counts[k] ? ` <span class="badge" style="${k === 'submitted' ? '' : 'background:var(--navy-soft);color:var(--navy)'}">${d.counts[k]}</span>` : ''}</a>`).join('')}</div>
+  ${d.claims.length ? d.claims.map(c => `<div class="panel"><div class="ph"><h3>${esc(c.particular)} <span class="sub">· ${esc(c.category || '')}</span></h3>${claimPill(c)}</div>
+    <div class="grid g3 sub"><div><b>Employee</b><br>${esc(c.user_name)} · ${esc(c.department)}</div><div><b>Date of expense</b><br>${fd(c.edate)}</div><div><b>Order</b><br>${c.expo ? esc(c.company + ' · ' + c.expo) : '—'}</div>
+     <div><b>Unit rate × qty</b><br>${inr2(c.rate)} × ${num(c.qty)} = ${inr2(c.total)}</div><div><b>GST</b><br>${inr2(c.gst)}</div><div><b>Grand total</b><br><span style="font-size:15px;color:var(--ink)"><b>${inr2(c.grand)}</b></span></div></div>
+    ${c.note ? `<p class="sub"><b>Note:</b> ${esc(c.note)}</p>` : ''}<div class="row" style="margin-top:8px"><span class="sub">Bill / proof:</span>${fileChips(c.files)}</div>${claimThread(c)}
+    ${['submitted', 'on_hold'].includes(c.status) ? `<form class="inset" data-cdec="${c.id}" style="margin-top:12px"><div class="grid g3">
+      <label class="f">Book under (expense head)<select name="account_id">${accOpts(expOf(m), d.cat_acc[c.category] || d.cat_acc.Other)}</select></label>
+      <label class="f">Pay / reimburse<select name="pay_from"><option value="staff">Owe to ${esc(c.user_name)} (reimburse later)</option>${money.map(a => `<option value="${a.id}">Already paid from ${esc(a.name)}</option>`).join('')}</select></label>
+      ${+c.gst ? `<label class="row f" style="align-self:end;gap:6px"><input type="checkbox" name="gst_credit" value="1"> Claim GST credit <select name="gst_mode" style="max-width:130px"><option value="cgst_sgst">CGST+SGST</option><option value="igst">IGST</option></select></label>` : ''}
+      <label class="f wide">Reason / note <span class="sub" style="font-weight:400">(needed to reject or hold)</span><input name="reason"></label></div>
+      <div class="row" style="margin-top:8px"><button class="btn sm" data-cact="approve">Approve & post</button><button class="btn ghost sm" data-cact="hold">Hold — ask for details</button><button class="btn danger sm" data-cact="reject">Reject</button></div></form>` : ''}
+    ${c.status === 'approved' && c.journal_id ? `<div class="sub" style="margin-top:8px">Posted: <a href="#jv-${c.journal_id}">open voucher</a> · approved by ${esc(c.decided_by)} on ${fd(c.decided_at)}</div>` : ''}</div>`).join('')
+  : `<div class="panel">${blank('Nothing here.')}</div>`}`;
+};
+
+// ---------- post CRM entries ----------
+routes.topost = async () => {
+  const [d, m] = await Promise.all([api('acc_inbox'), accMeta()]); const money = moneyOf(m);
+  const def = mode => (money.find(a => a.sub === (mode === 'Bank' || mode === 'UPI' || mode === 'Cheque' ? 'bank' : 'cash')) || money[0] || {}).id;
+  const row = (t, x, who, cat) => `<tr><td class="num">${fd(x.pdate || x.edate)}</td><td>${esc(x.company)}<div class="sub">${esc(x.expo)}</div></td><td>${esc(who)}</td><td class="r num">${inr2(x.amount)}</td><td>${esc(x.mode || x.category || '')}</td>
+    <td><select data-pm="${t}:${x.id}">${accOpts(money, def(x.mode))}</select></td><td>${cat ? `<select data-pa="${t}:${x.id}">${accOpts(expOf(m), cat)}</select>` : ''}</td>
+    <td class="r" style="white-space:nowrap"><button class="btn sm" data-post="${t}:${x.id}">Post</button><button class="btn link" data-postskip="${t}:${x.id}" title="Already entered in the books another way">Skip</button></td></tr>`;
+  const sec = (title, list, head, fn) => `<div class="panel"><h2>${title} <span class="sub">(${list.length})</span></h2>${list.length ? `<div class="tw"><table><tr><th>Date</th><th>Client · expo</th><th>${head}</th><th class="r">Amount</th><th>Mode</th><th>Bank / cash</th><th>Expense head</th><th></th></tr>${list.map(fn).join('')}</table></div>` : '<div class="sub">Nothing to post.</div>'}</div>`;
+  const fab = m.accounts.find(a => a.sub === 'fab')?.id, sub2 = { Flight: 'exp_travel', Train: 'exp_travel', Hotel: 'exp_hotel', Commute: 'exp_local', Food: 'exp_food', Courier: 'exp_courier' };
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#acc">← Accounts</a></div><h1>Post from orders</h1><p>Payments and expenses that sales recorded inside orders (from ${fd(d.books_from)}). Check each one and post it to the books.</p></div></div>
+   ${sec('Received from clients', d.cpay, 'From', x => row('cpay', x, x.company, null))}
+   ${sec('Paid to vendors', d.vpay, 'Vendor', x => row('vpay', x, x.vendor || '—', fab))}
+   ${sec('Order expenses', d.pexp, 'Details', x => row('pexp', x, x.description || x.category, m.accounts.find(a => a.sub === (sub2[x.category] || 'exp_misc'))?.id))}`;
+};
+
+// ---------- books & reports ----------
+const REPORTS = [['daybook', 'Day book'], ['ledger', 'Ledger'], ['cash', 'Cash book'], ['bank', 'Bank book'], ['petty', 'Petty cash'], ['trial', 'Trial balance'], ['pl', 'Profit & loss'], ['bs', 'Balance sheet'], ['gst', 'GST & TDS'], ['expenses', 'Expenses'], ['salary', 'Salary register'], ['parties', 'Outstanding'], ['claims', 'Expense claims']];
+routes.books = async ({ id, tab }) => {
+  const m = await accMeta(); const hashTab = location.hash.split('-')[1];
+  const r = REPORTS.some(x => x[0] === hashTab) ? hashTab : (C.br || 'daybook'); C.br = r;
+  const f = C.bf = Object.assign({ from: m.company.books_from || B.today.slice(0, 4) + '-04-01', to: B.today, account_id: '' }, C.bf || {});
+  const asOf = ['trial', 'bs', 'parties'].includes(r), pick = r === 'ledger' ? m.accounts : ['bank', 'cash', 'petty'].includes(r) ? m.accounts.filter(a => a.sub === r) : null;
+  if (pick && !pick.some(a => +a.id === +f.account_id)) f.account_id = pick[0]?.id || '';
+  let rep, err = '';
+  try { rep = (await api('acc_report', { r, ...f })).report; } catch (e) { err = e.message; }
+  const qs = new URLSearchParams({ r, ...f }).toString();
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#acc">← Accounts</a></div><h1>Books & reports</h1></div>${rep ? `<a class="btn" href="acc_export.php?${qs}">⬇ Export to Excel</a>` : ''}</div>
+  <div class="panel" style="padding-top:4px"><div class="tabs">${REPORTS.map(([k, l]) => `<a href="#books-${k}" class="${r === k ? 'on' : ''}">${l}</a>`).join('')}</div>
+   <form class="row" id="bookf" style="align-items:flex-end;padding-top:14px">${pick ? `<label class="f" style="min-width:260px">${r === 'bank' ? 'Bank account' : r === 'ledger' ? 'Account' : 'Cash account'}<select name="account_id">${accOpts(pick, f.account_id)}</select></label>` : ''}
+    ${asOf ? '' : `<label class="f">From<input type="date" name="from" value="${f.from}"></label>`}<label class="f">${asOf ? 'As on' : 'To'}<input type="date" name="to" value="${f.to}"></label><button class="btn ghost">Show</button></form></div>
+  ${err ? `<div class="alert bad"><span class="m">${esc(err)}</span></div>` : `<div class="panel"><h2>${esc(rep.title)}</h2><div class="tw"><table class="rep"><tr>${rep.cols.map((c, i) => `<th class="${rep.num.includes(i) ? 'r' : ''}">${esc(c)}</th>`).join('')}</tr>
+   ${rep.rows.map(x => `<tr class="${x.k.startsWith('j') ? 'click' : ''} rk-${x.k}" ${x.k.startsWith('j') ? `data-go="jv-${x.k.slice(1)}"` : ''}>${x.c.map((v, i) => `<td class="${rep.num.includes(i) ? 'r num' : /Dr$|Cr$|^0\.00$/.test(String(v)) ? 'r num' : ''}">${rep.num.includes(i) && v !== '' ? inr2(v) : esc(/^\d{4}-\d{2}-\d{2}$/.test(v) ? fd(v) : v)}</td>`).join('')}</tr>`).join('')}</table></div></div>`}`;
+  $('#bookf').onsubmit = e => { e.preventDefault(); Object.assign(C.bf, Object.fromEntries(new FormData(e.target))); refresh(); };
+};
+
+// ---------- chart of accounts ----------
+const SUBL = { bank: 'Bank', cash: 'Cash', petty: 'Petty cash', debtor: 'Client', creditor: 'Vendor', employee: 'Staff', gst_in_c: 'Input GST', gst_in_s: 'Input GST', gst_in_i: 'Input GST', gst_out_c: 'Output GST', gst_out_s: 'Output GST', gst_out_i: 'Output GST', tds_in: 'TDS', tds_out: 'TDS' };
+routes.coa = async () => {
+  const d = await api('acc_accounts'); const ed = C.coaEdit ? d.accounts.find(a => +a.id === +C.coaEdit) : null;
+  const grp = { asset: 'Assets', liability: 'Liabilities', equity: 'Capital', income: 'Income', expense: 'Expenses' };
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#acc">← Accounts</a></div><h1>Chart of accounts</h1><p>Set opening balances here when you start. Client, vendor and staff accounts are created automatically.</p></div></div>
+  ${ed ? `<form class="panel" id="coaform"><h3>Edit ${esc(ed.name)}</h3><div class="grid g3"><label class="f">Name *<input name="name" required value="${esc(ed.name)}"></label><label class="f">Code<input name="code" value="${esc(ed.code || '')}"></label>
+    <label class="f">Opening balance (₹)<input type="number" step="any" name="opening" value="${Math.abs(+ed.opening) || ''}"></label><label class="f">Side<select name="opening_side"><option value="dr" ${+ed.opening >= 0 ? 'selected' : ''}>Debit</option><option value="cr" ${+ed.opening < 0 ? 'selected' : ''}>Credit</option></select></label>
+    <label class="row f" style="align-self:end;gap:6px"><input type="checkbox" name="active" value="1" ${+ed.active ? 'checked' : ''}> Active</label></div><div class="row" style="margin-top:10px"><button class="btn">Save</button><button type="button" class="btn ghost" id="coa-cancel">Cancel</button></div></form>` : ''}
+  <form class="panel" id="coanew"><h3>Add account</h3><div class="grid g3"><label class="f">Name *<input name="name" required placeholder="e.g. HDFC Bank, Office cleaning"></label><label class="f">Code<input name="code"></label>
+   <label class="f">Type *<select name="type">${Object.entries(grp).map(([k, l]) => `<option value="${k}" ${k === 'expense' ? 'selected' : ''}>${l}</option>`).join('')}</select></label><label class="f">If asset: kind<select name="sub"><option value="">Normal</option><option value="bank">Bank account</option><option value="cash">Cash</option><option value="petty">Petty cash</option></select></label>
+   <label class="f">Opening balance (₹)<input type="number" step="any" name="opening"></label><label class="f">Side<select name="opening_side"><option value="dr">Debit</option><option value="cr">Credit</option></select></label></div><div style="margin-top:10px"><button class="btn ghost">+ Add account</button></div></form>
+  ${Object.entries(grp).map(([t, l]) => { const list = d.accounts.filter(a => a.type === t); return list.length ? `<div class="panel"><h2>${l}</h2><div class="tw"><table><tr><th>Code</th><th>Account</th><th>Kind</th><th class="r">Opening</th><th class="r">Balance today</th><th></th></tr>
+   ${list.map(a => `<tr class="click" data-go="books-ledger" data-acc="${a.id}"><td class="num">${esc(a.code || '')}</td><td><b>${esc(a.name)}</b>${+a.active ? '' : ' <span class="sub">(inactive)</span>'}</td><td class="sub">${esc(SUBL[a.sub] || '')}</td><td class="r num">${+a.opening ? inr2(Math.abs(a.opening)) + (a.opening > 0 ? ' Dr' : ' Cr') : ''}</td><td class="r num">${+a.balance ? inr2(Math.abs(a.balance)) + (a.balance > 0 ? ' Dr' : ' Cr') : '—'}</td><td class="r"><button class="btn link" data-coaedit="${a.id}">Edit</button></td></tr>`).join('')}</table></div></div>` : ''; }).join('')}`;
+};
+routes.accset = async () => {
+  const m = await accMeta(true); const c = m.company;
+  const F = (k, l, t = 'text') => `<label class="f">${l}<input name="${k}" type="${t}" value="${esc(c[k] || '')}"></label>`;
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#acc">← Accounts</a></div><h1>Company & invoice settings</h1><p>Printed on every invoice.</p></div></div>
+  <form class="panel" id="accsetf"><div class="grid g3">${F('name', 'Company name')}${F('gstin', 'GSTIN')}${F('pan', 'PAN')}${F('phone', 'Phone')}
+   <label class="f">State (for CGST/SGST vs IGST)<input name="state" list="states" value="${esc(c.state || '')}"></label><datalist id="states">${STATES.map(x => `<option value="${x}">`).join('')}</datalist>${F('sac', 'Default SAC code')}
+   ${F('bank_name', 'Bank name')}${F('bank_acno', 'Bank account no.')}${F('bank_ifsc', 'IFSC')}${F('books_from', 'Books start date', 'date')}</div>
+   <div class="grid" style="margin-top:12px"><label class="f">Address<textarea name="address">${esc(c.address || '')}</textarea></label><label class="f">Invoice terms<textarea name="terms">${esc(c.terms || '')}</textarea></label></div>
+   <div style="margin-top:12px"><button class="btn">Save settings</button></div></form>`;
+};
+
+// ---------- my expenses (sales + production) ----------
+routes.myexp = async () => {
+  const d = await api('claim_mine'); B.claims_attention = d.claims.filter(c => ['on_hold', 'rejected'].includes(c.status)).length; renderNav('myexp');
+  const ed = C.cledit ? d.claims.find(c => +c.id === +C.cledit) : null, x = ed || { edate: B.today, particular: '', category: d.cats[0], rate: '', qty: 1, gst: '', project_id: '', note: '' };
+  const form = `<form class="panel" id="clform" ${ed ? `data-id="${ed.id}"` : ''}><h2>${ed ? 'Correct and send again' : 'Add an expense'}</h2>${ed && ed.reason ? `<div class="alert ${ed.status === 'rejected' ? 'bad' : 'warn'}" style="margin-bottom:10px"><span class="m"><b>Accounts:</b> ${esc(ed.reason)}</span></div>` : ''}
+   <div class="grid g3"><label class="f">Date of expense *<input type="date" name="edate" required max="${B.today}" value="${esc(x.edate)}"></label><label class="f wide">Particular of expense *<input name="particular" required value="${esc(x.particular)}" placeholder="e.g. Flight Delhi–Bengaluru for site visit"></label>
+    <label class="f">Category<select name="category">${d.cats.map(k => `<option ${k === x.category ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></label>
+    <label class="f">Unit rate (₹) *<input type="number" step="any" name="rate" required value="${esc(x.rate)}" data-clc></label><label class="f">Qty<input type="number" step="any" name="qty" value="${esc(x.qty)}" data-clc></label>
+    <label class="f">Total amount<input id="cl-total" readonly tabindex="-1"></label><label class="f">GST (₹, if any)<input type="number" step="any" name="gst" value="${esc(+x.gst ? x.gst : '')}" data-clc></label><label class="f">Grand total<input id="cl-grand" readonly tabindex="-1" style="font-weight:700"></label>
+    <label class="f">Order (optional)<select name="project_id"><option value="">— not for an order —</option>${d.projects.map(p => `<option value="${p.id}" ${+p.id === +x.project_id ? 'selected' : ''}>${esc(p.company + ' · ' + p.expo)}</option>`).join('')}</select></label>
+    <label class="f wide">Note<input name="note" value="${esc(x.note || '')}"></label>${ed ? '<label class="f wide">What did you change?<input name="reply"></label>' : ''}</div>
+   <div class="row" style="margin-top:12px"><label class="up">⬆ Upload bill / proof (JPG, PNG, PDF, Excel)<input type="file" name="file" multiple accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,.xlsx,.xls,.csv"></label>${ed ? fileChips(ed.files) : ''}<button class="btn">${ed ? 'Send again for approval' : 'Submit for approval'}</button>${ed ? '<button type="button" class="btn ghost" id="cl-cancel">Cancel</button>' : ''}</div></form>`;
+  view().innerHTML = `<div class="head"><div><h1>My expenses</h1><p>Submit expenses with the bill. Accounts approves, rejects with a reason, or asks for more details.</p></div></div>${form}
+  <div class="panel"><h2>My claims</h2>${d.claims.length ? d.claims.map(c => `<div class="inset" style="margin-bottom:10px"><div class="ph" style="margin-bottom:4px"><b>${esc(c.particular)}</b>${claimPill(c)}</div>
+    <div class="sub">${fd(c.edate)} · ${esc(c.category || '')}${c.expo ? ' · ' + esc(c.company + ' · ' + c.expo) : ''} · ${inr2(c.rate)} × ${num(c.qty)}${+c.gst ? ' + GST ' + inr2(c.gst) : ''} = <b style="color:var(--ink)">${inr2(c.grand)}</b></div>
+    <div class="row" style="margin-top:6px">${fileChips(c.files)}${c.status !== 'approved' ? upBtn('claim', c.id, 'Add bill') : ''}</div>${claimThread(c)}
+    ${c.status === 'on_hold' ? `<form class="row" data-clreply="${c.id}" style="margin-top:8px"><input name="text" required placeholder="Give the details accounts asked for" style="flex:1"><button class="btn sm">Send details</button></form>` : ''}
+    <div class="row" style="margin-top:6px">${['rejected', 'on_hold'].includes(c.status) ? `<button class="btn ghost sm" data-cledit="${c.id}">Edit & send again</button>` : ''}${c.status !== 'approved' ? `<button class="btn link" data-cldel="${c.id}">Delete</button>` : ''}</div></div>`).join('') : blank('No expenses submitted yet.')}</div>`;
+  clCalc();
+};
+function clCalc() { const f = $('#clform'); if (!f) return; const v = k => +(f.querySelector(`[name=${k}]`).value) || 0; const t = v('rate') * (v('qty') || 1); $('#cl-total').value = inr2(t); $('#cl-grand').value = inr2(t + v('gst')); }
+
 // ---------- TEAM ----------
 routes.team = async () => {
   const d = await api('users'); const ed = C.editUser ? d.users.find(u => +u.id === +C.editUser) : null;
@@ -824,11 +1058,25 @@ routes.account = async () => {
 
 // ---------- EVENTS ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-adec],[data-acancel],[data-asent],[data-slt],[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
+  const t = e.target.closest('[data-clt],[data-invissue],[data-invconv],[data-invcancel],[data-ildel],[data-post],[data-postskip],[data-coaedit],[data-cledit],[data-cldel],[data-adec],[data-acancel],[data-asent],[data-slt],[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
   if (!t) return;
   const ds = t.dataset;
   try {
+    if (ds.go && ds.acc && !e.target.closest('a,button,input,select,label')) { C.bf = Object.assign(C.bf || {}, { account_id: ds.acc }); C.br = 'ledger'; }
     if (ds.go) { if (e.target.closest('a,button,input,select,label')) return; location.hash = '#' + ds.go; return; }
+    if (ds.coaedit) { e.stopPropagation(); C.coaEdit = +ds.coaedit; await refresh(); window.scrollTo(0, 0); return; }
+    if (ds.clt) { e.preventDefault(); C.clf = { ...(C.clf || {}), status: ds.clt }; return refresh(); }
+    if (ds.invissue) { if (!confirm('Issue this invoice? A number is given and a tax invoice is posted to the books.')) return; const r = await act(() => api('inv_issue', { id: ds.invissue })); toast('Issued ' + r.inv_no); return refresh(); }
+    if (ds.invconv) { const r = await act(() => api('inv_convert', { id: ds.invconv }), 'Tax invoice draft created'); location.hash = '#inv-' + r.id; return; }
+    if (ds.invcancel) { const draft = ds.st === 'draft'; let reason = '';
+      if (!draft) { reason = prompt('Why is this invoice being cancelled?') || ''; if (!reason.trim()) return; } else if (!confirm('Delete this draft?')) return;
+      await act(() => api('inv_cancel', { id: ds.invcancel, reason }), draft ? 'Draft deleted' : 'Invoice cancelled and reversed in the books'); return refresh(); }
+    if (ds.ildel !== undefined) { invCapture(); C.inv.lines.splice(+ds.ildel, 1); return drawInv(); }
+    if (ds.post || ds.postskip) { const key = ds.post || ds.postskip, [rt, rid] = key.split(':');
+      const pm = document.querySelector(`[data-pm="${key}"]`), pa = document.querySelector(`[data-pa="${key}"]`);
+      await act(() => api('acc_post_crm', { ref_type: rt, ref_id: rid, money_id: pm?.value, account_id: pa?.value, skip: ds.postskip ? 1 : 0 }), ds.post ? 'Posted to books' : 'Skipped'); return refresh(); }
+    if (ds.cledit) { C.cledit = +ds.cledit; await refresh(); window.scrollTo(0, 0); return; }
+    if (ds.cldel) { if (!confirm('Delete this expense claim?')) return; await act(() => api('claim_del', { id: ds.cldel }), 'Deleted'); return refresh(); }
     if (ds.slt) { e.preventDefault(); C.slog = { ...(C.slog || {}), status: ds.slt }; return refresh(); }
     if (ds.adec) { const [dec, id] = ds.adec.split(':'); const note = (document.querySelector(`[data-anote="${id}"]`) || {}).value || '';
       if (dec === 'rejected' && !note.trim()) { toast('Write what needs to change in the note box, then click Reject', true); const n = document.querySelector(`[data-anote="${id}"]`); if (n) n.focus(); return; }
@@ -879,6 +1127,13 @@ document.addEventListener('click', async e => {
         $('#ri-confirm').innerHTML = `<div class="alert warn" style="margin-top:10px"><b>Submit ${draft.items.length} entr${draft.items.length > 1 ? 'ies' : 'y'}?</b><span class="m">After this you cannot edit today's report.</span><div class="row"><button class="btn" id="ri-final">Yes, submit</button><button class="btn ghost" id="ri-cancel">Go back</button></div></div>`; return;
       }
       case 'ri-cancel': $('#ri-confirm').innerHTML = ''; return;
+      case 'jl-add': { const tb = $('#jl'); const tr = tb.rows[1].cloneNode(true); tr.querySelectorAll('input').forEach(i => i.value = ''); tr.querySelector('select').selectedIndex = 0; tb.tBodies[0].appendChild(tr); return; }
+      case 'inv-addline': invCapture(); C.inv.lines.push({ desc: '', sac: C.am.company.sac || '998596', qty: 1, rate: '', tax: 1 }); return drawInv();
+      case 'inv-fill': { invCapture(); const pid = C.inv.project_id; if (!pid) return toast('Pick the order first', true);
+        const r = await act(() => api('inv_prefill', { project_id: pid })); Object.assign(C.inv, { client_id: r.client_id, gst_rate: r.gst_rate, lines: r.lines }); return drawInv(); }
+      case 'jv-rev-open': $('#jv-rev').hidden = false; return;
+      case 'coa-cancel': C.coaEdit = null; return refresh();
+      case 'cl-cancel': C.cledit = null; return refresh();
       case 'lx-edit-open': $('#lx-edit').hidden = false; return;
       case 'lx-edit-cancel': $('#lx-edit').hidden = true; return;
       case 'lx-paste-go': {
@@ -909,6 +1164,10 @@ document.addEventListener('input', e => {
   if (ds.nce && newClient) newClient.expo[ds.nce] = t.value;
   if (ds.ri !== undefined && ds.ri !== 'pv' && draft) draft.items[+ds.ri][ds.k] = t.value;
   if (ds.op && C.ops && ds.op !== 'vinyl_total') setPath(C.ops, ds.op, t.value);
+  if (ds.sal !== undefined) { const f = t.form, v = k => +f.querySelector(`[name=${k}]`).value || 0; $('#sal-net').value = inr2(v('gross') - v('deductions') - v('tds')); }
+  if (t.closest && t.closest('#invform')) invCalc();
+  if (ds.clc !== undefined) clCalc();
+  if (ds.jl) { let dr = 0, cr = 0; document.querySelectorAll('#jl [data-jl=dr]').forEach(i => dr += +i.value || 0); document.querySelectorAll('#jl [data-jl=cr]').forEach(i => cr += +i.value || 0); $('#jl-tot').textContent = `Debit ${inr2(dr)} · Credit ${inr2(cr)}${Math.abs(dr - cr) > 0.009 ? ' · not equal yet' : ' · balanced'}`; }
   if (ds.furnq !== undefined && C.ops) { const f = C.ops.furniture.find(x => x.item === ds.furnq); if (f) f.qty = t.value; }
   if (['agreed', 'gst_rate', 'gst_on'].includes(ds.pf) && C.project && $('#calc-total')) {
     const over = {}; ['agreed', 'gst_rate', 'gst_on'].forEach(k => { const el = document.querySelector(`[data-pf="${k}"]`); if (el) over[k] = el.value; });
@@ -932,6 +1191,8 @@ document.addEventListener('change', async e => {
     if (ds.rfile !== undefined) { draft.files[+ds.rfile].push(...t.files); return refresh(); }
     if (ds.woff !== undefined) { const i = +ds.woff; const w = t.checked ? [...B.weekly_off, i] : B.weekly_off.filter(x => x !== i); await act(() => api('settings_save', { weekly_off: w }), 'Weekly off saved'); await reboot(); return; }
     if (t.id === 'fm-dept') { C.fmDept = t.value; return refresh(); }
+    if (t.id === 'rcp-proj') { const c = t.selectedOptions[0]?.dataset.client; if (c) $('#rcp-client').value = c; return; }
+    if (t.id === 'inv-proj') { const c = t.selectedOptions[0]?.dataset.client; if (c) $('#inv-client').value = c; return; }
     if (ds.deptmod !== undefined) { await act(() => api('settings_save', { dept_modules: { [ds.deptmod]: t.value } }), `${ds.deptmod}: ${MOD_LABEL[t.value]}`); await reboot(); return refresh(); }
     if (ds.jassign) { const [kind, pid] = ds.jassign.split(':'); await act(() => api(kind === 'designer' ? 'assign_designer' : 'assign_ops', { project_id: pid, user_id: t.value }), +t.value ? 'Assigned' : 'Unassigned'); return refresh(); }
     if (ds.assign && C.project) { await act(() => api(ds.assign === 'designer' ? 'assign_designer' : 'assign_ops', { project_id: C.project.id, user_id: t.value }), +t.value ? 'Assigned' : 'Unassigned'); return refresh(); }
@@ -957,6 +1218,39 @@ document.addEventListener('change', async e => {
 
 document.addEventListener('submit', async e => {
   const f = e.target;
+  if (f.id === 'accentry') {
+    e.preventDefault(); const fdta = new FormData(f); const files = fdta.getAll('file').filter(x => x && x.size); fdta.delete('file');
+    const data = { kind: f.dataset.kind, ...Object.fromEntries(fdta) };
+    if (data.kind === 'expense' && !data.paid_from && !data.vendor_id) return toast('Pick where it was paid from, or the vendor it is owed to', true);
+    if (data.kind === 'journal') data.lines = [...f.querySelectorAll('#jl tr')].slice(1).map(tr => ({ account_id: tr.querySelector('[data-jl=account_id]').value, dr: tr.querySelector('[data-jl=dr]').value, cr: tr.querySelector('[data-jl=cr]').value, memo: tr.querySelector('[data-jl=memo]').value }));
+    const btn = f.querySelector('button:not([type=button])'); btn.disabled = true;
+    try { const r = await act(() => api('acc_entry', data)); if (files.length) await act(() => uploadAll('voucher', r.id, files)); toast('Posted ' + r.vno); location.hash = '#jv-' + r.id; } catch { btn.disabled = false; }
+    return;
+  }
+  if (f.id === 'jv-rev') { e.preventDefault(); const r = await act(() => api('acc_reverse', { id: C.jv.id, ...Object.fromEntries(new FormData(f)) }), 'Reversed').catch(() => null); if (r) location.hash = '#jv-' + r.id; return; }
+  if (f.id === 'invform') {
+    e.preventDefault(); invCapture(); const how = e.submitter?.dataset.invsave || 'draft';
+    const r = await act(() => api('inv_save', { ...C.inv })).catch(() => null); if (!r) return;
+    if (how === 'issue') { if (!confirm('Issue now? The number is given and the invoice cannot be edited after.')) { location.hash = '#inv-' + r.id; return; } const x = await act(() => api('inv_issue', { id: r.id })).catch(() => null); if (x) { toast('Issued ' + x.inv_no); location.hash = '#invoices'; } return; }
+    toast('Draft saved'); location.hash = '#invoices'; return;
+  }
+  if (f.dataset.cdec) {
+    e.preventDefault(); const action = e.submitter?.dataset.cact; const o = Object.fromEntries(new FormData(f));
+    if (action !== 'approve' && !(o.reason || '').trim()) return toast(action === 'reject' ? 'Write the reason for rejecting' : 'Write what details you need', true);
+    const ok = await act(() => api('claim_decide', { id: f.dataset.cdec, action, ...o }), action === 'approve' ? 'Approved and posted to books' : action === 'hold' ? 'On hold — sent back for details' : 'Rejected — sent back with reason').catch(() => null); if (ok) { await reboot(); refresh(); } return;
+  }
+  if (f.id === 'coaform' || f.id === 'coanew') { e.preventDefault(); const o = Object.fromEntries(new FormData(f)); if (f.id === 'coaform') { o.id = C.coaEdit; o.active = o.active ? 1 : 0; }
+    const ok = await act(() => api('acc_account_save', o), 'Saved').catch(() => null); if (ok) { C.coaEdit = null; C.am = null; refresh(); } return; }
+  if (f.id === 'accsetf') { e.preventDefault(); const ok = await act(() => api('acc_company_save', Object.fromEntries(new FormData(f))), 'Settings saved').catch(() => null); if (ok) C.am = null; return; }
+  if (f.id === 'clform') {
+    e.preventDefault(); const fdta = new FormData(f); const files = fdta.getAll('file').filter(x => x && x.size); fdta.delete('file');
+    const o = Object.fromEntries(fdta); if (f.dataset.id) o.id = f.dataset.id;
+    if (!f.dataset.id && !files.length && !confirm('No bill attached. Submit without proof?')) return;
+    const btn = f.querySelector('button:not([type=button])'); btn.disabled = true;
+    try { const r = await act(() => api('claim_save', o)); if (files.length) await act(() => uploadAll('claim', r.id, files)); toast('Sent to accounts for approval'); C.cledit = null; await reboot(); refresh(); } catch { btn.disabled = false; }
+    return;
+  }
+  if (f.dataset.clreply) { e.preventDefault(); const ok = await act(() => api('claim_reply', { id: f.dataset.clreply, ...Object.fromEntries(new FormData(f)) }), 'Details sent to accounts').catch(() => null); if (ok) { await reboot(); refresh(); } return; }
   if (f.dataset.areq && C.project) {
     e.preventDefault(); const fdta = new FormData(f); const files = fdta.getAll('file').filter(x => x && x.size); const reuse = fdta.getAll('reuse');
     if (!files.length && !reuse.length) return toast('Attach the ' + (f.dataset.areq === 'quote' ? 'quote' : 'design') + ' file first', true);
