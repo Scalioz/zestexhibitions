@@ -118,6 +118,42 @@ function inv_counts() {
 }
 const INV_GROUPS = ['todo' => ['requested', 'draft'], 'pending' => ['pending'], 'changes' => ['on_hold', 'rejected'], 'issued' => ['issued'], 'cancelled' => ['cancelled']];
 
+// ---------- admin corrections ----------
+function audit_log($kind, $id, $action, $before, $after, $pid = null) {
+  global $MID; ins('audit', ['user_id' => $MID, 'at' => now(), 'project_id' => $pid, 'kind' => $kind, 'entry_id' => (int) $id, 'action' => $action,
+    'before_json' => $before === null ? null : json_encode($before, JSON_UNESCAPED_UNICODE), 'after_json' => $after === null ? null : json_encode($after, JSON_UNESCAPED_UNICODE)]);
+}
+function claim_post($c, $exp, $credit, $mode, $payTo, $uname) {   // books an approved claim (+ order expense) and returns the voucher id
+  global $MID;
+  $lines = [[$exp, $c['total'] + ($credit ? 0 : $c['gst']), 0, $c['particular']]]; if ($credit) $lines = array_merge($lines, gst_lines((float) $c['gst'], $mode, 'in'));
+  $lines[] = [$payTo, 0, $c['grand'], $c['particular']];
+  $jid = post_journal($c['edate'], 'Claim', "Expense by $uname: {$c['particular']}", $lines, 'claim', $c['id'], $c['project_id'], $MID);
+  if ($c['project_id']) {
+    ins('expenses', ['project_id' => $c['project_id'], 'edate' => $c['edate'], 'category' => pexp_cat(acc_get($exp)['sub']), 'description' => mb_substr("{$c['particular']} ($uname, claim #{$c['id']})", 0, 250), 'amount' => $c['total'] + ($credit ? 0 : $c['gst'])]);
+    ins('post_skip', ['ref_type' => 'pexp', 'ref_id' => (int) db()->lastInsertId()]);   // already in the books through this claim
+  }
+  return $jid;
+}
+function claim_unpost($c) {   // reverses an approved claim's voucher and removes its order expense; returns how it was booked
+  global $MID;
+  $how = null;
+  if ($c['journal_id'] && ($j = one('SELECT * FROM ' . T('journal') . ' WHERE id = ?', [$c['journal_id']])) && !$j['reversed_by']) {
+    $ls = all('SELECT l.*, a.type, a.sub FROM ' . T('jlines') . ' l JOIN ' . T('accounts') . ' a ON a.id = l.account_id WHERE l.journal_id = ?', [$j['id']]);
+    $how = ['exp' => null, 'credit' => false, 'mode' => 'cgst_sgst', 'pay' => null];
+    foreach ($ls as $l) {
+      if ($l['cr'] > 0) $how['pay'] = (int) $l['account_id'];
+      elseif (str_starts_with((string) $l['sub'], 'gst_in_')) { $how['credit'] = true; if ($l['sub'] === 'gst_in_i') $how['mode'] = 'igst'; }
+      elseif ($l['type'] === 'expense') $how['exp'] = (int) $l['account_id'];
+    }
+    reverse_journal($j['id'], $j['jdate'], 'Expense claim corrected by admin', $MID);
+    upd('journal', $j['id'], ['ref_type' => 'claim_x']);
+  }
+  if ($c['project_id']) foreach (all('SELECT id FROM ' . T('expenses') . ' WHERE project_id = ? AND description LIKE ?', [$c['project_id'], '%claim #' . $c['id'] . ')']) as $x) {
+    q('DELETE FROM ' . T('post_skip') . " WHERE ref_type = 'pexp' AND ref_id = ?", [$x['id']]); q('DELETE FROM ' . T('expenses') . ' WHERE id = ?', [$x['id']]);
+  }
+  return $how;
+}
+
 try {
 switch ($A) {
 
@@ -274,6 +310,62 @@ case 'acc_reverse':
   $why = s($in['reason'] ?? null, 500) ?? fail('Write why it is being reversed.');
   db()->beginTransaction(); $rid = reverse_journal($j['id'], d($in['date'] ?? null) ?? today(), $why, $MID); db()->commit();
   out(['id' => $rid]);
+
+
+case 'acc_edit':   // admin: correct a book entry (old one is reversed on its own date, corrected one posted in its place)
+  need_admin();
+  $j = one('SELECT * FROM ' . T('journal') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]) ?? fail('Not found', 404);
+  if ($j['reversed_by']) fail('This entry is already reversed / replaced.');
+  if ($j['vtype'] === 'Reversal') fail('A reversal cannot be edited.');
+  if ($j['ref_type'] === 'invoice') fail('This came from a tax invoice. Cancel the invoice instead.');
+  if ($j['ref_type'] === 'claim') fail('This came from an expense claim. Edit the claim in Expense approvals — the books are corrected automatically.');
+  $lines = [];
+  foreach (array_slice((array) ($in['lines'] ?? []), 0, 40) as $l) { $l = (array) $l; $a = (int) ($l['account_id'] ?? 0); $dr = n($l['dr'] ?? null) ?? 0; $cr = n($l['cr'] ?? null) ?? 0;
+    if (!$a && !$dr && !$cr) continue; if (!acc_get($a)) fail('Pick an account on every line.'); $lines[] = [$a, $dr, $cr, s($l['memo'] ?? null, 255)]; }
+  if (count($lines) < 2) fail('An entry needs at least two lines.');
+  $date = d($in['date'] ?? null) ?? $j['jdate']; $narr = s($in['narration'] ?? null, 1000) ?? $j['narration'];
+  $before = $j + ['lines' => all('SELECT account_id, dr, cr, memo FROM ' . T('jlines') . ' WHERE journal_id = ?', [$j['id']])];
+  db()->beginTransaction();
+  $new = post_journal($date, $j['vtype'], $narr, $lines, $j['ref_type'], $j['ref_id'], $j['project_id'], $MID);
+  reverse_journal($j['id'], $j['jdate'], 'Edited by admin — replaced by ' . val('SELECT vno FROM ' . T('journal') . ' WHERE id = ?', [$new]), $MID);
+  if ($j['ref_type']) upd('journal', $j['id'], ['ref_type' => mb_substr($j['ref_type'] . '_x', 0, 20)]);
+  upd('journal', $new, ['replaces' => $j['id']]);
+  q('UPDATE ' . T('files') . " SET entity_id = ? WHERE entity = 'voucher' AND entity_id = ?", [$new, $j['id']]);
+  audit_log('journal', $j['id'], 'edit', $before, ['id' => $new, 'date' => $date, 'narration' => $narr, 'lines' => $lines], $j['project_id']);
+  db()->commit(); out(['id' => $new]);
+
+case 'claim_admin_save':   // admin: change any expense claim; an approved one is re-booked with the new figures
+  need_admin();
+  $c = claim_row($in['id'] ?? 0);
+  $data = ['edate' => d($in['edate'] ?? null) ?? fail('Enter the date of expense.'), 'particular' => s($in['particular'] ?? null, 255) ?? fail('Enter the particular of expense.'),
+    'category' => array_key_exists($in['category'] ?? '', CLAIM_CATS) ? $in['category'] : 'Other', 'rate' => n($in['rate'] ?? null) ?? fail('Enter the unit rate.'), 'qty' => n($in['qty'] ?? 1) ?: 1, 'gst' => n($in['gst'] ?? 0) ?? 0, 'note' => s($in['note'] ?? null, 2000),
+    'project_id' => (int) ($in['project_id'] ?? 0) ?: null];
+  if ($data['rate'] <= 0) fail('Unit rate must be more than zero.');
+  $data['total'] = round($data['rate'] * $data['qty'], 2); $data['grand'] = round($data['total'] + $data['gst'], 2);
+  $ch = [];
+  foreach (['edate' => 'Date', 'particular' => 'Particular', 'category' => 'Category', 'rate' => 'Unit rate', 'qty' => 'Qty', 'gst' => 'GST', 'grand' => 'Grand total', 'note' => 'Note', 'project_id' => 'Order'] as $k => $l)
+    if ((string) ($c[$k] ?? '') !== (string) ($data[$k] ?? '') && !(is_numeric($c[$k]) && is_numeric($data[$k]) && (float) $c[$k] == (float) $data[$k])) $ch[] = "$l: " . ($c[$k] ?? '—') . ' → ' . ($data[$k] ?? '—');
+  if (!$ch) fail('Nothing was changed.');
+  db()->beginTransaction();
+  if ($c['status'] === 'approved') {
+    $how = claim_unpost($c); upd('claims', $c['id'], $data); $c2 = claim_row($c['id']);
+    $u = one('SELECT name FROM ' . T('users') . ' WHERE id = ?', [$c['user_id']]);
+    $credit = $how && $how['credit'] && $c2['gst'] > 0;
+    $jid = claim_post($c2, $how['exp'] ?? acc_sub(CLAIM_CATS[$c2['category']] ?? 'exp_misc'), $credit, $how['mode'] ?? 'cgst_sgst', $how['pay'] ?? party_account('employee', $c['user_id'], $u['name']), $u['name']);
+    upd('claims', $c['id'], ['journal_id' => $jid]);
+  } else upd('claims', $c['id'], $data);
+  claim_note($c['id'], 'edited', 'Changed by admin: ' . implode(' · ', $ch));
+  audit_log('claim', $c['id'], 'edit', $c, $data, $c['project_id']);
+  db()->commit(); out(['ok' => true]);
+
+case 'claim_admin_del':
+  need_admin();
+  $c = claim_row($in['id'] ?? 0);
+  db()->beginTransaction();
+  if ($c['status'] === 'approved') claim_unpost($c);
+  audit_log('claim', $c['id'], 'delete', $c, null, $c['project_id']);
+  q('DELETE FROM ' . T('claim_notes') . ' WHERE claim_id = ?', [$c['id']]); q('DELETE FROM ' . T('claims') . ' WHERE id = ?', [$c['id']]);
+  db()->commit(); out(['ok' => true]);
 
 // ================= POST CRM ENTRIES =================
 case 'acc_inbox':
@@ -498,14 +590,8 @@ case 'claim_decide':
   $u = one('SELECT id, name FROM ' . T('users') . ' WHERE id = ?', [$c['user_id']]);
   $exp = acc_of_type($in['account_id'] ?? 0, 'expense'); $credit = !empty($in['gst_credit']) && $c['gst'] > 0; $mode = ($in['gst_mode'] ?? '') === 'igst' ? 'igst' : 'cgst_sgst';
   $payTo = ($in['pay_from'] ?? 'staff') === 'staff' ? party_account('employee', $u['id'], $u['name']) : money_id($in['pay_from']);
-  $narr = "Expense by {$u['name']}: {$c['particular']}";
   db()->beginTransaction();
-  $lines = [[$exp, $c['total'] + ($credit ? 0 : $c['gst']), 0, $c['particular']]]; if ($credit) $lines = array_merge($lines, gst_lines((float) $c['gst'], $mode, 'in'));
-  $lines[] = [$payTo, 0, $c['grand'], $c['particular']];
-  $jid = post_journal($c['edate'], 'Claim', $narr, $lines, 'claim', $c['id'], $c['project_id'], $MID);
-  if ($c['project_id']) ins('expenses', ['project_id' => $c['project_id'], 'edate' => $c['edate'], 'category' => pexp_cat(acc_get($exp)['sub']), 'description' => mb_substr("{$c['particular']} ({$u['name']}, claim #{$c['id']})", 0, 250), 'amount' => $c['total'] + ($credit ? 0 : $c['gst'])]);
-  // the order expense above is already in the books through this claim — keep it out of the "to post" list
-  if ($c['project_id']) ins('post_skip', ['ref_type' => 'pexp', 'ref_id' => (int) db()->lastInsertId()]);
+  $jid = claim_post($c, $exp, $credit, $mode, $payTo, $u['name']);
   upd('claims', $c['id'], ['status' => 'approved', 'decided_by' => $me['name'], 'decided_at' => now(), 'reason' => $why, 'journal_id' => $jid]);
   claim_note($c['id'], 'approved', $why);
   db()->commit(); out(['ok' => true]);

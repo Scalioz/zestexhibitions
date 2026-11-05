@@ -426,16 +426,27 @@ routes.reportlog = async () => {
   const f = C.log || (C.log = { from: '', to: '', user_id: '' });
   const d = await api('report_log', f);
   const emps = B.users.filter(u => u.role === 'employee' && +u.active);
+  C.repById = {}; d.days.forEach(day => day.rows.forEach(r => { if (r.id) C.repById[r.id] = { id: r.id, name: r.user.name, date: day.date, fields: r.fields, items: r.items.map(x => { const o = { ...x }; delete o._files; return o; }) }; }));
   view().innerHTML = `
   <div class="head"><div><h1>Daily reports</h1><p>${fd(d.from)} to ${fd(d.to)} · click a name to open the report</p></div>
    <form class="row" id="logf"><label class="f">Employee<select name="user_id"><option value="">All employees</option>${emps.map(e => `<option value="${e.id}" ${+f.user_id === +e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label><label class="f">From<input type="date" name="from" value="${d.from}"></label><label class="f">To<input type="date" name="to" value="${d.to}"></label><button class="btn ghost sm" style="align-self:flex-end">Show</button></form></div>
+  ${C.repEdit ? repEditor(C.repEdit) : ''}
   <div class="log">${d.days.map(day => `<h3 class="num">${fd(day.date)} ${day.off ? `<span class="pill p-off">${esc(day.off)}</span>` : ''}</h3>
    ${day.rows.length ? day.rows.map(r => r.status === 'received'
-     ? `<details><summary><b>${esc(r.user.name)}</b><span class="sub">${esc(r.user.department)}</span><span class="pill p-received">received ${r.at}</span><span class="sub" style="margin-left:auto">${r.items.length} entr${r.items.length === 1 ? 'y' : 'ies'}</span></summary><div class="in">${reportTable(r.items, r.fields)}</div></details>`
+     ? `<details><summary><b>${esc(r.user.name)}</b><span class="sub">${esc(r.user.department)}</span><span class="pill p-received">received ${r.at}</span><span class="sub" style="margin-left:auto">${r.items.length} entr${r.items.length === 1 ? 'y' : 'ies'}</span></summary><div class="in">${reportTable(r.items, r.fields)}<div class="row" style="margin-top:8px"><button class="btn ghost sm" data-repedit="${r.id}">Edit report</button><button class="btn link" data-repdel="${r.id}">Delete report</button></div></div></details>`
      : `<details><summary><b>${esc(r.user.name)}</b><span class="sub">${esc(r.user.department)}</span><span class="pill p-${r.status === 'work' ? 'received' : r.status}">${r.status === 'work' ? 'work logged' : r.status === 'pending' ? 'pending today' : 'report not received'}</span>${r.status === 'work' && r.leads ? `<span class="sub" style="margin-left:auto">${r.leads} expo entr${r.leads === 1 ? 'y' : 'ies'}</span>` : ''}</summary></details>`).join('')
      : `<div class="sub">${day.off ? 'No report expected.' : 'No employees to track on this day.'}</div>`}`).join('')}</div>`;
   $('#logf').onsubmit = e => { e.preventDefault(); const fm = new FormData(e.target); C.log = { from: fm.get('from'), to: fm.get('to'), user_id: fm.get('user_id') }; refresh(); };
 };
+
+function repEditor(R) {
+  const F = R.fields.filter(f => f.t !== 'file');
+  const inp = (f, k, v) => f.t === 'long' ? `<textarea data-rek="${k}" data-k="${esc(f.k)}">${esc(v)}</textarea>` : f.t === 'select' ? `<select data-rek="${k}" data-k="${esc(f.k)}"><option value="">Select</option>${(f.o || []).map(o => `<option ${v === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}${v && !(f.o || []).includes(v) ? `<option selected>${esc(v)}</option>` : ''}</select>` : `<input ${f.t === 'number' ? 'type="number" step="any"' : f.t === 'date' ? 'type="date"' : ''} data-rek="${k}" data-k="${esc(f.k)}" value="${esc(v)}">`;
+  return `<form class="panel" id="repeditf" style="border:2px solid var(--warn)"><div class="ph"><h2>Edit report · ${esc(R.name)} · ${fd(R.date)}</h2><button type="button" class="btn link" data-repedit="0">Close</button></div>
+   ${R.items.map((x, k) => `<div class="inset" style="margin-top:8px"><div class="ph"><b>Entry ${k + 1}</b>${R.items.length > 1 ? `<button type="button" class="btn link" data-reprm="${k}">Remove</button>` : ''}</div><div class="grid g3">${F.map(f => `<label class="f ${f.t === 'long' ? 'wide' : ''}">${esc(f.l)}${inp(f, k, x[f.k] ?? '')}</label>`).join('')}</div></div>`).join('')}
+   <div class="row" style="margin-top:10px"><button type="button" class="btn ghost sm" data-repadd>+ Add entry</button><button class="btn sm">Save report</button></div><div class="sub" style="margin-top:6px">Every change is recorded in the change history.</div></form>`;
+}
+function repCapture() { document.querySelectorAll('#repeditf [data-rek]').forEach(el => { const it = C.repEdit.items[+el.dataset.rek]; if (it) it[el.dataset.k] = el.value; }); }
 
 // ---------- CLIENT LOG (admin) ----------
 routes.clientlog = async () => {
@@ -799,12 +810,20 @@ routes.entry = async ({ tab }) => {
 };
 
 routes.jv = async ({ id }) => {
-  const { journal: j } = await api('acc_journal', { id });
+  const [{ journal: j }] = await Promise.all([api('acc_journal', { id }), isAdmin() ? accMeta() : null]);
   view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#books">← Books</a></div><h1>${esc(j.vno)} · ${esc(j.vtype)}</h1><p>${fd(j.jdate)} · entered by ${esc(j.by)} on ${fd(j.created_at)}</p></div>
-   ${j.reversed_by ? `<a class="pill p-bad" href="#jv-${j.reversed_by}">reversed — open reversal</a>` : j.vtype !== 'Reversal' && !['invoice', 'claim'].includes(j.ref_type) ? '<button class="btn ghost" id="jv-rev-open">Reverse this entry</button>' : ''}</div>
+   <div class="row">${j.reversed_by ? `<a class="pill p-bad" href="#jv-${j.reversed_by}">reversed — open reversal</a>` : j.vtype !== 'Reversal' && !['invoice', 'claim'].includes(j.ref_type) ? `${isAdmin() ? '<button class="btn" id="jv-edit-open">Edit entry</button>' : ''}<button class="btn ghost" id="jv-rev-open">${isAdmin() ? 'Delete (reverse)' : 'Reverse this entry'}</button>` : ''}
+   ${isAdmin() && j.ref_type === 'claim' && !j.reversed_by ? '<a class="btn ghost" href="#claims">Edit it in Expense approvals</a>' : ''}${isAdmin() && j.ref_type === 'invoice' && !j.reversed_by ? '<a class="btn ghost" href="#invoices">Cancel it from Invoices</a>' : ''}</div></div>
+  ${j.replaces ? `<div class="alert"><b>Corrected entry</b><span class="m">This replaces an earlier entry that was edited by admin. <a href="#jv-${j.replaces}">Open the old one →</a></span></div>` : ''}
   <div class="panel"><p style="margin-top:0">${esc(j.narration)}</p><div class="tw"><table><tr><th>Account</th><th class="r">Debit (₹)</th><th class="r">Credit (₹)</th><th>Memo</th></tr>
    ${j.lines.map(l => `<tr><td>${esc(l.name)}</td><td class="r num">${+l.dr ? inr2(l.dr) : ''}</td><td class="r num">${+l.cr ? inr2(l.cr) : ''}</td><td class="sub">${esc(l.memo || '')}</td></tr>`).join('')}</table></div>
    <div class="row" style="margin-top:12px"><span class="sub">Bills / proof:</span>${fileChips(j.files)}${upBtn('voucher', j.id, 'Attach')}</div>
+   ${isAdmin() ? `<form id="jv-edit" class="inset" hidden style="margin-top:12px"><h3>Edit entry</h3><div class="grid g3"><label class="f">Date *<input type="date" name="date" required value="${j.jdate}"></label><label class="f wide">Narration<input name="narration" value="${esc(j.narration || '')}"></label></div>
+    <div class="tw" style="margin-top:10px"><table id="jl"><tr><th>Account</th><th class="r">Debit (₹)</th><th class="r">Credit (₹)</th><th>Memo</th></tr>
+    ${j.lines.map(l => `<tr><td><select data-jl="account_id">${accOpts(C.am.accounts, l.account_id, 'Pick account')}</select></td><td><input type="number" step="any" data-jl="dr" value="${+l.dr ? num(l.dr) : ''}"></td><td><input type="number" step="any" data-jl="cr" value="${+l.cr ? num(l.cr) : ''}"></td><td><input data-jl="memo" value="${esc(l.memo || '')}"></td></tr>`).join('')}</table></div>
+    <div class="row" style="margin-top:6px"><button type="button" class="btn ghost sm" id="jl-add">+ Add line</button><span class="sub" id="jl-tot"></span></div>
+    <div class="sub" style="margin-top:6px">The old entry is reversed on its own date and this corrected one is posted in its place — both stay visible in the books.${['cpay', 'vpay', 'pexp'].includes(j.ref_type) ? ' This entry is linked to an order: if the amount changes, correct it in the order too.' : ''}</div>
+    <div style="margin-top:8px"><button class="btn sm">Save corrected entry</button></div></form>` : ''}
    <form id="jv-rev" class="inset" hidden style="margin-top:12px"><div class="grid g3"><label class="f">Reversal date<input type="date" name="date" value="${B.today}"></label><label class="f wide">Reason *<input name="reason" required></label></div><div style="margin-top:8px"><button class="btn danger sm">Post reversal</button></div></form></div>`;
   C.jv = j;
 };
@@ -963,7 +982,15 @@ routes.claims = async () => {
       ${+c.gst ? `<label class="row f" style="align-self:end;gap:6px"><input type="checkbox" name="gst_credit" value="1"> Claim GST credit <select name="gst_mode" style="max-width:130px"><option value="cgst_sgst">CGST+SGST</option><option value="igst">IGST</option></select></label>` : ''}
       <label class="f wide">Reason / note <span class="sub" style="font-weight:400">(needed to reject or hold)</span><input name="reason"></label></div>
       <div class="row" style="margin-top:8px"><button class="btn sm" data-cact="approve">Approve & post</button><button class="btn ghost sm" data-cact="hold">Hold — ask for details</button><button class="btn danger sm" data-cact="reject">Reject</button></div></form>` : ''}
-    ${c.status === 'approved' && c.journal_id ? `<div class="sub" style="margin-top:8px">Posted: <a href="#jv-${c.journal_id}">open voucher</a> · approved by ${esc(c.decided_by)} on ${fd(c.decided_at)}</div>` : ''}</div>`).join('')
+    ${c.status === 'approved' && c.journal_id ? `<div class="sub" style="margin-top:8px">Posted: <a href="#jv-${c.journal_id}">open voucher</a> · approved by ${esc(c.decided_by)} on ${fd(c.decided_at)}</div>` : ''}
+    ${isAdmin() ? `<div class="row" style="margin-top:10px"><button class="btn ghost sm" data-caedit="${c.id}">Edit</button><button class="btn link" data-cadel="${c.id}" data-st="${c.status}">Delete</button></div>
+     ${+C.caEdit === +c.id ? `<form class="inset" data-casave="${c.id}" style="margin-top:8px"><div class="grid g3">
+      <label class="f wide">Particular *<input name="particular" required value="${esc(c.particular)}"></label><label class="f">Date *<input type="date" name="edate" required value="${c.edate}"></label>
+      <label class="f">Category<select name="category">${Object.keys(m.claim_cats).map(k => `<option ${k === c.category ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></label>
+      <label class="f">Unit rate *<input type="number" step="any" name="rate" required value="${num(c.rate)}"></label><label class="f">Qty<input type="number" step="any" name="qty" value="${num(c.qty)}"></label><label class="f">GST (₹)<input type="number" step="any" name="gst" value="${num(c.gst)}"></label>
+      <label class="f">Order<select name="project_id">${projOpts(m, c.project_id)}</select></label><label class="f wide">Note<input name="note" value="${esc(c.note || '')}"></label></div>
+      ${c.status === 'approved' ? '<div class="sub" style="margin-top:6px">Already in the books — the old voucher is reversed and a corrected one is posted automatically.</div>' : ''}
+      <div class="row" style="margin-top:8px"><button class="btn sm">Save changes</button><button type="button" class="btn link" data-caedit="0">Close</button></div></form>` : ''}` : ''}</div>`).join('')
   : `<div class="panel">${blank('Nothing here.')}</div>`}`;
 };
 
@@ -1144,13 +1171,19 @@ routes.account = async () => {
 
 // ---------- EVENTS ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-clt],[data-invt],[data-invreqtax],[data-invconv],[data-ildel],[data-post],[data-postskip],[data-coaedit],[data-cledit],[data-cldel],[data-adec],[data-acancel],[data-asent],[data-slt],[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
+  const t = e.target.closest('[data-caedit],[data-cadel],[data-repedit],[data-repdel],[data-repadd],[data-reprm],[data-clt],[data-invt],[data-invreqtax],[data-invconv],[data-ildel],[data-post],[data-postskip],[data-coaedit],[data-cledit],[data-cldel],[data-adec],[data-acancel],[data-asent],[data-slt],[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
   if (!t) return;
   const ds = t.dataset;
   try {
     if (ds.go && ds.acc && !e.target.closest('a,button,input,select,label')) { C.bf = Object.assign(C.bf || {}, { account_id: ds.acc }); C.br = 'ledger'; }
     if (ds.go) { if (e.target.closest('a,button,input,select,label')) return; location.hash = '#' + ds.go; return; }
     if (ds.coaedit) { e.stopPropagation(); C.coaEdit = +ds.coaedit; await refresh(); window.scrollTo(0, 0); return; }
+    if (ds.caedit !== undefined) { C.caEdit = +ds.caedit; return refresh(); }
+    if (ds.cadel) { if (!confirm(ds.st === 'approved' ? 'Delete this expense? It will also be removed from the books (reversed) and from the order.' : 'Delete this expense claim?')) return; await act(() => api('claim_admin_del', { id: ds.cadel }), 'Expense deleted'); await reboot(); return refresh(); }
+    if (ds.repedit !== undefined) { C.repEdit = ds.repedit === '0' ? null : JSON.parse(JSON.stringify(C.repById[ds.repedit])); await refresh(); if (C.repEdit) window.scrollTo(0, 0); return; }
+    if (ds.repdel) { if (!confirm('Delete this daily report? The employee will have to submit it again.')) return; await act(() => api('report_delete', { id: ds.repdel }), 'Report deleted'); C.repEdit = null; return refresh(); }
+    if (ds.repadd !== undefined) { repCapture(); C.repEdit.items.push({}); return refresh(); }
+    if (ds.reprm !== undefined) { repCapture(); C.repEdit.items.splice(+ds.reprm, 1); return refresh(); }
     if (ds.clt) { e.preventDefault(); C.clf = { ...(C.clf || {}), status: ds.clt }; return refresh(); }
     if (ds.invt) { e.preventDefault(); C.invf = { ...(C.invf || {}), group: ds.invt }; return refresh(); }
     if (ds.invreqtax) { const note = prompt('Anything accounts should know for the tax invoice?', 'Tax invoice as per approved proforma'); if (note === null) return; const r = await act(() => api('inv_request', { from_id: ds.invreqtax, note: note || 'Tax invoice as per approved proforma' }), 'Request sent to accounts'); location.hash = '#invd-' + r.id; return; }
@@ -1215,7 +1248,8 @@ document.addEventListener('click', async e => {
       case 'inv-addline': invCapture(); C.inv.lines.push({ desc: '', sac: C.am.company.sac || '998596', qty: 1, rate: '', tax: 1 }); return drawInv();
       case 'inv-fill': { invCapture(); const pid = C.inv.project_id; if (!pid) return toast('Pick the order first', true);
         const r = await act(() => api('inv_prefill', { project_id: pid })); Object.assign(C.inv, { client_id: r.client_id, gst_rate: r.gst_rate, lines: r.lines }); return drawInv(); }
-      case 'jv-rev-open': $('#jv-rev').hidden = false; return;
+      case 'jv-rev-open': $('#jv-rev').hidden = false; $('#jv-edit') && ($('#jv-edit').hidden = true); return;
+      case 'jv-edit-open': $('#jv-edit').hidden = false; $('#jv-rev').hidden = true; return;
       case 'coa-cancel': C.coaEdit = null; return refresh();
       case 'cl-cancel': C.cledit = null; return refresh();
       case 'lx-edit-open': $('#lx-edit').hidden = false; return;
@@ -1311,6 +1345,11 @@ document.addEventListener('submit', async e => {
     try { const r = await act(() => api('acc_entry', data)); if (files.length) await act(() => uploadAll('voucher', r.id, files)); toast('Posted ' + r.vno); location.hash = '#jv-' + r.id; } catch { btn.disabled = false; }
     return;
   }
+  if (f.id === 'jv-edit') {
+    e.preventDefault(); const o = Object.fromEntries(new FormData(f));
+    o.lines = [...f.querySelectorAll('#jl tr')].slice(1).map(tr => ({ account_id: tr.querySelector('[data-jl=account_id]').value, dr: tr.querySelector('[data-jl=dr]').value, cr: tr.querySelector('[data-jl=cr]').value, memo: tr.querySelector('[data-jl=memo]').value }));
+    const r = await act(() => api('acc_edit', { id: C.jv.id, ...o }), 'Entry corrected').catch(() => null); if (r) location.hash = '#jv-' + r.id; return;
+  }
   if (f.id === 'jv-rev') { e.preventDefault(); const r = await act(() => api('acc_reverse', { id: C.jv.id, ...Object.fromEntries(new FormData(f)) }), 'Reversed').catch(() => null); if (r) location.hash = '#jv-' + r.id; return; }
   if (f.id === 'invform') {
     e.preventDefault(); invCapture(); const how = e.submitter?.dataset.invsave || 'draft';
@@ -1331,6 +1370,8 @@ document.addEventListener('submit', async e => {
   if (f.dataset.invreply) { e.preventDefault(); const ok = await act(() => api('inv_reply', { id: f.dataset.invreply, text: f.querySelector('[name=text]').value }), 'Sent').catch(() => null); if (ok) refresh(); return; }
   if (f.dataset.invcorr) { e.preventDefault(); const ok = await act(() => api('inv_correct', { id: f.dataset.invcorr, reason: f.querySelector('[name=reason]').value }), 'Reopened for correction').catch(() => null); if (ok) { await reboot(); refresh(); } return; }
   if (f.dataset.invcan) { e.preventDefault(); const ok = await act(() => api('inv_cancel', { id: f.dataset.invcan, reason: f.querySelector('[name=reason]').value }), 'Cancelled').catch(() => null); if (ok) { await reboot(); refresh(); } return; }
+  if (f.dataset.casave) { e.preventDefault(); const ok = await act(() => api('claim_admin_save', { id: f.dataset.casave, ...Object.fromEntries(new FormData(f)) }), 'Expense updated').catch(() => null); if (ok) { C.caEdit = null; refresh(); } return; }
+  if (f.id === 'repeditf') { e.preventDefault(); repCapture(); const ok = await act(() => api('report_admin_save', { id: C.repEdit.id, items: C.repEdit.items }), 'Report updated').catch(() => null); if (ok) { C.repEdit = null; refresh(); } return; }
   if (f.dataset.cdec) {
     e.preventDefault(); const action = e.submitter?.dataset.cact; const o = Object.fromEntries(new FormData(f));
     if (action !== 'approve' && !(o.reason || '').trim()) return toast(action === 'reject' ? 'Write the reason for rejecting' : 'Write what details you need', true);

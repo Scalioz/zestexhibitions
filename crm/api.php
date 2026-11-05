@@ -623,8 +623,8 @@ case 'report_log':
     foreach ($users as $u) {
       $r = $byKey[$u['id'] . '|' . $dd] ?? null;
       if ($r) {
-        $day['rows'][] = ['user' => $u, 'status' => 'received', 'at' => substr($r['submitted_at'], 11, 5), 'fields' => json_decode($r['fields_json'], true),
-          'items' => array_map(fn($it) => json_decode($it['data_json'], true) + ['_files' => $fl[$it['id']] ?? []], $items[$r['id']] ?? [])];
+        $day['rows'][] = ['user' => $u, 'status' => 'received', 'id' => (int) $r['id'], 'at' => substr($r['submitted_at'], 11, 5), 'fields' => json_decode($r['fields_json'], true),
+          'items' => array_map(fn($it) => json_decode($it['data_json'], true) + ['_id' => (int) $it['id'], '_files' => $fl[$it['id']] ?? []], $items[$r['id']] ?? [])];
       } elseif (isset($act[$u['id'] . '|' . $dd])) {
         $day['rows'][] = ['user' => $u, 'status' => 'work', 'leads' => $leadN[$u['id'] . '|' . $dd] ?? 0];
       } elseif (!$day['off'] && $dd >= $u['joined_on'] && $dd >= $track) {
@@ -635,9 +635,34 @@ case 'report_log':
   }
   out(['from' => $from, 'to' => $to, 'days' => $days]);
 
+case 'report_admin_save':   // admin: correct a submitted daily report (change, add or remove entries)
+  need_admin();
+  $r = one('SELECT * FROM ' . T('reports') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]) ?? fail('Report not found.', 404);
+  $tpl = json_decode($r['fields_json'], true) ?: []; $first = $tpl[0]['k'] ?? 'company';
+  $old = all('SELECT * FROM ' . T('report_items') . ' WHERE report_id = ? ORDER BY sl', [$r['id']]); $oldById = array_column($old, null, 'id');
+  $keep = []; $rows = [];
+  foreach (array_slice((array) ($in['items'] ?? []), 0, 200) as $i => $it) { $it = (array) $it; $row = [];
+    foreach ($tpl as $f) { if ($f['t'] === 'file') continue; $row[$f['k']] = $f['t'] === 'date' ? d($it[$f['k']] ?? null) : s($it[$f['k']] ?? null, 4000); }
+    if (!array_filter($row)) continue;
+    if (!$row[$first]) fail('Entry ' . ($i + 1) . ': please fill ' . ($tpl[0]['l'] ?? 'the first field') . '.');
+    $rows[] = [(int) ($it['_id'] ?? 0), $row];
+  }
+  if (!$rows) fail('A report needs at least one entry. Use Delete report to remove it fully.');
+  db()->beginTransaction();
+  foreach ($rows as $k => [$iid, $row]) {
+    $js = json_encode($row, JSON_UNESCAPED_UNICODE);
+    if ($iid && isset($oldById[$iid])) { $keep[] = $iid; if ($oldById[$iid]['data_json'] !== $js || (int) $oldById[$iid]['sl'] !== $k + 1) upd('report_items', $iid, ['sl' => $k + 1, 'data_json' => $js]); }
+    else $keep[] = ins('report_items', ['report_id' => $r['id'], 'sl' => $k + 1, 'data_json' => $js]);
+  }
+  foreach ($old as $o) if (!in_array((int) $o['id'], $keep, true)) q('DELETE FROM ' . T('report_items') . ' WHERE id = ?', [$o['id']]);
+  ins('audit', ['user_id' => $MID, 'at' => now(), 'project_id' => null, 'kind' => 'report', 'entry_id' => $r['id'], 'action' => 'edit',
+    'before_json' => json_encode(array_map(fn($o) => json_decode($o['data_json'], true), $old), JSON_UNESCAPED_UNICODE), 'after_json' => json_encode(array_column($rows, 1), JSON_UNESCAPED_UNICODE)]);
+  db()->commit(); out(['ok' => true]);
+
 case 'report_delete':  // admin only: in case an employee submitted wrong data and must redo
   need_admin();
   $r = one('SELECT * FROM ' . T('reports') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]); if (!$r) fail('Not found', 404);
+  ins('audit', ['user_id' => $MID, 'at' => now(), 'project_id' => null, 'kind' => 'report', 'entry_id' => $r['id'], 'action' => 'delete', 'before_json' => json_encode(['user_id' => $r['user_id'], 'rdate' => $r['rdate'], 'items' => array_map(fn($o) => json_decode($o['data_json'], true), all('SELECT data_json FROM ' . T('report_items') . ' WHERE report_id = ?', [$r['id']]))], JSON_UNESCAPED_UNICODE), 'after_json' => null]);
   q('DELETE FROM ' . T('report_items') . ' WHERE report_id = ?', [$r['id']]);
   q('DELETE FROM ' . T('reports') . ' WHERE id = ?', [$r['id']]);
   out(['ok' => true]);
