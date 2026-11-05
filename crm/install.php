@@ -20,6 +20,7 @@ if (!$done && $_SERVER['REQUEST_METHOD'] === 'POST') {
       if (@file_put_contents($cfgFile, $php) === false) throw new Exception('Could not save config.php. Check folder permissions.');
       create_schema('mysql');
       seed_defaults();
+      migrate();   // bring every table to the latest version now, so any problem shows here
       if (!val('SELECT COUNT(*) FROM ' . T('users') . " WHERE role = 'admin'")) {
         ins('users', ['name' => $aname, 'email' => $aemail, 'pass_hash' => password_hash($apass, PASSWORD_DEFAULT), 'role' => 'admin',
           'designation' => 'Business Head', 'department' => 'Operations', 'active' => 1, 'joined_on' => today(), 'created_at' => now()]);
