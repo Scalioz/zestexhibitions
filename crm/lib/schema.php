@@ -108,6 +108,16 @@ function migrate() {
     foreach (['orig_size INT', 'shrunk INT NOT NULL DEFAULT 0'] as $col) { try { db()->exec('ALTER TABLE ' . T('files') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ } }
     set_setting('schema_v', 12);
   }
+  if ($v < 13) {   // quote generator + "customer approved the design"
+    foreach (['doc TEXT', 'quote_no VARCHAR(40)'] as $col) { try { db()->exec('ALTER TABLE ' . T('approvals') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ } }
+    foreach (['design_ok_on DATE', 'design_ok_by VARCHAR(120)', 'design_ok_ver INT'] as $col) { try { db()->exec('ALTER TABLE ' . T('projects') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ } }
+    try { db()->exec('CREATE UNIQUE INDEX zc_appr_qno ON ' . T('approvals') . ' (quote_no)'); } catch (PDOException $e) { /* already there */ }
+    $c = setting('company', []);   // bank details from Zest's quotation format
+    foreach (['bank_benef' => 'ZEST EXHIBITIONS', 'bank_name' => 'AXIS BANK', 'bank_branch' => 'ITT, Nehru Place, New Delhi - 110019', 'bank_acno' => '9230-2000-4724944', 'bank_ifsc' => 'UTIB0005104',
+              'bank_swift' => 'AXISINBBXX', 'bank_micr' => '1102113848', 'email' => 'info@zestexhibitions.com', 'website' => 'www.zestexhibitions.com'] as $k => $val) if (empty($c[$k])) $c[$k] = $val;
+    set_setting('company', $c);
+    set_setting('schema_v', 13);
+  }
 }
 
 // ---------- ACCOUNTS (double entry) ----------
@@ -169,7 +179,7 @@ function create_approvals_table() {
   foreach ([
     'CREATE TABLE IF NOT EXISTS ' . T('approvals') . " (id $PK, project_id INT NOT NULL, kind VARCHAR(10) NOT NULL, version INT NOT NULL, amount DECIMAL(14,2), note TEXT,
       requested_by INT NOT NULL, requested_at DATETIME NOT NULL, status VARCHAR(10) NOT NULL DEFAULT 'pending', decided_by VARCHAR(120), decided_at DATETIME, admin_note TEXT,
-      sent_on DATE, sent_by VARCHAR(120), sent_at DATETIME)$E",
+      sent_on DATE, sent_by VARCHAR(120), sent_at DATETIME, doc TEXT, quote_no VARCHAR(40))$E",
     'CREATE INDEX zc_appr_project ON ' . T('approvals') . ' (project_id)',
     'CREATE INDEX zc_appr_status ON ' . T('approvals') . ' (status)',
   ] as $q) { try { db()->exec($q); } catch (PDOException $e) { if (stripos($q, 'CREATE INDEX') !== 0) throw $e; } }

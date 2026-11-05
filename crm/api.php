@@ -103,7 +103,7 @@ define('ZEST_API', 1);
 if (in_array($A, ['lexpos', 'lexpo', 'lexpo_save', 'lead_add', 'lead_bulk', 'lead_update', 'lead_del', 'design_jobs', 'design_save', 'assign_designer', 'assign_ops',
   'ops_jobs', 'ops_job', 'ops_save', 'jobs_board'], true)) require __DIR__ . '/lib/work_api.php';
 if (str_starts_with($A, 'acc_') || str_starts_with($A, 'inv_') || str_starts_with($A, 'claim_')) require __DIR__ . '/lib/acc_api.php';
-if (in_array($A, ['appr_request', 'appr_cancel', 'appr_decide', 'appr_sent', 'sales_log'], true)) require __DIR__ . '/lib/appr_api.php';
+if (in_array($A, ['appr_request', 'appr_cancel', 'appr_decide', 'appr_sent', 'sales_log', 'design_client_ok', 'quote_prefill', 'quote_save'], true)) require __DIR__ . '/lib/appr_api.php';
 
 // ---------- actions ----------
 switch ($A) {
@@ -455,7 +455,8 @@ case 'project':
   $p['ops'] = json_decode($p['ops_json'] ?? '', true) ?: null; unset($p['ops_json']);
   $p['chosen_vendor'] = one('SELECT v.name, q.amount FROM ' . T('vendor_quotes') . ' q JOIN ' . T('vendors') . ' v ON v.id = q.vendor_id WHERE q.project_id = ? AND q.selected = 1', [$id]);
   $p['approvals'] = all('SELECT a.*, u.name AS requested_by_name FROM ' . T('approvals') . ' a LEFT JOIN ' . T('users') . ' u ON u.id = a.requested_by WHERE a.project_id = ? ORDER BY a.kind, a.version', [$id]);
-  $af = files_of('appr', array_column($p['approvals'], 'id')); foreach ($p['approvals'] as &$ap) $ap['files'] = $af[$ap['id']] ?? []; unset($ap);
+  $p['approvals'] = array_values(array_filter($p['approvals'], fn($a) => $a['status'] !== 'draft' || $ADMIN || (int) $a['requested_by'] === $MID));   // drafts: only their maker
+  $af = files_of('appr', array_column($p['approvals'], 'id')); foreach ($p['approvals'] as &$ap) { $ap['files'] = $af[$ap['id']] ?? []; $ap['has_doc'] = $ap['doc'] ? 1 : 0; unset($ap['doc']); } unset($ap);
   $p['history'] = array_map(fn($h) => $h + ['by' => $um[$h['user_id']] ?? '—'], all('SELECT * FROM ' . T('audit') . ' WHERE project_id = ? ORDER BY id DESC LIMIT 50', [$id]));
   $c = one('SELECT id, company, dnq FROM ' . T('clients') . ' WHERE id = ?', [$p['client_id']]);
   $p['client'] = $c; $p['owner'] = users_map()[$p['owner_id']] ?? '—';
@@ -722,7 +723,8 @@ case 'password':
 // ----- SETTINGS -----
 case 'settings':
   need_admin();
-  out(['holidays' => all('SELECT * FROM ' . T('holidays') . ' ORDER BY hdate DESC'), 'track_from' => setting('track_from')]);
+  require_once __DIR__ . '/lib/quote.php';
+  out(['holidays' => all('SELECT * FROM ' . T('holidays') . ' ORDER BY hdate DESC'), 'track_from' => setting('track_from'), 'quote_defaults' => quote_defaults()]);
 
 case 'storage':   // admin: how much space files use, and compress older files
   need_admin(); require_once __DIR__ . '/lib/shrink.php';
@@ -750,6 +752,14 @@ case 'storage_shrink':   // admin: compress older files, a few at a time (the pa
 
 case 'settings_save':
   need_admin();
+  if (isset($in['quote_defaults'])) {   // default text for generated quotes
+    require_once __DIR__ . '/lib/quote.php'; $q = (array) $in['quote_defaults']; $cur = (array) setting('quote_defaults', []);
+    $ln = fn($v) => array_values(array_filter(array_map(fn($x) => mb_substr(trim((string) $x), 0, 400), is_array($v) ? $v : preg_split('~\r?\n~', (string) $v)), 'strlen'));
+    foreach (['payment_terms', 'notes', 'client_resp', 'excludes'] as $k) if (isset($q[$k])) $cur[$k] = $ln($q[$k]);
+    if (isset($q['valid_days'])) $cur['valid_days'] = max(1, min(365, (int) $q['valid_days']));
+    if (isset($q['scope'])) $cur['scope'] = s($q['scope'], 120) ?? QUOTE_DEFAULTS['scope'];
+    set_setting('quote_defaults', $cur);
+  }
   if (isset($in['file_quality'])) { require_once __DIR__ . '/lib/shrink.php'; if (!isset(SHRINK_LEVELS[$in['file_quality']])) fail('Pick a quality level.'); set_setting('file_quality', $in['file_quality']); }
   if (isset($in['weekly_off'])) set_setting('weekly_off', array_values(array_unique(array_map('intval', array_filter((array) $in['weekly_off'], fn($x) => $x >= 0 && $x <= 6)))));
   if (isset($in['departments'])) { $dp = array_values(array_unique(array_filter(array_map(fn($x) => s($x, 60), (array) $in['departments'])))); if (!$dp) fail('Keep at least one department.'); set_setting('departments', $dp); }

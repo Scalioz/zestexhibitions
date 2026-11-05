@@ -105,13 +105,13 @@ async function route() {
   window.scrollTo(0, 0);
 }
 const ADMIN_ONLY = { invappr: 1, clientlog: 1, saleslog: 1, leadlog: 1, jobs: 1, reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
-const RECORDS_ONLY = { clients: 1, client: 1, project: 1, newclient: 1 };
+const RECORDS_ONLY = { clients: 1, client: 1, project: 1, newclient: 1, qgen: 1 };
 const ACC_ROUTES = { acc: 1, entry: 1, jv: 1, invoices: 1, invnew: 1, inv: 1, invappr: 1, claims: 1, topost: 1, books: 1, coa: 1, accset: 1 };
 const MODULE_ONLY = { myinv: ['records'], myexp: ['records', 'ops'],  leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
 async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); window.scrollTo(0, y); }
 
 function renderNav(cur) {
-  const map = { jv: 'books', inv: 'invoices', invnew: 'invoices', invd: B.acc ? 'invoices' : 'myinv', acc: isAdmin() ? 'acc' : 'home', client: 'clients', project: 'clients', lexpo: isAdmin() ? 'leadlog' : 'leads', opsjob: isAdmin() ? 'jobs' : 'myops' };
+  const map = { qgen: 'clients', jv: 'books', inv: 'invoices', invnew: 'invoices', invd: B.acc ? 'invoices' : 'myinv', acc: isAdmin() ? 'acc' : 'home', client: 'clients', project: 'clients', lexpo: isAdmin() ? 'leadlog' : 'leads', opsjob: isAdmin() ? 'jobs' : 'myops' };
   const on = map[cur] || cur;
   const L = (k, l, b) => `<a href="#${k}" class="${on === k ? 'on' : ''}">${l}${b ? `<span class="badge">${b}</span>` : ''}</a>`;
   $('#nav').innerHTML = isAdmin()
@@ -358,7 +358,7 @@ PT.design = p => `<div class="inset" style="margin-bottom:14px"><div class="grid
    <div class="sub"><b>Assigned by</b><br>${esc(p.design_assigned_by || '—')}${p.designer_id ? ' · ' + fd(p.assigned_on) : ''}</div>
    <div class="sub"><b>Design submitted</b><br>${p.design_submitted_on ? fd(p.design_submitted_on) : p.designer_id ? '<span class="pill p-pending">pending</span>' : '—'}</div></div>
    ${p.design_notes ? `<div class="sub" style="margin-top:8px"><b>Designer notes:</b> ${esc(p.design_notes)}</div>` : ''}</div>
-  ${apprPanel(p, 'design')}
+  ${designOkBlock(p)}${apprPanel(p, 'design')}
   <div class="grid">${PF(p, 'designed_by', 'Designed by')}${PF(p, 'assigned_on', 'Design assigned on', 'date')}${PF(p, 'design_approved_by', 'Design approved by (Zest)')}</div>
   <h3 style="margin:18px 0 8px">Corrections</h3>
   ${p.revisions.length ? `<div class="tw"><table><tr><th>#</th><th>Date</th><th>Done by</th><th>What changed</th><th>File</th><th></th></tr>${p.revisions.map((r, i) => rowOr('revision', r, 6, `<tr><td>R${i + 1}</td><td class="num">${fd(r.rdate)}</td><td>${esc(r.done_by || '')}</td><td>${esc(r.changes)}</td><td>${fileChips(p.files.revision[r.id], isAdmin())}</td><td class="r">${acts('revision', r.id)}</td></tr>`)).join('')}</table></div>` : '<div class="sub">No corrections yet.</div>'}
@@ -717,13 +717,15 @@ routes.jobs = async () => {
 };
 
 // ---------- APPROVALS (design + quote) ----------
-const STAGE = { pending: ['p-pending', 'waiting approval'], approved: ['p-ok', 'approved · to send'], rejected: ['p-bad', 'rejected'], sent: ['p-received', 'sent to customer'] };
+const STAGE = { draft: ['p-off', 'draft · not sent'], pending: ['p-pending', 'waiting approval'], approved: ['p-ok', 'approved · to send'], rejected: ['p-bad', 'rejected'], sent: ['p-received', 'sent to customer'] };
 const stageOf = a => a.sent_on ? 'sent' : a.status;
 const stagePill = a => { const [c, l] = STAGE[stageOf(a)]; return `<span class="pill ${c}">${l}</span>`; };
 const dt = v => v ? `${fd(v)} <span class="sub">${String(v).slice(11, 16)}</span>` : '—';
 // one version's controls: approve/reject (admin), withdraw (requester), mark sent (sales/admin)
 function apprActions(a) {
   const st = stageOf(a), mine = +a.requested_by === +B.me.id;
+  if (st === 'draft') return mine ? `<div class="row"><a class="btn sm" href="#qgen-${a.project_id}-${a.id}">Continue</a><button class="btn link" data-acancel="${a.id}">Delete draft</button></div>` : '';
+  if (st === 'rejected' && a.has_doc && B.records) return `<a class="btn ghost sm" href="#qgen-${a.project_id}-${a.id}">Correct → new version</a>`;
   if (st === 'pending') return `${isAdmin() ? `<div class="row" style="flex-wrap:nowrap;gap:6px"><input data-anote="${a.id}" placeholder="Note (needed to reject)" style="min-width:160px">
       <button class="btn sm" data-adec="approved:${a.id}">Approve</button><button class="btn sm danger" data-adec="rejected:${a.id}">Reject</button></div>` : ''}
     ${mine || isAdmin() ? `<div class="row" style="margin-top:4px">${upBtn('appr', a.id, 'Add file')}<button class="btn link" data-acancel="${a.id}">Withdraw</button></div>` : ''}`;
@@ -733,7 +735,7 @@ function apprActions(a) {
 function apprTable(list, showAmount) {
   return `<div class="tw"><table><tr><th>Ver.</th><th>Sent for approval</th>${showAmount ? '<th class="r">Amount</th>' : ''}<th>Files</th><th>Sales note</th><th>Admin decision</th><th>Sent to customer</th><th>Status</th><th></th></tr>
   ${list.map(a => `<tr><td><b>V${a.version}</b></td><td class="num">${dt(a.requested_at)}<div class="sub">${esc(a.requested_by_name || '')}</div></td>${showAmount ? `<td class="r num">${inr(a.amount)}</td>` : ''}
-   <td>${fileChips(a.files, a.status === 'pending' && (isAdmin() || +a.requested_by === +B.me.id))}</td><td class="sub">${esc(a.note || '')}</td>
+   <td>${qFiles(a)}${fileChips(a.files, a.status === 'pending' && (isAdmin() || +a.requested_by === +B.me.id))}</td><td class="sub">${esc(a.note || '')}</td>
    <td>${a.decided_at ? `<span class="num">${dt(a.decided_at)}</span><div class="sub">${esc(a.decided_by)}${a.admin_note ? ' — ' + esc(a.admin_note) : ''}</div>` : '—'}</td>
    <td>${a.sent_on ? `<span class="num">${fd(a.sent_on)}</span><div class="sub">${esc(a.sent_by)}</div>` : '—'}</td><td>${stagePill(a)}</td><td>${apprActions(a)}</td></tr>`).join('')}</table></div>`;
 }
@@ -743,12 +745,117 @@ function apprPanel(p, kind) {
   const reuse = q ? [] : [...p.files.final, ...p.files.wd];
   return `<div class="inset" style="margin-bottom:16px"><h3 style="margin-bottom:6px">${q ? 'Quote approvals' : 'Design approvals'}</h3>
    <p class="sub" style="margin-top:0">Every ${q ? 'quote' : 'design'} goes to admin for approval before it is sent to the customer. Each new version is numbered V1, V2, V3…</p>
+   ${q ? quoteGenBlock(p) : ''}
    ${list.length ? apprTable(list, q) : `<div class="sub">No ${q ? 'quote' : 'design'} sent for approval yet.</div>`}
-   ${B.records ? `<form data-areq="${kind}" style="margin-top:12px"><b class="sub">Send V${list.length + 1} for approval</b>${pend ? ` <span class="sub">· V${pend.version} is still waiting</span>` : ''}
+   ${B.records ? `${q ? '<details style="margin-top:12px"><summary class="btn link">Or attach a quote file made outside the CRM</summary>' : ''}<form data-areq="${kind}" style="margin-top:12px"><b class="sub">Send V${list.length + 1} for approval</b>${pend ? ` <span class="sub">· V${pend.version} is still waiting</span>` : ''}
     <div class="grid g3" style="margin-top:6px">${q ? `<label class="f">Quote amount (₹) *<input type="number" step="any" name="amount" required value="${num(p.agreed || p.offered || '')}"></label>` : ''}
      <label class="f wide">Note for admin <span class="sub" style="font-weight:400">(what changed in this version)</span><input name="note"></label></div>
     ${reuse.length ? `<div class="row" style="margin-top:8px"><span class="sub">Use designer's file:</span>${reuse.map(f => `<label class="row" style="gap:4px"><input type="checkbox" name="reuse" value="${f.id}">${esc(f.orig_name)}</label>`).join('')}</div>` : ''}
-    <div class="row" style="margin-top:8px"><label class="up">⬆ ${q ? 'Attach quote (PDF)' : 'Attach design file'}<input type="file" name="file" multiple accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx,.pptx"></label><button class="btn sm">Send for approval</button></div></form>` : ''}</div>`;
+    <div class="row" style="margin-top:8px"><label class="up">⬆ ${q ? 'Attach quote (PDF)' : 'Attach design file'}<input type="file" name="file" multiple accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx,.pptx"></label><button class="btn sm">Send for approval</button></div></form>${q ? '</details>' : ''}` : ''}</div>`;
+}
+
+
+// ---------- customer approval of the design + quote generator ----------
+function designOkBlock(p) {
+  const sent = p.approvals.filter(a => a.kind === 'design' && a.sent_on);
+  if (p.design_ok_on) return `<div class="alert" style="background:var(--ok-bg);color:var(--ok)"><b>Customer approved the design${p.design_ok_ver ? ` (V${p.design_ok_ver})` : ''} on ${fd(p.design_ok_on)}</b><span class="m">Marked by ${esc(p.design_ok_by || '')}. The quote can now be generated from the Order tab.${isAdmin() ? ' <button class="btn link" data-dokundo="1">Undo</button>' : ''}</span></div>`;
+  if (!B.records) return '';
+  return `<form class="inset" id="dokf" style="margin-bottom:16px"><h3 style="margin-bottom:6px">Customer approval</h3>
+   ${sent.length ? `<div class="row" style="align-items:flex-end"><label class="f">Design version the customer approved<select name="approval_id">${[...sent].reverse().map(a => `<option value="${a.id}">V${a.version} · sent ${fd(a.sent_on)}</option>`).join('')}</select></label>
+    <label class="f">Approved on<input type="date" name="on" value="${B.today}" max="${B.today}"></label><button class="btn sm">✓ Customer approved this design</button></div>`
+   : `<div class="sub">Once a design version is approved by admin and marked “sent to customer”, mark here when the customer approves it. That unlocks “Generate quote”.</div>${isAdmin() ? '<div style="margin-top:8px"><button class="btn ghost sm" name="nover" value="1">Mark customer approved (design shared outside the CRM)</button></div>' : ''}`}</form>`;
+}
+function quoteGenBlock(p) {
+  const qs = p.approvals.filter(a => a.kind === 'quote'), draft = qs.find(a => a.status === 'draft' && +a.requested_by === +B.me.id);
+  const lastGen = [...qs].reverse().find(a => a.has_doc && a.status !== 'draft');
+  if (!B.records) return '';
+  if (!p.design_ok_on) return `<div class="alert"><b>Generate quote</b><span class="m">Available once the customer approves the design — mark it on the <a href="#project-${p.id}-design">Design tab</a>.</span></div>`;
+  return `<div class="row" style="margin-bottom:12px">${draft ? `<a class="btn" href="#qgen-${p.id}-${draft.id}">Continue draft quote V${draft.version}</a>` : `<a class="btn" href="#qgen-${p.id}${lastGen ? '-' + lastGen.id : ''}">⚡ Generate quote${lastGen ? ` V${qs.length + 1} (from V${lastGen.version})` : ''}</a>`}
+   <span class="sub">Filled from this order — check, adjust and send to admin for approval.</span></div>`;
+}
+const qFiles = a => a.has_doc ? `<a class="btn ghost sm" href="quote.php?id=${a.id}" target="_blank" rel="noopener">${a.status === 'approved' ? 'View / download' : 'View quote'}</a>${a.quote_no ? `<div class="sub num">${esc(a.quote_no)}</div>` : ''}` : '';
+
+const Q_AREA = ['As Per Design', 'L.S', 'm²', 'Sq. ft.', 'Running ft.'];
+routes.qgen = async ({ id, tab }) => {
+  const d = await api('quote_prefill', { project_id: id, from_id: tab || 0 });
+  if (!d.design_ok) { toast('Mark the design as approved by the customer first', true); location.hash = `#project-${id}-design`; return; }
+  C.q = { pid: id, draft: d.draft_id, ver: d.version, doc: d.doc, meta: d };
+  drawQuote();
+};
+function qCapture() {
+  const f = $('#qgenf'); if (!f) return; const q = C.q.doc, g = k => f.querySelector(`[name="${k}"]`);
+  ['date', 'valid_days', 'to_company', 'to_address', 'to_gstin', 'salutation', 'attn', 'expo', 'expo_dates', 'venue', 'total', 'discount', 'gst_rate', 'gst_mode', 'prepared_by', 'prepared_phone'].forEach(k => { if (g(k)) q[k] = g(k).value; });
+  q.show_rates = g('show_rates').checked ? 1 : 0;
+  ['payment_terms', 'notes', 'client_resp', 'excludes'].forEach(k => q[k] = g(k).value.split('\n').map(x => x.trim()).filter(Boolean));
+  q.details = [...f.querySelectorAll('[data-qdrow]')].map(r => ({ l: r.querySelector('[data-k=l]').value, v: r.querySelector('[data-k=v]').value }));
+  q.items = [...f.querySelectorAll('[data-qirow]')].map(r => ({ desc: r.querySelector('[data-k=desc]').value, qty: r.querySelector('[data-k=qty]').value, area: r.querySelector('[data-k=area]').value, amount: r.querySelector('[data-k=amount]')?.value ?? '', sub: r.querySelector('[data-k=sub]').checked ? 1 : 0 }));
+  C.q.note = g('note').value;
+}
+function qTotals() {
+  const f = $('#qgenf'); if (!f) return; const g = k => f.querySelector(`[name="${k}"]`);
+  const rates = g('show_rates').checked;
+  const sum = [...f.querySelectorAll('[data-k=amount]')].reduce((s, i) => s + (+String(i.value).replace(/,/g, '') || 0), 0);
+  if (rates) g('total').value = sum ? Math.round(sum * 100) / 100 : '';
+  const tot = +String(g('total').value).replace(/,/g, '') || 0, disc = +String(g('discount').value).replace(/,/g, '') || 0, r = +g('gst_rate').value || 0;
+  const tx = Math.max(0, tot - disc), gst = Math.round(tx * r) / 100, igst = g('gst_mode').value === 'igst';
+  $('#q-tot').innerHTML = `<div class="sum"><div class="l"><span>Total</span><span class="num">${inr2(tot)}</span></div>${disc ? `<div class="l"><span>Discount</span><span class="num">− ${inr2(disc)}</span></div>` : ''}
+   ${igst ? `<div class="l"><span>IGST ${r}%</span><span class="num">${inr2(gst)}</span></div>` : `<div class="l"><span>CGST ${r / 2}%</span><span class="num">${inr2(Math.round(gst * 50) / 100)}</span></div><div class="l"><span>SGST ${r / 2}%</span><span class="num">${inr2(gst - Math.round(gst * 50) / 100)}</span></div>`}
+   <div class="l tot big"><span>Grand total</span><span class="num">${inr2(tx + gst)}</span></div></div>`;
+  g('total').readOnly = rates;
+}
+function drawQuote() {
+  const { doc: q, meta, ver } = C.q, p = meta.project;
+  const ta = (k, l, hint) => `<label class="f">${l}<textarea name="${k}" rows="${Math.max(3, q[k].length + 1)}" placeholder="${hint || 'One point per line'}">${esc(q[k].join('\n'))}</textarea></label>`;
+  const inp = (k, l, t = 'text', extra = '') => `<label class="f">${l}<input name="${k}" type="${t}" value="${esc(q[k] ?? '')}" ${extra}></label>`;
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#project-${p.id}-order">← ${esc(p.company)} · ${esc(p.expo)}</a></div><h1>Quotation V${ver}</h1><p>Filled from the order. Check every section, then send it to admin for approval.</p></div><span class="pill p-pending">${C.q.draft ? 'draft' : 'new'}</span></div>
+  <form id="qgenf">
+   <div class="panel"><h2>Customer</h2><div class="grid g3">${inp('date', 'Quote date *', 'date', 'required')}${inp('valid_days', 'Valid for (days)', 'number', 'min="1"')}${inp('to_company', 'Company (M/S) *', 'text', 'required')}
+    <label class="f">Salutation<select name="salutation">${['Mr.', 'Ms.', 'Mrs.', 'Dr.', 'Sir / Madam'].map(x => `<option ${q.salutation === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>${inp('attn', 'Contact person')}${inp('to_gstin', 'Customer GSTIN')}</div>
+    <label class="f" style="margin-top:10px">Customer address<textarea name="to_address" rows="2">${esc(q.to_address)}</textarea></label></div>
+   <div class="panel"><h2>Event</h2><div class="grid g3">${inp('expo', 'Expo name *', 'text', 'required')}${inp('expo_dates', 'Dates (as printed)', 'text', 'placeholder="27 – 29 November 2026"')}${inp('venue', 'Venue')}</div></div>
+   <div class="panel"><h2>General details</h2><p class="sub" style="margin-top:0">Blank lines are left out of the quote.</p>
+    <div id="q-det">${q.details.map((x, k) => `<div class="row" data-qdrow style="margin-top:6px;flex-wrap:nowrap"><input data-k="l" value="${esc(x.l)}" style="max-width:180px"><input data-k="v" value="${esc(x.v)}" style="flex:1;min-width:0"><button type="button" class="btn link" data-qdel="${k}" aria-label="Remove">✕</button></div>`).join('')}</div>
+    <button type="button" class="btn ghost sm" id="q-detadd" style="margin-top:8px">+ Add detail</button></div>
+   <div class="panel"><div class="ph"><h2>Items</h2><label class="row" style="gap:6px"><input type="checkbox" name="show_rates" ${+q.show_rates ? 'checked' : ''}> Show price against each item</label></div>
+    <p class="sub" style="margin-top:0">Tick “Sub” for points under a heading (a, b, c). Area can be “As Per Design”, “L.S” (lumpsum) or a size.</p>
+    <div class="tw"><table id="q-items"><tr><th style="width:44px">Sub</th><th>Particulars</th><th style="width:80px">Qty</th><th style="width:150px">Area</th>${+q.show_rates ? '<th style="width:130px">Amount (₹)</th>' : ''}<th style="width:96px"></th></tr>
+     ${q.items.map((x, k) => `<tr data-qirow><td style="text-align:center"><input type="checkbox" data-k="sub" ${+x.sub ? 'checked' : ''} aria-label="Sub point"></td><td><input data-k="desc" value="${esc(x.desc)}" ${+x.sub ? 'style="margin-left:18px;width:calc(100% - 18px)"' : ''}></td><td><input data-k="qty" value="${esc(x.qty)}"></td><td><input data-k="area" list="q-area" value="${esc(x.area)}"></td>${+q.show_rates ? `<td><input data-k="amount" type="number" step="any" value="${esc(x.amount)}" data-qcalc></td>` : ''}
+      <td class="r" style="white-space:nowrap"><button type="button" class="btn link" data-qup="${k}" aria-label="Move up">↑</button><button type="button" class="btn link" data-qdown="${k}" aria-label="Move down">↓</button><button type="button" class="btn link" data-qidel="${k}" aria-label="Remove">✕</button></td></tr>`).join('')}</table></div>
+    <datalist id="q-area">${Q_AREA.map(x => `<option value="${x}">`).join('')}</datalist>
+    <button type="button" class="btn ghost sm" id="q-itemadd" style="margin-top:8px">+ Add item</button></div>
+   <div class="panel"><h2>Amount</h2><div class="grid"><div class="grid g3">${inp('total', 'Total (₹) *', 'number', 'step="any" data-qcalc')}${inp('discount', 'Discount (₹)', 'number', 'step="any" min="0" data-qcalc')}${inp('gst_rate', 'GST rate (%)', 'number', 'step="any" data-qcalc')}
+     <label class="f">GST type<select name="gst_mode" data-qcalc><option value="igst" ${q.gst_mode === 'igst' ? 'selected' : ''}>IGST (customer in another state)</option><option value="cgst_sgst" ${q.gst_mode === 'cgst_sgst' ? 'selected' : ''}>CGST + SGST (same state as Zest)</option></select></label></div><div class="inset" id="q-tot"></div></div>
+    <div class="sub">Amount in words is added automatically.</div></div>
+   <div class="panel"><h2>Terms</h2><div class="grid">${ta('payment_terms', 'Payment terms')}${ta('notes', 'Important notes & terms', 'One point per line · {valid} = validity days')}${ta('client_resp', 'Client responsibilities & ownership')}${ta('excludes', 'Quotation does not include')}</div>
+    <p class="sub">Bank details, GSTIN and contact line come from Company settings.</p></div>
+   <div class="panel"><h2>Send</h2><div class="grid g3">${inp('prepared_by', 'Prepared by')}${inp('prepared_phone', 'Phone')}<label class="f wide">Note for admin<input name="note" value="${esc(C.q.note || '')}" placeholder="e.g. Agreed 15k discount on call"></label></div>
+    <div class="row" style="margin-top:12px"><button class="btn ghost" data-qsave="draft">Save draft</button><button class="btn ghost" data-qsave="preview">Save & preview</button><button class="btn" data-qsave="submit">Send to admin for approval</button></div></div>
+  </form>`;
+  qTotals();
+  const f = $('#qgenf');
+  f.addEventListener('input', e => { if (e.target.matches('[data-qcalc]')) qTotals(); });
+  f.addEventListener('change', e => { if (e.target.name === 'show_rates' || e.target.dataset.k === 'sub') { qCapture(); drawQuote(); } else if (e.target.matches('[data-qcalc]')) qTotals(); });
+  f.addEventListener('click', e => {
+    const b = e.target.closest('button[type=button]'); if (!b) return; qCapture(); const it = C.q.doc.items, ds = b.dataset;
+    if (b.id === 'q-itemadd') it.push({ desc: '', qty: '', area: '', amount: '', sub: 0 });
+    else if (b.id === 'q-detadd') C.q.doc.details.push({ l: '', v: '' });
+    else if (ds.qidel !== undefined) it.splice(+ds.qidel, 1);
+    else if (ds.qdel !== undefined) C.q.doc.details.splice(+ds.qdel, 1);
+    else if (ds.qup !== undefined && +ds.qup > 0) [it[+ds.qup - 1], it[+ds.qup]] = [it[+ds.qup], it[+ds.qup - 1]];
+    else if (ds.qdown !== undefined && +ds.qdown < it.length - 1) [it[+ds.qdown + 1], it[+ds.qdown]] = [it[+ds.qdown], it[+ds.qdown + 1]];
+    else return;
+    drawQuote();
+  });
+  f.onsubmit = async e => {
+    e.preventDefault(); qCapture(); const how = e.submitter?.dataset.qsave || 'draft';
+    if (how === 'submit' && !confirm('Send this quote to admin for approval?')) return;
+    const btns = f.querySelectorAll('[data-qsave]'); btns.forEach(x => x.disabled = true);
+    const r = await act(() => api('quote_save', { project_id: C.q.pid, id: C.q.draft || 0, doc: C.q.doc, note: C.q.note, submit: how === 'submit' ? 1 : 0 }), how === 'submit' ? `Quote V${C.q.ver} sent to admin for approval` : 'Draft saved').catch(() => null);
+    btns.forEach(x => x.disabled = false); if (!r) return;
+    C.q.draft = r.status === 'draft' ? r.id : null;
+    if (how === 'preview') { window.open('quote.php?id=' + r.id, '_blank', 'noopener'); return; }
+    if (how === 'submit') { await reboot(); location.hash = `#project-${C.q.pid}-order`; }
+  };
 }
 
 routes.saleslog = async () => {
@@ -1077,10 +1184,10 @@ routes.coa = async () => {
 routes.accset = async () => {
   const m = await accMeta(true); const c = m.company;
   const F = (k, l, t = 'text') => `<label class="f">${l}<input name="${k}" type="${t}" value="${esc(c[k] || '')}"></label>`;
-  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#acc">← Accounts</a></div><h1>Company & invoice settings</h1><p>Printed on every invoice.</p></div></div>
-  <form class="panel" id="accsetf"><div class="grid g3">${F('name', 'Company name')}${F('gstin', 'GSTIN')}${F('pan', 'PAN')}${F('phone', 'Phone')}
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#acc">← Accounts</a></div><h1>Company & invoice settings</h1><p>Printed on every invoice and quotation.</p></div></div>
+  <form class="panel" id="accsetf"><div class="grid g3">${F('name', 'Company name')}${F('gstin', 'GSTIN')}${F('pan', 'PAN')}${F('phone', 'Phone')}${F('email', 'Email')}${F('website', 'Website')}
    <label class="f">State (for CGST/SGST vs IGST)<input name="state" list="states" value="${esc(c.state || '')}"></label><datalist id="states">${STATES.map(x => `<option value="${x}">`).join('')}</datalist>${F('sac', 'Default SAC code')}
-   ${F('bank_name', 'Bank name')}${F('bank_acno', 'Bank account no.')}${F('bank_ifsc', 'IFSC')}${F('books_from', 'Books start date', 'date')}</div>
+   ${F('bank_benef', 'Beneficiary name')}${F('bank_name', 'Bank name')}${F('bank_branch', 'Branch address')}${F('bank_acno', 'Bank account no.')}${F('bank_ifsc', 'IFSC')}${F('bank_swift', 'SWIFT code')}${F('bank_micr', 'MICR code')}${F('books_from', 'Books start date', 'date')}</div>
    <div class="grid" style="margin-top:12px"><label class="f">Address<textarea name="address">${esc(c.address || '')}</textarea></label><label class="f">Invoice terms<textarea name="terms">${esc(c.terms || '')}</textarea></label></div>
    <div style="margin-top:12px"><button class="btn">Save settings</button></div></form>`;
 };
@@ -1183,6 +1290,10 @@ routes.settings = async () => {
    <div class="panel"><h2>Vendors</h2>${B.vendors.length ? `<div class="tw"><table><tr><th>Vendor</th><th>Phone</th><th>City</th><th>Email</th><th></th></tr>${B.vendors.map(v => `<tr><td><b>${esc(v.name)}</b></td><td class="num">${esc(v.phone || '')}</td><td>${esc(v.city || '')}</td><td>${esc(v.email || '')}</td><td class="r"><button class="btn link" data-delvendor="${v.id}">✕</button></td></tr>`).join('')}</table></div>` : '<div class="sub">No vendors yet.</div>'}
     <form class="grid g3 inset" id="vd-add" style="margin-top:10px"><label class="f">Vendor name *<input name="name" required></label><label class="f">Phone *<input name="phone" type="tel" required></label><label class="f">City *<input name="city" required></label><label class="f">Email<input name="email" type="email"></label><div style="align-self:end"><button class="btn ghost sm">+ Add vendor</button></div></form></div>
   </div>
+  <form class="panel" id="qdefs"><h2>Quote template</h2><p class="sub" style="margin-top:0">Every generated quote starts with these. Sales can still change them on each quote. One point per line.</p>
+   <div class="grid g3"><label class="f">Valid for (days)<input type="number" name="valid_days" min="1" value="${d.quote_defaults.valid_days}"></label><label class="f wide">Default scope of work<input name="scope" value="${esc(d.quote_defaults.scope)}"></label></div>
+   <div class="grid" style="margin-top:10px">${[['payment_terms', 'Payment terms'], ['notes', 'Important notes & terms ({valid} = validity days)'], ['client_resp', 'Client responsibilities & ownership'], ['excludes', 'Quotation does not include']].map(([k, l]) => `<label class="f">${l}<textarea name="${k}" rows="${d.quote_defaults[k].length + 1}">${esc(d.quote_defaults[k].join('\n'))}</textarea></label>`).join('')}</div>
+   <div style="margin-top:10px"><button class="btn sm">Save quote template</button> <span class="sub">Bank details & GSTIN: <a href="#accset">Company settings</a></span></div></form>
   <div class="panel" id="storage"><h2>Files & storage</h2><p class="sub" style="margin-top:0">Every upload is compressed automatically: photos, screenshots and the pictures inside PDF, Word, Excel and PowerPoint files. Text and drawings are not touched.</p>
    ${!st.tools.gd || !st.tools.zip ? `<div class="alert bad"><b>Compression tools missing on this server</b><span class="m">Ask hosting to enable the PHP "${!st.tools.gd ? 'gd' : ''}${!st.tools.gd && !st.tools.zip ? '" and "' : ''}${!st.tools.zip ? 'zip' : ''}" extension. Uploads still work, but are not compressed.</span></div>` : ''}
    <div class="kpis"><div class="kpi"><span>Files stored</span><b>${st.files}</b></div><div class="kpi"><span>Space used</span><b>${mb(st.size)}</b></div><div class="kpi hl"><span>Space saved by compression</span><b>${mb(st.saved)}</b></div><div class="kpi"><span>Largest upload allowed</span><b>${st.limit_mb} MB</b>${st.limit_mb < 50 ? '<small>hosting limit — can be raised in hPanel → PHP settings</small>' : ''}</div></div>
@@ -1196,6 +1307,7 @@ routes.settings = async () => {
   const sub = (id, a, msg) => { $(id).onsubmit = async e => { e.preventDefault(); await act(() => api(a, Object.fromEntries(new FormData(e.target))), msg); await reboot(); refresh(); }; };
   sub('#hol-add', 'holiday_add', 'Holiday added'); sub('#rs-add', 'reason_add', 'Reason added'); sub('#vd-add', 'vendor_add', 'Vendor added');
   $('#trackf-save').onclick = async () => { await act(() => api('settings_save', { track_from: $('#trackf').value }), 'Saved'); };
+  $('#qdefs').onsubmit = async e => { e.preventDefault(); await act(() => api('settings_save', { quote_defaults: Object.fromEntries(new FormData(e.target)) }), 'Quote template saved'); };
   $('#fq-save').onclick = async () => { await act(() => api('settings_save', { file_quality: $('#fq').value }), 'Saved — applies to new uploads'); await reboot(); };
   const run = $('#shr-run'); if (run) run.onclick = async () => {
     run.disabled = true; let saved = 0, left = st.pending;
@@ -1214,13 +1326,14 @@ routes.account = async () => {
 
 // ---------- EVENTS ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-caedit],[data-cadel],[data-repedit],[data-repdel],[data-repadd],[data-reprm],[data-clt],[data-invt],[data-invreqtax],[data-invconv],[data-ildel],[data-post],[data-postskip],[data-coaedit],[data-cledit],[data-cldel],[data-adec],[data-acancel],[data-asent],[data-slt],[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
+  const t = e.target.closest('[data-dokundo],[data-caedit],[data-cadel],[data-repedit],[data-repdel],[data-repadd],[data-reprm],[data-clt],[data-invt],[data-invreqtax],[data-invconv],[data-ildel],[data-post],[data-postskip],[data-coaedit],[data-cledit],[data-cldel],[data-adec],[data-acancel],[data-asent],[data-slt],[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
   if (!t) return;
   const ds = t.dataset;
   try {
     if (ds.go && ds.acc && !e.target.closest('a,button,input,select,label')) { C.bf = Object.assign(C.bf || {}, { account_id: ds.acc }); C.br = 'ledger'; }
     if (ds.go) { if (e.target.closest('a,button,input,select,label')) return; location.hash = '#' + ds.go; return; }
     if (ds.coaedit) { e.stopPropagation(); C.coaEdit = +ds.coaedit; await refresh(); window.scrollTo(0, 0); return; }
+    if (ds.dokundo) { if (!confirm('Undo the customer approval of the design?')) return; await act(() => api('design_client_ok', { project_id: C.project.id, undo: 1 }), 'Undone'); return refresh(); }
     if (ds.caedit !== undefined) { C.caEdit = +ds.caedit; return refresh(); }
     if (ds.cadel) { if (!confirm(ds.st === 'approved' ? 'Delete this expense? It will also be removed from the books (reversed) and from the order.' : 'Delete this expense claim?')) return; await act(() => api('claim_admin_del', { id: ds.cadel }), 'Expense deleted'); await reboot(); return refresh(); }
     if (ds.repedit !== undefined) { C.repEdit = ds.repedit === '0' ? null : JSON.parse(JSON.stringify(C.repById[ds.repedit])); await refresh(); if (C.repEdit) window.scrollTo(0, 0); return; }
@@ -1413,6 +1526,7 @@ document.addEventListener('submit', async e => {
   if (f.dataset.invreply) { e.preventDefault(); const ok = await act(() => api('inv_reply', { id: f.dataset.invreply, text: f.querySelector('[name=text]').value }), 'Sent').catch(() => null); if (ok) refresh(); return; }
   if (f.dataset.invcorr) { e.preventDefault(); const ok = await act(() => api('inv_correct', { id: f.dataset.invcorr, reason: f.querySelector('[name=reason]').value }), 'Reopened for correction').catch(() => null); if (ok) { await reboot(); refresh(); } return; }
   if (f.dataset.invcan) { e.preventDefault(); const ok = await act(() => api('inv_cancel', { id: f.dataset.invcan, reason: f.querySelector('[name=reason]').value }), 'Cancelled').catch(() => null); if (ok) { await reboot(); refresh(); } return; }
+  if (f.id === 'dokf') { e.preventDefault(); const o = Object.fromEntries(new FormData(f)); const ok = await act(() => api('design_client_ok', { project_id: C.project.id, approval_id: e.submitter?.name === 'nover' ? 0 : o.approval_id, on: o.on }), 'Marked: customer approved the design — Generate quote is now open').catch(() => null); if (ok) refresh(); return; }
   if (f.dataset.casave) { e.preventDefault(); const ok = await act(() => api('claim_admin_save', { id: f.dataset.casave, ...Object.fromEntries(new FormData(f)) }), 'Expense updated').catch(() => null); if (ok) { C.caEdit = null; refresh(); } return; }
   if (f.id === 'repeditf') { e.preventDefault(); repCapture(); const ok = await act(() => api('report_admin_save', { id: C.repEdit.id, items: C.repEdit.items }), 'Report updated').catch(() => null); if (ok) { C.repEdit = null; refresh(); } return; }
   if (f.dataset.cdec) {
