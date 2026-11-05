@@ -89,6 +89,13 @@ function migrate() {
     if (($m['Accounts'] ?? 'none') === 'none' && in_array('Accounts', setting('departments', []), true)) { $m['Accounts'] = 'accounts'; set_setting('dept_modules', $m); }
     set_setting('schema_v', 8);
   }
+  if ($v < 9) {   // invoice approval workflow
+    foreach (['requested_by INT', 'request_note TEXT', 'version INT NOT NULL DEFAULT 0', 'submitted_at DATETIME', 'decided_by VARCHAR(120)', 'decided_at DATETIME', 'reason TEXT'] as $col) {
+      try { db()->exec('ALTER TABLE ' . T('invoices') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ }
+    }
+    create_accounts_tables();
+    set_setting('schema_v', 9);
+  }
 }
 
 // ---------- ACCOUNTS (double entry) ----------
@@ -108,7 +115,10 @@ function create_accounts_tables() {
     'CREATE INDEX zc_jl_j ON ' . T('jlines') . ' (journal_id)',
     'CREATE INDEX zc_jl_a ON ' . T('jlines') . ' (account_id)',
     'CREATE TABLE IF NOT EXISTS ' . T('invoices') . " (id $PK, kind VARCHAR(10) NOT NULL, inv_no VARCHAR(40), inv_date DATE NOT NULL, client_id INT NOT NULL, project_id INT, place_state VARCHAR(60), gst_mode VARCHAR(10) NOT NULL DEFAULT 'cgst_sgst', gst_rate DECIMAL(5,2) NOT NULL DEFAULT 18,
-      lines_json TEXT NOT NULL, taxable $M NOT NULL DEFAULT 0, gst $M NOT NULL DEFAULT 0, total $M NOT NULL DEFAULT 0, status VARCHAR(10) NOT NULL DEFAULT 'draft', notes TEXT, from_id INT, journal_id INT, created_by INT, created_at DATETIME NOT NULL)$E",
+      lines_json TEXT NOT NULL, taxable $M NOT NULL DEFAULT 0, gst $M NOT NULL DEFAULT 0, total $M NOT NULL DEFAULT 0, status VARCHAR(10) NOT NULL DEFAULT 'draft', notes TEXT, from_id INT, journal_id INT, created_by INT, created_at DATETIME NOT NULL,
+      requested_by INT, request_note TEXT, version INT NOT NULL DEFAULT 0, submitted_at DATETIME, decided_by VARCHAR(120), decided_at DATETIME, reason TEXT)$E",
+    'CREATE TABLE IF NOT EXISTS ' . T('inv_log') . " (id $PK, invoice_id INT NOT NULL, user_id INT NOT NULL, at DATETIME NOT NULL, action VARCHAR(16) NOT NULL, note TEXT, version INT, snap TEXT)$E",
+    'CREATE INDEX zc_invlog_i ON ' . T('inv_log') . ' (invoice_id)',
     'CREATE TABLE IF NOT EXISTS ' . T('claims') . " (id $PK, user_id INT NOT NULL, edate DATE NOT NULL, particular VARCHAR(255) NOT NULL, category VARCHAR(40), rate $M NOT NULL, qty DECIMAL(10,2) NOT NULL DEFAULT 1, total $M NOT NULL, gst $M NOT NULL DEFAULT 0, grand $M NOT NULL,
       project_id INT, note TEXT, status VARCHAR(10) NOT NULL DEFAULT 'submitted', submitted_at DATETIME NOT NULL, decided_by VARCHAR(120), decided_at DATETIME, reason TEXT, journal_id INT, created_at DATETIME NOT NULL)$E",
     'CREATE INDEX zc_claims_user ON ' . T('claims') . ' (user_id)',

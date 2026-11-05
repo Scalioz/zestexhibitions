@@ -119,6 +119,9 @@ case 'boot':
     'acc' => $ACC,
     'claims_attention' => (int) val('SELECT COUNT(*) FROM ' . T('claims') . " WHERE user_id = ? AND status IN ('on_hold','rejected')", [$MID]),
     'claims_waiting' => $ACC ? (int) val('SELECT COUNT(*) FROM ' . T('claims') . " WHERE status = 'submitted'") : 0,
+    'inv_todo' => $ACC ? (int) val('SELECT COUNT(*) FROM ' . T('invoices') . " WHERE status IN ('requested','on_hold','rejected')") : 0,
+    'inv_pending' => $ADMIN ? (int) val('SELECT COUNT(*) FROM ' . T('invoices') . " WHERE status = 'pending'") : 0,
+    'inv_attention' => $MODULE === 'records' ? (int) val('SELECT COUNT(*) FROM ' . T('invoices') . ' i LEFT JOIN ' . T('projects') . " p ON p.id = i.project_id WHERE i.status IN ('on_hold','rejected') AND (i.requested_by = ? OR p.owner_id = ?)", [$MID, $MID]) : 0,
     'pending_approvals' => $ADMIN ? (int) val('SELECT COUNT(*) FROM ' . T('approvals') . " WHERE status = 'pending'") : 0,
   ]);
 
