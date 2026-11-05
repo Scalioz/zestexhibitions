@@ -105,7 +105,7 @@ async function route() {
   window.scrollTo(0, 0);
 }
 const ADMIN_ONLY = { invappr: 1, clientlog: 1, saleslog: 1, leadlog: 1, jobs: 1, reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
-const RECORDS_ONLY = { clients: 1, client: 1, project: 1, newclient: 1, qgen: 1 };
+const RECORDS_ONLY = { refs: 1, clients: 1, client: 1, project: 1, newclient: 1, qgen: 1 };
 const ACC_ROUTES = { acc: 1, entry: 1, jv: 1, invoices: 1, invnew: 1, inv: 1, invappr: 1, claims: 1, topost: 1, books: 1, coa: 1, accset: 1 };
 const MODULE_ONLY = { myinv: ['records'], myexp: ['records', 'ops'],  leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
 async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); window.scrollTo(0, y); }
@@ -116,11 +116,11 @@ function renderNav(cur) {
   const L = (k, l, b) => `<a href="#${k}" class="${on === k ? 'on' : ''}">${l}${b ? `<span class="badge">${b}</span>` : ''}</a>`;
   $('#nav').innerHTML = isAdmin()
     ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('saleslog', 'Sales log', B.pending_approvals || '')}${L('invappr', 'Invoice approvals', B.inv_pending || '')}${L('leadlog', 'Expo data log')}${L('jobs', 'Design & production')}${L('reportlog', 'Daily reports', B.flags || '')}
-       <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('dnq', 'Do-not-quote list')}
+       <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('dnq', 'Do-not-quote list')}
        <div class="sec">Accounts</div>${L('acc', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}
        <div class="sec">Admin</div>${L('team', 'Team')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
     : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('report', 'Daily report', B.flags || '')}`
-    : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('report', 'Daily report', B.flags || '')}`
+    : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('report', 'Daily report', B.flags || '')}`
     : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('report', 'Daily report', B.flags || '')}`;
 }
 
@@ -161,7 +161,7 @@ async function empHome() {
     <div class="kpi hl"><span>Balance to collect</span><b>${inr(d.due)}</b></div>
   </div>
   <div class="panel"><h2>My active orders & enquiries</h2>${projTable(d.projects)}</div>`;
-  claimAlert(); invAlert();
+  claimAlert(); invAlert(); refAlert();
 }
 function claimAlert() { if (!B.claims_attention) return; const w = $('.welcome'); if (w) w.insertAdjacentHTML('afterend', `<div class="alert warn"><b>${B.claims_attention} expense claim${B.claims_attention > 1 ? 's need' : ' needs'} your attention</b><span class="m">Accounts rejected it or asked for more details. <a href="#myexp">Open my expenses →</a></span></div>`); }
 
@@ -174,6 +174,7 @@ async function adminHome(r) {
   view().innerHTML = `
   <div class="head"><div><h1>Business dashboard</h1><p>${f.from || f.to ? `Expos from ${f.from ? fd(f.from) : 'start'} to ${f.to ? fd(f.to) : 'today'}` : 'All time · all employees'}</p></div>
    <form class="row" id="dashf"><label class="f">From<input type="date" name="from" value="${f.from}"></label><label class="f">To<input type="date" name="to" value="${f.to}"></label><button class="btn ghost sm" style="align-self:flex-end">Apply</button>${f.from || f.to ? '<button type="button" class="btn link" id="dashclear" style="align-self:flex-end">Clear</button>' : ''}</form></div>
+  ${B.ref_new ? `<div class="alert warn"><b>${B.ref_new} referral lead${B.ref_new > 1 ? 's' : ''} handed to you</b><div><a class="btn sm" href="#refs">Open referral leads</a></div></div>` : ''}
   ${B.inv_pending ? `<div class="alert warn"><b>${B.inv_pending} invoice${B.inv_pending > 1 ? 's' : ''} waiting for your approval</b><div><a class="btn sm" href="#invappr">Review invoices</a></div></div>` : ''}
   ${B.pending_approvals ? `<div class="alert warn"><b>${B.pending_approvals} design / quote approval${B.pending_approvals > 1 ? 's' : ''} waiting</b><div><a class="btn sm" href="#saleslog">Open sales log</a></div></div>` : ''}
   ${flags.length ? `<div class="alert bad"><b>Daily reports not received</b><span class="m">${flags.map(e => `${esc(e.name)} — ${e.missing.slice(-5).map(fd).join(', ')}${e.missing.length > 5 ? ` (+${e.missing.length - 5} more)` : ''}`).join('<br>')}</span><div><a class="btn sm" href="#reportlog">Open report log</a></div></div>` : ''}
@@ -228,6 +229,7 @@ routes.newclient = async () => {
   const n = newClient || (newClient = { company: '', email: '', phone: '', person: '', designation: '', city: '', location: '', gst_no: '', notes: '', owner_id: '', contacts: [], cards: [], briefs: [], gstcert: [], expo: { expo: '', location: '', start_date: '', area_sqm: '', space_type: '', sides_open: '', stall_no: '' } });
   const F = (k, l, t = 'text') => `<label class="f">${l}<input data-nc="${k}" type="${t}" value="${esc(n[k])}"></label>`;
   view().innerHTML = `
+  ${n.ref_id ? '<div class="alert"><b>From a referral lead</b><span class="m">Saving this client marks the referral as “added as client”. Add the expo details if you have them.</span></div>' : ''}
   <div class="head"><div><h1>New client</h1><p>As you type the company, email or phone, the CRM checks every past record, including other employees' clients.</p></div></div>
   <div class="panel"><h2>Client details</h2>
    <div class="grid">${F('company', 'Company name *')}${F('email', 'Email', 'email')}${F('phone', 'Phone', 'tel')}${F('person', 'Contact person')}${F('designation', 'Designation')}${F('city', 'City')}${F('gst_no', 'GSTIN')}
@@ -858,6 +860,52 @@ function drawQuote() {
   };
 }
 
+
+// ---------- referral leads (admin hands a lead to a sales person or another admin) ----------
+const REF_ST = { new: ['p-pending', 'new · not opened'], seen: ['p-enquiry', 'opened'], converted: ['p-ok', 'added as client'], closed: ['p-bad', 'closed'] };
+const refPill = r => `<span class="pill ${REF_ST[r.status][0]}">${REF_ST[r.status][1]}</span>`;
+const refLead = r => `<b>${esc(r.company)}</b><div>${esc(r.name)} · <a href="tel:${esc(String(r.phone).replace(/[^\d+]/g, ''))}" class="num">${esc(r.phone)}</a></div>${r.area ? `<div class="sub">Area: ${esc(r.area)}</div>` : ''}${r.note ? `<div class="sub">${esc(r.note)}</div>` : ''}`;
+const refHist = r => r.history.length ? `<details style="margin-top:4px"><summary class="sub" style="cursor:pointer">History</summary>${r.history.map(h => `<div class="sub">${fd(h.at)} ${String(h.at).slice(11, 16)} · ${esc(h.text)}</div>`).join('')}</details>` : '';
+function refTake(r) {   // the person it was handed to: add as client / cannot take it up
+  if (!['new', 'seen'].includes(r.status) || +r.assigned_to !== +B.me.id) return '';
+  return `<div class="row" style="margin-top:8px"><button class="btn sm" data-refadd="${r.id}">+ Add as client</button><button class="btn ghost sm" data-refclose="${r.id}">Can't take it up</button></div>
+   <form class="inset" data-refclosef="${r.id}" hidden style="margin-top:8px"><label class="f">Why? *<input name="reason" required placeholder="e.g. Not reachable after 3 calls · budget too low"></label><div style="margin-top:6px"><button class="btn danger sm">Close lead</button></div></form>`;
+}
+routes.refs = async () => {
+  const f = C.reff || (C.reff = { status: isAdmin() ? '' : '' });
+  const d = await api('ref_list', f); C.refs = d.rows;
+  const unseen = d.rows.filter(r => r.status === 'new' && +r.assigned_to === +B.me.id);
+  if (unseen.length) { await Promise.all(unseen.map(r => api('ref_seen', { id: r.id }))); B.ref_new = 0; }
+  renderNav('refs');
+  const open = (d.counts.new || 0) + (d.counts.seen || 0);
+  const tabs = [['', 'All'], ['new', 'Not opened'], ['seen', 'Opened'], ['converted', 'Added as client'], ['closed', 'Closed']];
+  const T = d.targets, sales = T.filter(u => u.role !== 'admin'), admins = T.filter(u => u.role === 'admin');
+  const toOpts = sel => `<option value="">Pick sales person or admin</option><optgroup label="Sales team">${sales.map(u => `<option value="${u.id}" ${+sel === +u.id ? 'selected' : ''}>${esc(u.name)}${u.designation ? ' · ' + esc(u.designation) : ''}</option>`).join('')}</optgroup><optgroup label="Admins">${admins.map(u => `<option value="${u.id}" ${+sel === +u.id ? 'selected' : ''}>${esc(u.name)}${+u.id === +B.me.id ? ' (me)' : ''}</option>`).join('')}</optgroup>`;
+  view().innerHTML = `<div class="head"><div><h1>Referral leads</h1><p>${isAdmin() ? 'Leads from your contacts in the market. Hand each one to the sales person or admin best placed to take it up.' : 'Leads admin has handed to you. Call them, then add them as a client — or close with a reason.'}</p></div>${open ? `<span class="pill p-pending">${open} open</span>` : ''}</div>
+  ${isAdmin() ? `<form class="panel" id="reff"><h2>Refer a lead</h2><div class="grid g3">
+    <label class="f">Name of the person *<input name="name" required autocomplete="off"></label><label class="f">Contact number *<input name="phone" type="tel" required></label><label class="f">Company name *<input name="company" required autocomplete="off"></label>
+    <label class="f">Area<input name="area" placeholder="e.g. 36 sqm"></label><label class="f">Hand to *<select name="assigned_to" required>${toOpts('')}</select></label><label class="f">Note<input name="note" placeholder="Optional: expo, city, how you know them"></label></div>
+    <div id="refdup" style="margin-top:10px"></div><div style="margin-top:10px"><button class="btn">Refer lead</button></div></form>` : ''}
+  <div class="tabs" style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:0 8px">${tabs.map(([k, l]) => `<a href="#refs" data-reft="${k}" class="${(f.status || '') === k ? 'on' : ''}">${l}${k && d.counts[k] ? ` <span class="badge" style="background:var(--navy-soft);color:var(--navy)">${d.counts[k]}</span>` : ''}</a>`).join('')}</div>
+  <div class="panel">${d.rows.length ? `<div class="tw"><table><tr><th>Referred</th><th>Lead</th>${isAdmin() ? '<th>With</th>' : '<th>From</th>'}<th>Status</th><th></th></tr>
+   ${d.rows.map(r => `<tr><td class="num" style="white-space:nowrap">${fd(r.created_at)}<div class="sub">by ${esc(r.by_name)}</div></td><td>${refLead(r)}${refHist(r)}</td>
+    <td>${isAdmin() ? `<b>${esc(r.to_name)}</b><div class="sub">since ${fd(r.assigned_at)}</div>` : esc(r.by_name)}</td>
+    <td>${refPill(r)}${r.status === 'converted' && r.client_id ? `<div><a href="#client-${r.client_id}">${esc(r.client_company || 'Open client')} →</a></div>` : ''}${r.status === 'closed' ? `<div class="sub">${esc(r.closed_reason || '')}</div>` : ''}</td>
+    <td style="min-width:220px">${refTake(r)}
+     ${isAdmin() && ['new', 'seen'].includes(r.status) ? `<form class="row" data-refmove="${r.id}" style="margin-top:6px;flex-wrap:nowrap"><select name="assigned_to" aria-label="Hand to someone else" style="min-width:0">${toOpts(r.assigned_to)}</select><button class="btn ghost sm">Reassign</button></form>` : ''}
+     ${isAdmin() && r.status === 'closed' ? `<button class="btn link" data-refreopen="${r.id}">Reopen</button>` : ''}</td></tr>`).join('')}</table></div>` : blank(isAdmin() ? 'No referral leads yet. Use the form above to hand one to your team.' : 'No referral leads handed to you.')}</div>`;
+  const rf = $('#reff'); if (rf) {
+    let tm; rf.addEventListener('input', e => { if (!['company', 'phone'].includes(e.target.name)) return; clearTimeout(tm); tm = setTimeout(async () => {
+      const o = Object.fromEntries(new FormData(rf)); if ((o.company || '').trim().length < 3 && (o.phone || '').replace(/\D/g, '').length < 10) { $('#refdup').innerHTML = ''; return; }
+      const r = await api('dup', { company: o.company, phone: o.phone }).catch(() => ({ matches: [] }));
+      $('#refdup').innerHTML = r.matches.map(m => +m.dnq ? `<div class="alert bad"><b>⛔ Do not quote — ${esc(m.company)}</b><span class="m">Reason: ${esc(m.dnq_reason)}${m.dnq_note ? ' · ' + esc(m.dnq_note) : ''}</span></div>`
+        : `<div class="alert warn"><b>Already in the CRM — ${esc(m.company)}</b><span class="m">Handled by ${esc(m.owner)} · ${m.orders} order(s). <a href="#client-${m.id}">Open client →</a> You may want to hand it to ${esc(m.owner)}.</span></div>`).join('');
+    }, 350); });
+    rf.onsubmit = async e => { e.preventDefault(); const ok = await act(() => api('ref_save', Object.fromEntries(new FormData(rf))), 'Lead referred — they will see it on their dashboard').catch(() => null); if (ok) { await reboot(); refresh(); } };
+  }
+};
+function refAlert() { const n = B.ref_new; if (!n) return; const w = $('.welcome') || $('.head'); if (w) w.insertAdjacentHTML('afterend', `<div class="alert warn"><b>${n} new referral lead${n > 1 ? 's' : ''} for you</b><span class="m">Handed to you by admin. <a href="#refs">Open referral leads →</a></span></div>`); }
+
 routes.saleslog = async () => {
   const f = C.slog || (C.slog = { status: 'pending', kind: '', user_id: '', q: '', from: '', to: '' });
   const d = await api('sales_log', f);
@@ -1326,13 +1374,20 @@ routes.account = async () => {
 
 // ---------- EVENTS ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-dokundo],[data-caedit],[data-cadel],[data-repedit],[data-repdel],[data-repadd],[data-reprm],[data-clt],[data-invt],[data-invreqtax],[data-invconv],[data-ildel],[data-post],[data-postskip],[data-coaedit],[data-cledit],[data-cldel],[data-adec],[data-acancel],[data-asent],[data-slt],[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
+  const t = e.target.closest('[data-reft],[data-refadd],[data-refclose],[data-refreopen],[data-dokundo],[data-caedit],[data-cadel],[data-repedit],[data-repdel],[data-repadd],[data-reprm],[data-clt],[data-invt],[data-invreqtax],[data-invconv],[data-ildel],[data-post],[data-postskip],[data-coaedit],[data-cledit],[data-cldel],[data-adec],[data-acancel],[data-asent],[data-slt],[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
   if (!t) return;
   const ds = t.dataset;
   try {
     if (ds.go && ds.acc && !e.target.closest('a,button,input,select,label')) { C.bf = Object.assign(C.bf || {}, { account_id: ds.acc }); C.br = 'ledger'; }
     if (ds.go) { if (e.target.closest('a,button,input,select,label')) return; location.hash = '#' + ds.go; return; }
     if (ds.coaedit) { e.stopPropagation(); C.coaEdit = +ds.coaedit; await refresh(); window.scrollTo(0, 0); return; }
+    if (ds.reft !== undefined) { e.preventDefault(); C.reff = { status: ds.reft }; return refresh(); }
+    if (ds.refadd) { const r = C.refs.find(x => +x.id === +ds.refadd);
+      newClient = { company: r.company, email: '', phone: r.phone, person: r.name, designation: '', city: '', location: '', gst_no: '', notes: `Referral lead from ${r.by_name}${r.area ? ' · Area: ' + r.area : ''}${r.note ? ' — ' + r.note : ''}`, owner_id: '', contacts: [], cards: [], briefs: [], gstcert: [],
+        expo: { expo: '', location: '', start_date: '', area_sqm: '', space_type: '', sides_open: '', stall_no: '' }, ref_id: r.id };
+      location.hash = '#newclient'; return; }
+    if (ds.refclose) { const fm = document.querySelector(`[data-refclosef="${ds.refclose}"]`); fm.hidden = !fm.hidden; if (!fm.hidden) fm.querySelector('input').focus(); return; }
+    if (ds.refreopen) { await act(() => api('ref_reopen', { id: ds.refreopen }), 'Reopened'); return refresh(); }
     if (ds.dokundo) { if (!confirm('Undo the customer approval of the design?')) return; await act(() => api('design_client_ok', { project_id: C.project.id, undo: 1 }), 'Undone'); return refresh(); }
     if (ds.caedit !== undefined) { C.caEdit = +ds.caedit; return refresh(); }
     if (ds.cadel) { if (!confirm(ds.st === 'approved' ? 'Delete this expense? It will also be removed from the books (reversed) and from the order.' : 'Delete this expense claim?')) return; await act(() => api('claim_admin_del', { id: ds.cadel }), 'Expense deleted'); await reboot(); return refresh(); }
@@ -1383,7 +1438,7 @@ document.addEventListener('click', async e => {
         if (n.cards.length) await act(() => uploadAll('card', r.id, n.cards)).catch(() => {});
         if (n.briefs.length) await act(() => uploadAll('brief', r.id, n.briefs)).catch(() => {});
         if (n.gstcert.length) await act(() => uploadAll('gstcert', r.id, n.gstcert)).catch(() => {});
-        newClient = null; toast(n.expo.expo.trim() ? 'Client and expo order saved' : 'Client saved'); location.hash = '#client-' + r.id; return;
+        newClient = null; toast(n.expo.expo.trim() ? 'Client and expo order saved' : 'Client saved'); if (n.ref_id) await reboot(); location.hash = '#client-' + r.id; return;
       }
       case 'dnq-open': $('#dnq-form').innerHTML = `<form class="panel" id="dnqf"><h3>Mark as “Do not quote”</h3><div class="grid"><label class="f">Reason<select name="reason" required>${B.reasons.map(r => `<option>${esc(r.label)}</option>`).join('')}</select></label><label class="f">What happened?<input name="note"></label></div><div class="row" style="margin-top:8px"><button class="btn danger">Confirm flag</button></div></form>`;
         $('#dnqf').onsubmit = async ev => { ev.preventDefault(); await act(() => api('dnq', { id: C.client.id, on: 1, ...Object.fromEntries(new FormData(ev.target)) }), 'Flagged: do not quote'); refresh(); }; return;
@@ -1526,6 +1581,8 @@ document.addEventListener('submit', async e => {
   if (f.dataset.invreply) { e.preventDefault(); const ok = await act(() => api('inv_reply', { id: f.dataset.invreply, text: f.querySelector('[name=text]').value }), 'Sent').catch(() => null); if (ok) refresh(); return; }
   if (f.dataset.invcorr) { e.preventDefault(); const ok = await act(() => api('inv_correct', { id: f.dataset.invcorr, reason: f.querySelector('[name=reason]').value }), 'Reopened for correction').catch(() => null); if (ok) { await reboot(); refresh(); } return; }
   if (f.dataset.invcan) { e.preventDefault(); const ok = await act(() => api('inv_cancel', { id: f.dataset.invcan, reason: f.querySelector('[name=reason]').value }), 'Cancelled').catch(() => null); if (ok) { await reboot(); refresh(); } return; }
+  if (f.dataset.refclosef) { e.preventDefault(); const ok = await act(() => api('ref_close', { id: f.dataset.refclosef, reason: f.querySelector('[name=reason]').value }), 'Lead closed').catch(() => null); if (ok) { await reboot(); refresh(); } return; }
+  if (f.dataset.refmove) { e.preventDefault(); const ok = await act(() => api('ref_save', { id: f.dataset.refmove, assigned_to: f.querySelector('[name=assigned_to]').value }), 'Lead handed over').catch(() => null); if (ok) { await reboot(); refresh(); } return; }
   if (f.id === 'dokf') { e.preventDefault(); const o = Object.fromEntries(new FormData(f)); const ok = await act(() => api('design_client_ok', { project_id: C.project.id, approval_id: e.submitter?.name === 'nover' ? 0 : o.approval_id, on: o.on }), 'Marked: customer approved the design — Generate quote is now open').catch(() => null); if (ok) refresh(); return; }
   if (f.dataset.casave) { e.preventDefault(); const ok = await act(() => api('claim_admin_save', { id: f.dataset.casave, ...Object.fromEntries(new FormData(f)) }), 'Expense updated').catch(() => null); if (ok) { C.caEdit = null; refresh(); } return; }
   if (f.id === 'repeditf') { e.preventDefault(); repCapture(); const ok = await act(() => api('report_admin_save', { id: C.repEdit.id, items: C.repEdit.items }), 'Report updated').catch(() => null); if (ok) { C.repEdit = null; refresh(); } return; }
