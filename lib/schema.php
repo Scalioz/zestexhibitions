@@ -100,6 +100,10 @@ function migrate() {
     try { db()->exec('ALTER TABLE ' . T('journal') . ' ADD COLUMN replaces INT'); } catch (PDOException $e) { /* already there */ }
     set_setting('schema_v', 10);
   }
+  if ($v < 11) {   // numbers can never repeat, even when people save at the same moment
+    foreach (['CREATE UNIQUE INDEX zc_j_vno ON ' . T('journal') . ' (vno)', 'CREATE UNIQUE INDEX zc_inv_no ON ' . T('invoices') . ' (inv_no)'] as $q) { try { db()->exec($q); } catch (PDOException $e) { /* already there */ } }
+    set_setting('schema_v', 11);
+  }
 }
 
 // ---------- ACCOUNTS (double entry) ----------

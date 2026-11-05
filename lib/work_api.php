@@ -121,7 +121,7 @@ case 'lead_bulk':   // rows pasted from Excel: company, contact, phone, email, n
   $e = expo_row($in['expo_id'] ?? 0);
   $rows = array_slice((array) ($in['rows'] ?? []), 0, 2000);
   $added = 0; $skipped = []; $seen = [];
-  db()->beginTransaction();
+  tx();
   foreach ($rows as $r) {
     $r = array_values((array) $r); $co = s($r[0] ?? null, 200); if (!$co) continue;
     $key = mb_strtolower($co);
