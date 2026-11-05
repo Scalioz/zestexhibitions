@@ -96,6 +96,10 @@ function migrate() {
     create_accounts_tables();
     set_setting('schema_v', 9);
   }
+  if ($v < 10) {   // admin edits of book entries
+    try { db()->exec('ALTER TABLE ' . T('journal') . ' ADD COLUMN replaces INT'); } catch (PDOException $e) { /* already there */ }
+    set_setting('schema_v', 10);
+  }
 }
 
 // ---------- ACCOUNTS (double entry) ----------
@@ -108,7 +112,7 @@ function create_accounts_tables() {
     // type: asset | liability | equity | income | expense.  sub marks special accounts (bank, cash, petty, debtor, creditor, employee, gst_in, gst_out, tds ...)
     'CREATE TABLE IF NOT EXISTS ' . T('accounts') . " (id $PK, code VARCHAR(20), name VARCHAR(160) NOT NULL, type VARCHAR(10) NOT NULL, sub VARCHAR(20), party_type VARCHAR(10), party_id INT, opening $M NOT NULL DEFAULT 0, active TINYINT NOT NULL DEFAULT 1, created_at DATETIME NOT NULL)$E",
     'CREATE INDEX zc_acc_party ON ' . T('accounts') . ' (party_type, party_id)',
-    'CREATE TABLE IF NOT EXISTS ' . T('journal') . " (id $PK, jdate DATE NOT NULL, vtype VARCHAR(20) NOT NULL, vno VARCHAR(30), narration TEXT, ref_type VARCHAR(20), ref_id INT, project_id INT, created_by INT, created_at DATETIME NOT NULL, reversed_by INT)$E",
+    'CREATE TABLE IF NOT EXISTS ' . T('journal') . " (id $PK, jdate DATE NOT NULL, vtype VARCHAR(20) NOT NULL, vno VARCHAR(30), narration TEXT, ref_type VARCHAR(20), ref_id INT, project_id INT, created_by INT, created_at DATETIME NOT NULL, reversed_by INT, replaces INT)$E",
     'CREATE INDEX zc_j_date ON ' . T('journal') . ' (jdate)',
     'CREATE INDEX zc_j_ref ON ' . T('journal') . ' (ref_type, ref_id)',
     'CREATE TABLE IF NOT EXISTS ' . T('jlines') . " (id $PK, journal_id INT NOT NULL, account_id INT NOT NULL, dr $M NOT NULL DEFAULT 0, cr $M NOT NULL DEFAULT 0, memo VARCHAR(255))$E",
