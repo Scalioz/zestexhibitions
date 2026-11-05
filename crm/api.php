@@ -7,8 +7,8 @@ require_once __DIR__ . '/lib/report.php';
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-function out($d) { echo json_encode($d, JSON_UNESCAPED_UNICODE); exit; }
-function fail($msg, $code = 400) { http_response_code($code); out(['error' => $msg]); }
+function out($d) { $p = $GLOBALS['ZEST_PDO'] ?? null; if ($p && $p->inTransaction()) $p->commit(); echo json_encode($d, JSON_UNESCAPED_UNICODE); exit; }   // success: save everything
+function fail($msg, $code = 400) { $p = $GLOBALS['ZEST_PDO'] ?? null; if ($p && $p->inTransaction()) $p->rollBack(); http_response_code($code); out(['error' => $msg]); }   // error: save nothing
 
 set_exception_handler(function ($e) { error_log('[zestcrm] ' . $e->getMessage()); fail('Something went wrong on the server. Please try again.', 500); });
 
@@ -17,6 +17,7 @@ $me = current_user();
 if (!$me) fail('Please sign in again.', 401);
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail('POST only', 405);
 if (!hash_equals($_SESSION['csrf'], $_SERVER['HTTP_X_CSRF'] ?? '')) fail('Page expired. Reload the page.', 419);
+session_write_close();   // release the session so one person's parallel requests don't queue behind each other
 migrate();
 
 $isUpload = str_starts_with($_SERVER['CONTENT_TYPE'] ?? '', 'multipart/form-data');
@@ -330,7 +331,7 @@ case 'client_save':
     $ex = (array) ($in['expo'] ?? []);
     $hasExpo = array_filter(array_map(fn($x) => trim((string) $x), $ex));
     if ($hasExpo && !s($ex['expo'] ?? null)) fail('Enter the expo name (or clear the expo details).');
-    db()->beginTransaction();   // all-or-nothing: no half-saved client if something fails
+    tx();   // all-or-nothing: no half-saved client if something fails
     $id = ins('clients', $data);
     if ($hasExpo) create_project($id, $data['owner_id'], $ex);
     foreach ((array) ($in['contacts'] ?? []) as $ct) if (s($ct['name'] ?? null)) ins('contacts', ['client_id' => $id, 'name' => s($ct['name']), 'designation' => s($ct['designation'] ?? null), 'phone' => s($ct['phone'] ?? null), 'email' => s($ct['email'] ?? null)]);
@@ -377,7 +378,7 @@ case 'client_del':  // admin only: removes a client with all its orders, payment
   $c = client_row($in['id'] ?? 0);
   $pids = array_map('intval', array_column(all('SELECT id FROM ' . T('projects') . ' WHERE client_id = ?', [$c['id']]), 'id'));
   $files = all('SELECT * FROM ' . T('files') . " WHERE entity IN ('card','brief','gstcert') AND entity_id = ?", [$c['id']]);
-  db()->beginTransaction();
+  tx();
   if ($pids) {
     $in_p = implode(',', $pids);
     foreach (['revision' => 'revisions', 'quote' => 'quotes', 'vquote' => 'vendor_quotes', 'appr' => 'approvals'] as $ent => $tbl) {
@@ -593,8 +594,9 @@ case 'report_submit':
     if (!$row[$first]) fail('Entry ' . ($i + 1) . ': please fill ' . ($tpl[0]['l'] ?? 'the first field') . '.');
     $clean[] = $row;
   }
-  db()->beginTransaction();
-  $rid = ins('reports', ['user_id' => $MID, 'rdate' => today(), 'dept' => $me['department'], 'fields_json' => json_encode($tpl), 'submitted_at' => now()]);
+  tx();
+  try { $rid = ins('reports', ['user_id' => $MID, 'rdate' => today(), 'dept' => $me['department'], 'fields_json' => json_encode($tpl), 'submitted_at' => now()]); }
+  catch (PDOException $e) { db()->rollBack(); fail("Today's report is already submitted."); }
   $ids = [];
   foreach ($clean as $i => $row) $ids[] = ins('report_items', ['report_id' => $rid, 'sl' => $i + 1, 'data_json' => json_encode($row, JSON_UNESCAPED_UNICODE)]);
   db()->commit();
@@ -648,7 +650,7 @@ case 'report_admin_save':   // admin: correct a submitted daily report (change, 
     $rows[] = [(int) ($it['_id'] ?? 0), $row];
   }
   if (!$rows) fail('A report needs at least one entry. Use Delete report to remove it fully.');
-  db()->beginTransaction();
+  tx();
   foreach ($rows as $k => [$iid, $row]) {
     $js = json_encode($row, JSON_UNESCAPED_UNICODE);
     if ($iid && isset($oldById[$iid])) { $keep[] = $iid; if ($oldById[$iid]['data_json'] !== $js || (int) $oldById[$iid]['sl'] !== $k + 1) upd('report_items', $iid, ['sl' => $k + 1, 'data_json' => $js]); }

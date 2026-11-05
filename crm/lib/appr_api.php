@@ -22,7 +22,7 @@ case 'appr_request':
   if ($kind === 'quote' && !$amount) fail('Enter the quote amount.');
   $reuse = array_filter(array_map('intval', (array) ($in['reuse_file_ids'] ?? [])));
   $ver = (int) val('SELECT COALESCE(MAX(version),0)+1 FROM ' . T('approvals') . ' WHERE project_id = ? AND kind = ?', [$p['id'], $kind]);
-  db()->beginTransaction();
+  tx();
   $id = ins('approvals', ['project_id' => $p['id'], 'kind' => $kind, 'version' => $ver, 'amount' => $amount, 'note' => s($in['note'] ?? null, 4000),
     'requested_by' => $MID, 'requested_at' => now(), 'status' => 'pending']);
   if ($reuse) {   // attach files already on this order (e.g. the designer's PDF) without uploading again
@@ -56,12 +56,12 @@ case 'appr_decide':
 
 case 'appr_sent':
   can_sales();
-  $a = appr_row($in['id'] ?? 0); $p = project_row($a['project_id']);
+  appr_row($in['id'] ?? 0); lock_row('approvals', $in['id']); $a = appr_row($in['id'] ?? 0); $p = project_row($a['project_id']);
   if ($a['status'] !== 'approved') fail('Only an approved version can be sent to the customer.');
   if ($a['sent_on']) fail('Already marked as sent.');
   $on = d($in['sent_on'] ?? null) ?? today();
   if ($on < substr($a['decided_at'], 0, 10)) fail('Sent date cannot be before the approval date.');
-  db()->beginTransaction();
+  tx();
   upd('approvals', $a['id'], ['sent_on' => $on, 'sent_by' => $me['name'], 'sent_at' => now()]);
   if ($a['kind'] === 'quote') {   // keeps "Quote versions sent to client", offered price and order status in step
     $qv = (int) val('SELECT COALESCE(MAX(version),0)+1 FROM ' . T('quotes') . ' WHERE project_id = ?', [$p['id']]);

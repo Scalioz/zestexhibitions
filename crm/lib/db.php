@@ -12,13 +12,25 @@ function cfg() {
   return $c;
 }
 
+// SQLite (test server): take the write lock at the start of a transaction, so two people saving at once queue up cleanly.
+class ZestSqlite extends PDO {
+  private $tx = false;
+  public function beginTransaction(): bool { $this->exec('BEGIN IMMEDIATE'); $this->tx = true; return true; }
+  public function commit(): bool { $this->exec('COMMIT'); $this->tx = false; return true; }
+  public function rollBack(): bool { $this->exec('ROLLBACK'); $this->tx = false; return true; }
+  public function inTransaction(): bool { return $this->tx; }
+}
+
 function db() {
   static $pdo = null;
   if ($pdo) return $pdo;
   $c = cfg();
   if (!$c) throw new Exception('Not installed');
   if (($c['driver'] ?? 'mysql') === 'sqlite') {
-    $pdo = new PDO('sqlite:' . $c['path']);
+    $pdo = new ZestSqlite('sqlite:' . $c['path']);
+    $pdo->exec('PRAGMA busy_timeout = 15000');   // wait for another person's save instead of failing
+    $pdo->exec('PRAGMA journal_mode = WAL');      // readers never block writers
+    $pdo->exec('PRAGMA synchronous = NORMAL');
     $pdo->exec('PRAGMA foreign_keys = ON');
   } else {
     $pdo = new PDO("mysql:host={$c['host']};dbname={$c['name']};charset=utf8mb4", $c['user'], $c['pass']);
@@ -26,7 +38,15 @@ function db() {
   }
   $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
   $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+  $GLOBALS['ZEST_PDO'] = $pdo;
   return $pdo;
+}
+function tx() { if (!db()->inTransaction()) db()->beginTransaction(); }   // start a transaction (once)
+// Re-read a row inside the transaction and hold it, so two people clicking the same button at the same moment are handled one after the other.
+function lock_row($table, $id) {
+  tx();
+  $mysql = (cfg()['driver'] ?? 'mysql') !== 'sqlite';
+  return one('SELECT * FROM ' . T($table) . ' WHERE id = ?' . ($mysql ? ' FOR UPDATE' : ''), [(int) $id]);
 }
 
 function T($name) { return 'zc_' . $name; }   // table prefix

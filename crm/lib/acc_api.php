@@ -93,10 +93,12 @@ function inv_prefill_lines($pid) {
 function inv_issue_do($i) {   // gives the number (kept if a proforma is being revised) and posts a tax invoice to the books
   global $MID;
   $no = $i['inv_no'];
-  if (!$no) {
+  if (!$no) {   // unique index on inv_no: if two approvals happen at the same instant, the second takes the next number
     $pre = ($i['kind'] === 'tax' ? 'INV' : 'PI') . '/' . fy_of($i['inv_date']) . '/';
-    $last = 0; foreach (all('SELECT inv_no FROM ' . T('invoices') . ' WHERE inv_no LIKE ?', [$pre . '%']) as $r) $last = max($last, (int) substr($r['inv_no'], strlen($pre)));
-    $no = $pre . str_pad($last + 1, 3, '0', STR_PAD_LEFT);
+    for ($try = 0; ; $try++) {
+      $no = $pre . str_pad(next_no('invoices', 'inv_no', $pre) + 1, 3, '0', STR_PAD_LEFT);
+      try { upd('invoices', $i['id'], ['inv_no' => $no]); break; } catch (PDOException $e) { if ($try >= 8 || !is_dup($e)) throw $e; usleep(random_int(20000, 120000)); }
+    }
   }
   $jid = $i['journal_id'] ?: null;
   if ($i['kind'] === 'tax' && !$jid) {
@@ -220,7 +222,7 @@ case 'acc_entry':
   $amt = n($in['amount'] ?? 0) ?? 0; $narr = s($in['narration'] ?? null, 2000) ?? '';
   $pid = (int) ($in['project_id'] ?? 0) ?: null; $proj = $pid ? one('SELECT p.*, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . ' c ON c.id = p.client_id WHERE p.id = ?', [$pid]) : null;
   if ($pid && !$proj) fail('Order not found.');
-  db()->beginTransaction();
+  tx();
   switch ($k) {
     case 'expense': {   // company overhead or order expense, paid or owed to a vendor
       $exp = acc_of_type($in['account_id'] ?? 0, 'expense'); if ($amt <= 0) fail('Enter the amount.');
@@ -304,16 +306,18 @@ case 'acc_journal':
 
 case 'acc_reverse':
   need_acc();
+  lock_row('journal', $in['id'] ?? 0);
   $j = one('SELECT * FROM ' . T('journal') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]) ?? fail('Not found', 404);
   if ($j['ref_type'] === 'invoice') fail('This came from an invoice. Cancel the invoice instead.');
   if ($j['ref_type'] === 'claim') fail('This came from an approved expense claim and cannot be reversed here. Post a correcting journal instead.');
   $why = s($in['reason'] ?? null, 500) ?? fail('Write why it is being reversed.');
-  db()->beginTransaction(); $rid = reverse_journal($j['id'], d($in['date'] ?? null) ?? today(), $why, $MID); db()->commit();
+  tx(); $rid = reverse_journal($j['id'], d($in['date'] ?? null) ?? today(), $why, $MID); db()->commit();
   out(['id' => $rid]);
 
 
 case 'acc_edit':   // admin: correct a book entry (old one is reversed on its own date, corrected one posted in its place)
   need_admin();
+  lock_row('journal', $in['id'] ?? 0);
   $j = one('SELECT * FROM ' . T('journal') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]) ?? fail('Not found', 404);
   if ($j['reversed_by']) fail('This entry is already reversed / replaced.');
   if ($j['vtype'] === 'Reversal') fail('A reversal cannot be edited.');
@@ -325,7 +329,7 @@ case 'acc_edit':   // admin: correct a book entry (old one is reversed on its ow
   if (count($lines) < 2) fail('An entry needs at least two lines.');
   $date = d($in['date'] ?? null) ?? $j['jdate']; $narr = s($in['narration'] ?? null, 1000) ?? $j['narration'];
   $before = $j + ['lines' => all('SELECT account_id, dr, cr, memo FROM ' . T('jlines') . ' WHERE journal_id = ?', [$j['id']])];
-  db()->beginTransaction();
+  tx();
   $new = post_journal($date, $j['vtype'], $narr, $lines, $j['ref_type'], $j['ref_id'], $j['project_id'], $MID);
   reverse_journal($j['id'], $j['jdate'], 'Edited by admin — replaced by ' . val('SELECT vno FROM ' . T('journal') . ' WHERE id = ?', [$new]), $MID);
   if ($j['ref_type']) upd('journal', $j['id'], ['ref_type' => mb_substr($j['ref_type'] . '_x', 0, 20)]);
@@ -336,7 +340,7 @@ case 'acc_edit':   // admin: correct a book entry (old one is reversed on its ow
 
 case 'claim_admin_save':   // admin: change any expense claim; an approved one is re-booked with the new figures
   need_admin();
-  $c = claim_row($in['id'] ?? 0);
+  claim_row($in['id'] ?? 0); $c = lock_row('claims', $in['id']);
   $data = ['edate' => d($in['edate'] ?? null) ?? fail('Enter the date of expense.'), 'particular' => s($in['particular'] ?? null, 255) ?? fail('Enter the particular of expense.'),
     'category' => array_key_exists($in['category'] ?? '', CLAIM_CATS) ? $in['category'] : 'Other', 'rate' => n($in['rate'] ?? null) ?? fail('Enter the unit rate.'), 'qty' => n($in['qty'] ?? 1) ?: 1, 'gst' => n($in['gst'] ?? 0) ?? 0, 'note' => s($in['note'] ?? null, 2000),
     'project_id' => (int) ($in['project_id'] ?? 0) ?: null];
@@ -346,7 +350,7 @@ case 'claim_admin_save':   // admin: change any expense claim; an approved one i
   foreach (['edate' => 'Date', 'particular' => 'Particular', 'category' => 'Category', 'rate' => 'Unit rate', 'qty' => 'Qty', 'gst' => 'GST', 'grand' => 'Grand total', 'note' => 'Note', 'project_id' => 'Order'] as $k => $l)
     if ((string) ($c[$k] ?? '') !== (string) ($data[$k] ?? '') && !(is_numeric($c[$k]) && is_numeric($data[$k]) && (float) $c[$k] == (float) $data[$k])) $ch[] = "$l: " . ($c[$k] ?? '—') . ' → ' . ($data[$k] ?? '—');
   if (!$ch) fail('Nothing was changed.');
-  db()->beginTransaction();
+  tx();
   if ($c['status'] === 'approved') {
     $how = claim_unpost($c); upd('claims', $c['id'], $data); $c2 = claim_row($c['id']);
     $u = one('SELECT name FROM ' . T('users') . ' WHERE id = ?', [$c['user_id']]);
@@ -360,8 +364,8 @@ case 'claim_admin_save':   // admin: change any expense claim; an approved one i
 
 case 'claim_admin_del':
   need_admin();
-  $c = claim_row($in['id'] ?? 0);
-  db()->beginTransaction();
+  claim_row($in['id'] ?? 0); $c = lock_row('claims', $in['id']);
+  tx();
   if ($c['status'] === 'approved') claim_unpost($c);
   audit_log('claim', $c['id'], 'delete', $c, null, $c['project_id']);
   q('DELETE FROM ' . T('claim_notes') . ' WHERE claim_id = ?', [$c['id']]); q('DELETE FROM ' . T('claims') . ' WHERE id = ?', [$c['id']]);
@@ -380,10 +384,12 @@ case 'acc_post_crm':
   $t = $in['ref_type'] ?? ''; $id = (int) ($in['ref_id'] ?? 0);
   $tbl = ['cpay' => 'client_payments', 'vpay' => 'vendor_payments', 'pexp' => 'expenses'][$t] ?? fail('Unknown item.');
   $x = one('SELECT x.*, p.expo, p.client_id, c.company FROM ' . T($tbl) . ' x JOIN ' . T('projects') . ' p ON p.id = x.project_id JOIN ' . T('clients') . ' c ON c.id = p.client_id WHERE x.id = ?', [$id]) ?? fail('Not found', 404);
+  lock_row($tbl, $id);
   if (val('SELECT COUNT(*) FROM ' . T('journal') . ' WHERE ref_type = ? AND ref_id = ?', [$t, $id])) fail('Already posted.');
+  if (val('SELECT COUNT(*) FROM ' . T('post_skip') . ' WHERE ref_type = ? AND ref_id = ?', [$t, $id])) fail('Already skipped.');
   if (!empty($in['skip'])) { ins('post_skip', ['ref_type' => $t, 'ref_id' => $id]); out(['ok' => true]); }
   $money = money_id($in['money_id'] ?? 0);
-  db()->beginTransaction();
+  tx();
   if ($t === 'cpay') $jid = post_journal($x['pdate'], 'Receipt', "Receipt from {$x['company']} for {$x['expo']}" . ($x['reference'] ? " ({$x['reference']})" : ''), [[$money, $x['amount'], 0, ''], [party_account('client', $x['client_id'], $x['company']), 0, $x['amount'], '']], 'cpay', $id, $x['project_id'], $MID);
   elseif ($t === 'vpay') { $vn = val('SELECT name FROM ' . T('vendors') . ' WHERE id = ?', [$x['vendor_id']]) ?? 'Vendor';
     $exp = !empty($in['account_id']) ? acc_of_type($in['account_id'], 'expense') : acc_sub('fab');
@@ -415,7 +421,7 @@ case 'inv_request':   // sales asks accounts for a proforma / tax invoice
   $note = s($in['note'] ?? null, 2000) ?? fail('Write what should be billed (e.g. 50% advance, full amount, extras).');
   $state = setting('company', [])['state'] ?? 'Delhi';
   if (!empty($in['from_id'])) {   // tax invoice from an approved proforma
-    $f = inv_row($in['from_id']); if (!inv_can_see($f)) fail('Not your invoice.', 403);
+    lock_row('invoices', $in['from_id']); $f = inv_row($in['from_id']); if (!inv_can_see($f)) fail('Not your invoice.', 403);
     if ($f['kind'] !== 'proforma' || $f['status'] !== 'issued') fail('Only an approved proforma can be turned into a tax invoice.');
     if ($ex = val('SELECT id FROM ' . T('invoices') . " WHERE from_id = ? AND status <> 'cancelled'", [$f['id']])) fail('A tax invoice for this proforma is already requested.');
     $data = ['kind' => 'tax', 'inv_date' => today(), 'client_id' => $f['client_id'], 'project_id' => $f['project_id'], 'place_state' => $f['place_state'], 'gst_mode' => $f['gst_mode'], 'gst_rate' => $f['gst_rate'],
@@ -455,9 +461,9 @@ case 'inv_save':   // accounts prepares / corrects; optional send to admin in th
   $mode = mb_strtolower(trim($state)) === mb_strtolower(trim(setting('company', [])['state'] ?? '')) ? 'cgst_sgst' : 'igst';
   $data = ['inv_date' => d($in['inv_date'] ?? null) ?? today(), 'client_id' => $cid, 'project_id' => (int) ($in['project_id'] ?? 0) ?: null, 'place_state' => $state, 'gst_mode' => $mode, 'gst_rate' => $rate,
     'lines_json' => json_encode($lines, JSON_UNESCAPED_UNICODE), 'taxable' => $taxable, 'gst' => $gst, 'total' => $total, 'notes' => s($in['notes'] ?? null, 2000)];
-  db()->beginTransaction();
+  tx();
   if (!empty($in['id'])) {
-    $i = inv_row($in['id']); if (!in_array($i['status'], INV_EDITABLE, true)) fail($i['status'] === 'pending' ? 'It is waiting for admin. It can be changed if admin puts it on hold or rejects it.' : 'This invoice can no longer be changed.');
+    lock_row('invoices', $in['id']); $i = inv_row($in['id']); if (!in_array($i['status'], INV_EDITABLE, true)) fail($i['status'] === 'pending' ? 'It is waiting for admin. It can be changed if admin puts it on hold or rejects it.' : 'This invoice can no longer be changed.');
     if ($i['inv_no'] && $i['kind'] !== $kind) fail('Kind cannot change after a number is given.');
     upd('invoices', $i['id'], $data + ['kind' => $kind, 'status' => $i['status'] === 'requested' ? 'draft' : $i['status']]);
     if ($i['status'] === 'requested') inv_log($i['id'], 'prepared');
@@ -478,11 +484,11 @@ case 'inv_save':   // accounts prepares / corrects; optional send to admin in th
 
 case 'inv_decide':   // admin: approve / hold / reject
   need_admin();
-  $i = inv_row($in['id'] ?? 0); if ($i['status'] !== 'pending') fail('This is not waiting for approval.');
+  lock_row('invoices', $in['id'] ?? 0); $i = inv_row($in['id'] ?? 0); if ($i['status'] !== 'pending') fail('This is already decided — it is not waiting for approval any more.');
   $act = $in['action'] ?? ''; $why = s($in['reason'] ?? null, 2000);
   if (!in_array($act, ['approve', 'hold', 'reject'], true)) fail('Pick approve, hold or reject.');
   if ($act !== 'approve' && !$why) fail($act === 'hold' ? 'Write what details are needed.' : 'Write why it is rejected and what to correct.');
-  db()->beginTransaction();
+  tx();
   if ($act === 'approve') { $no = inv_issue_do($i); upd('invoices', $i['id'], ['decided_by' => $me['name'], 'decided_at' => now(), 'reason' => $why]); inv_log($i['id'], 'approved', $why, (int) $i['version']); db()->commit(); out(['inv_no' => $no]); }
   upd('invoices', $i['id'], ['status' => $act === 'hold' ? 'on_hold' : 'rejected', 'decided_by' => $me['name'], 'decided_at' => now(), 'reason' => $why]);
   inv_log($i['id'], $act === 'hold' ? 'hold' : 'rejected', $why, (int) $i['version']);
@@ -495,7 +501,7 @@ case 'inv_reply':   // accounts or sales add details / comments
   out(['ok' => true]);
 
 case 'inv_correct':   // reopen an approved proforma for correction (number is kept, goes through approval again)
-  $i = inv_row($in['id'] ?? 0); if (!inv_can_see($i)) fail('Not your invoice.', 403);
+  lock_row('invoices', $in['id'] ?? 0); $i = inv_row($in['id'] ?? 0); if (!inv_can_see($i)) fail('Not your invoice.', 403);
   if ($i['status'] !== 'issued') fail('Only an approved invoice can be reopened.');
   if ($i['kind'] === 'tax') fail('An approved tax invoice cannot be edited. Admin can cancel it and a new one can be made.');
   $why = s($in['reason'] ?? null, 2000) ?? fail('Write what needs to be corrected.');
@@ -506,7 +512,7 @@ case 'inv_correct':   // reopen an approved proforma for correction (number is k
 
 case 'inv_convert':   // accounts: draft tax invoice from an approved proforma
   need_acc();
-  $i = inv_row($in['id'] ?? 0);
+  lock_row('invoices', $in['id'] ?? 0); $i = inv_row($in['id'] ?? 0);
   if ($i['kind'] !== 'proforma' || $i['status'] !== 'issued') fail('Only an approved proforma can be turned into a tax invoice.');
   if ($ex = val('SELECT id FROM ' . T('invoices') . " WHERE from_id = ? AND status <> 'cancelled'", [$i['id']])) out(['id' => (int) $ex]);
   $copy = array_intersect_key($i, array_flip(['client_id', 'project_id', 'place_state', 'gst_mode', 'gst_rate', 'lines_json', 'taxable', 'gst', 'total', 'notes', 'requested_by', 'request_note']));
@@ -516,11 +522,11 @@ case 'inv_convert':   // accounts: draft tax invoice from an approved proforma
 
 case 'inv_cancel':
   need_acc();
-  $i = inv_row($in['id'] ?? 0);
+  lock_row('invoices', $in['id'] ?? 0); $i = inv_row($in['id'] ?? 0);
   if ($i['status'] === 'cancelled') fail('Already cancelled.');
   if (!$ADMIN && !in_array($i['status'], ['requested', 'draft'], true)) fail('Only admin can cancel an invoice after it is sent for approval.');
   $why = s($in['reason'] ?? null, 500) ?? fail('Write why it is cancelled.');
-  db()->beginTransaction();
+  tx();
   if ($i['journal_id']) { $j = one('SELECT * FROM ' . T('journal') . ' WHERE id = ?', [$i['journal_id']]); upd('journal', $j['id'], ['ref_type' => 'invoice_x']); reverse_journal($j['id'], today(), "Invoice {$i['inv_no']} cancelled: $why", $MID); }
   upd('invoices', $i['id'], ['status' => 'cancelled']);
   inv_log($i['id'], 'cancelled', $why);
@@ -544,7 +550,7 @@ case 'claim_save':
   if ($pid && !$ADMIN && !val('SELECT COUNT(*) FROM ' . T('projects') . ' WHERE id = ? AND (owner_id = ? OR ops_id = ?)', [$pid, $MID, $MID])) fail('Pick one of your own orders.');
   $data['project_id'] = $pid ?: null;
   if (!empty($in['id'])) {
-    $c = claim_row($in['id']); if ((int) $c['user_id'] !== $MID) fail('Not yours.', 403);
+    claim_row($in['id']); $c = lock_row('claims', $in['id']); if ((int) $c['user_id'] !== $MID) fail('Not yours.', 403);
     if (!in_array($c['status'], ['rejected', 'on_hold'], true)) fail('Only a rejected or on-hold expense can be changed.');
     upd('claims', $c['id'], $data + ['status' => 'submitted', 'submitted_at' => now()]); claim_note($c['id'], 'resubmitted', s($in['reply'] ?? null, 2000) ?? 'Corrected and sent again');
     out(['id' => (int) $c['id']]);
@@ -562,7 +568,7 @@ case 'claim_reply':
 
 case 'claim_del':
   need_claimer();
-  $c = claim_row($in['id'] ?? 0); if ((int) $c['user_id'] !== $MID) fail('Not yours.', 403);
+  claim_row($in['id'] ?? 0); $c = lock_row('claims', $in['id']); if ((int) $c['user_id'] !== $MID) fail('Not yours.', 403);
   if ($c['status'] === 'approved') fail('An approved expense is in the books and cannot be deleted.');
   q('DELETE FROM ' . T('claim_notes') . ' WHERE claim_id = ?', [$c['id']]); q('DELETE FROM ' . T('claims') . ' WHERE id = ?', [$c['id']]);
   out(['ok' => true]);
@@ -578,7 +584,7 @@ case 'acc_claims':
 
 case 'claim_decide':
   need_acc();
-  $c = claim_row($in['id'] ?? 0);
+  claim_row($in['id'] ?? 0); $c = lock_row('claims', $in['id']);
   if (!in_array($c['status'], ['submitted', 'on_hold'], true)) fail('This expense is already ' . str_replace('_', ' ', $c['status']) . '.');
   $act = $in['action'] ?? ''; $why = s($in['reason'] ?? null, 2000);
   if ($act === 'reject' || $act === 'hold') {
@@ -590,7 +596,7 @@ case 'claim_decide':
   $u = one('SELECT id, name FROM ' . T('users') . ' WHERE id = ?', [$c['user_id']]);
   $exp = acc_of_type($in['account_id'] ?? 0, 'expense'); $credit = !empty($in['gst_credit']) && $c['gst'] > 0; $mode = ($in['gst_mode'] ?? '') === 'igst' ? 'igst' : 'cgst_sgst';
   $payTo = ($in['pay_from'] ?? 'staff') === 'staff' ? party_account('employee', $u['id'], $u['name']) : money_id($in['pay_from']);
-  db()->beginTransaction();
+  tx();
   $jid = claim_post($c, $exp, $credit, $mode, $payTo, $u['name']);
   upd('claims', $c['id'], ['status' => 'approved', 'decided_by' => $me['name'], 'decided_at' => now(), 'reason' => $why, 'journal_id' => $jid]);
   claim_note($c['id'], 'approved', $why);

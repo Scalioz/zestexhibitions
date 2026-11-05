@@ -20,6 +20,12 @@ function party_account($ptype, $pid, $name) {
 const VPREFIX = ['Sales' => 'SI', 'Receipt' => 'RV', 'Payment' => 'PV', 'Expense' => 'EV', 'Contra' => 'CV', 'Journal' => 'JV', 'Salary' => 'SV', 'Claim' => 'CL', 'Tax' => 'TX', 'Reversal' => 'RX'];
 
 // lines: [[account_id, dr, cr, memo], ...]  — must balance
+function next_no($table, $col, $pre) {   // highest number used so far with this prefix
+  $lock = (cfg()['driver'] ?? 'mysql') !== 'sqlite' && db()->inTransaction() ? ' FOR UPDATE' : '';   // MySQL: read the latest committed numbers and hold them until we save
+  $last = 0; foreach (all('SELECT ' . $col . ' AS v FROM ' . T($table) . ' WHERE ' . $col . ' LIKE ?' . $lock, [$pre . '%']) as $r) $last = max($last, (int) substr($r['v'], strlen($pre)));
+  return $last;
+}
+function is_dup(PDOException $e) { return in_array($e->getCode(), ['23000', '23505'], true) || stripos($e->getMessage(), 'UNIQUE') !== false || stripos($e->getMessage(), 'Duplicate') !== false; }
 function post_journal($date, $vtype, $narr, $lines, $ref_type = null, $ref_id = null, $project_id = null, $user = null) {
   $dr = 0; $cr = 0; $clean = [];
   foreach ($lines as $l) {
@@ -32,9 +38,15 @@ function post_journal($date, $vtype, $narr, $lines, $ref_type = null, $ref_id = 
   if (!$clean || round($dr, 2) <= 0) throw new UserError('Entry has no amount.');
   if (abs($dr - $cr) > 0.009) throw new UserError('Debit (' . inr_txt($dr) . ') and credit (' . inr_txt($cr) . ') must be equal.');
   $p = VPREFIX[$vtype] ?? 'JV'; $pre = "$p/" . fy_of($date) . '/';
-  $n = 1 + (int) val('SELECT COUNT(*) FROM ' . T('journal') . ' WHERE vno LIKE ?', [$pre . '%']);
-  $jid = ins('journal', ['jdate' => $date, 'vtype' => $vtype, 'vno' => $pre . str_pad($n, 4, '0', STR_PAD_LEFT), 'narration' => mb_substr((string) $narr, 0, 2000),
-    'ref_type' => $ref_type, 'ref_id' => $ref_id, 'project_id' => $project_id, 'created_by' => $user, 'created_at' => now()]);
+  // next number; the unique index on vno makes a clash impossible — if two people post at the same instant, the second simply takes the next number
+  for ($try = 0; ; $try++) {
+    $n = 1 + next_no('journal', 'vno', $pre);
+    try {
+      $jid = ins('journal', ['jdate' => $date, 'vtype' => $vtype, 'vno' => $pre . str_pad($n, 4, '0', STR_PAD_LEFT), 'narration' => mb_substr((string) $narr, 0, 2000),
+        'ref_type' => $ref_type, 'ref_id' => $ref_id, 'project_id' => $project_id, 'created_by' => $user, 'created_at' => now()]);
+      break;
+    } catch (PDOException $e) { if ($try >= 8 || !is_dup($e)) throw $e; usleep(random_int(20000, 120000)); }
+  }
   foreach ($clean as [$a, $d, $c, $m]) ins('jlines', ['journal_id' => $jid, 'account_id' => $a, 'dr' => $d, 'cr' => $c, 'memo' => $m]);
   return $jid;
 }
