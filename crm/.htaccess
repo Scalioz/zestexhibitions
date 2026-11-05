@@ -9,11 +9,19 @@ RewriteCond %{HTTP_HOST} !^[0-9.]+(:[0-9]+)?$
 RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 </IfModule>
 # Never serve config, git, or notes
-<FilesMatch "^(config\.php|.*\.md|\.git.*|\.env.*)$">
+<FilesMatch "^(config\.php|.*\.md|\.git.*|\.env.*|\.user\.ini)$">
   Require all denied
 </FilesMatch>
-# Allow larger uploads (Hostinger may cap these in hPanel → PHP settings)
+# Allow larger uploads (they are compressed after upload). Hostinger also reads .user.ini; hPanel → PHP settings can raise these too.
 <IfModule mod_php.c>
-  php_value upload_max_filesize 25M
-  php_value post_max_size 30M
+  php_value upload_max_filesize 60M
+  php_value post_max_size 64M
+  php_value memory_limit 768M
+  php_value max_execution_time 300
+</IfModule>
+<IfModule LiteSpeed>
+  php_value upload_max_filesize 60M
+  php_value post_max_size 64M
+  php_value memory_limit 768M
+  php_value max_execution_time 300
 </IfModule>
