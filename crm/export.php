@@ -19,11 +19,12 @@ $n = fn($v) => $v === null || $v === '' ? '' : (float) $v;
 $S = [];
 $S['Orders'] = [['Client', 'Client city', 'Expo', 'Expo location', 'Start date', 'End date', 'Area (sqm)', 'Space type', 'Stall no.', 'Status', 'Handled by (sales)', 'Designed by', 'Design assigned on', 'Design corrections', 'Design approved by',
   'Quote versions', 'Offered (₹)', 'Agreed (₹)', 'Extras (₹)', 'GST (₹)', 'Bill total (₹)', 'Received (₹)', 'Balance (₹)', 'Last payment', 'Fabricated by (vendor)', 'Vendor L1 quote (₹)', 'Vendor paid (₹)', 'Expenses (₹)', 'Losses (₹)', 'Profit excl. GST (₹)',
-  'Quote approved by', 'Invoice no.', 'Invoice date', 'Rejected by', 'Rejection reason', 'Rejection details', 'Do not quote']];
+  'Quote approved by', 'Invoice no.', 'Invoice date', 'Rejected by', 'Rejection reason', 'Rejection details', 'Do not quote', 'Sides open', 'Design assigned by', 'Design submitted on', 'Designer notes', 'Production person', 'Production details saved']];
 foreach ($orders as $o) { $b = $o['bill'];
   $S['Orders'][] = [$o['company'], $o['client_city'], $o['expo'], $o['location'], $o['start_date'], $o['end_date'], $n($o['area_sqm']), $o['space_type'], $o['stall_no'], ucfirst($o['status']), $o['owner'], $o['designed_by'], $o['assigned_on'], $o['revisions_n'], $o['design_approved_by'],
     $o['quotes_n'], $n($o['offered']), $n($o['agreed']), $b['extras'], $b['gst'], $b['total'], $b['received'], $b['balance'], $o['last_payment'], $o['fabricator'], $n($o['vendor_l1']), $b['vendor_paid'], $b['expenses'], $b['losses'], $b['profit'],
-    $o['approved_by'], $o['invoice_no'], $o['invoice_date'], $o['rejected_by'] === 'us' ? 'Zest' : ($o['rejected_by'] === 'client' ? 'Client' : ''), $o['reason'], $o['rejection_note'], $o['dnq'] ? 'YES' : ''];
+    $o['approved_by'], $o['invoice_no'], $o['invoice_date'], $o['rejected_by'] === 'us' ? 'Zest' : ($o['rejected_by'] === 'client' ? 'Client' : ''), $o['reason'], $o['rejection_note'], $o['dnq'] ? 'YES' : '',
+    $o['sides_open'] ? (int) $o['sides_open'] : '', $o['design_assigned_by'], $o['design_submitted_on'], $o['design_notes'], $um[$o['ops_id']] ?? '', $o['ops_updated_at'] ? substr($o['ops_updated_at'], 0, 10) : ''];
 }
 $S['Clients'] = [['Company', 'Contact person', 'Designation', 'Phone', 'Email', 'City', 'Address', 'GSTIN', 'Handled by', 'Others in the deal', 'Orders', 'Won', 'Business (₹)', 'Received (₹)', 'Outstanding (₹)', 'Do not quote', 'DNQ reason', 'Added on', 'GST certificate on file']];
 $byC = []; foreach ($orders as $o) { $k = $o['client_id']; $byC[$k] = $byC[$k] ?? ['o' => 0, 'w' => 0, 't' => 0, 'r' => 0, 'b' => 0]; $byC[$k]['o']++; if (is_won($o['status'])) { $byC[$k]['w']++; $byC[$k]['t'] += $o['bill']['total']; $byC[$k]['r'] += $o['bill']['received']; $byC[$k]['b'] += $o['bill']['balance']; } }

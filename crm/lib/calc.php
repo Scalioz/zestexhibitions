@@ -48,6 +48,8 @@ function missing_days($user, $end) {
   $off = setting('weekly_off', [0]);
   $hol = array_column(all('SELECT hdate FROM ' . T('holidays') . ' WHERE hdate BETWEEN ? AND ?', [$from, $end]), 'hdate');
   $done = array_column(all('SELECT rdate FROM ' . T('reports') . ' WHERE user_id = ? AND rdate BETWEEN ? AND ?', [$user['id'], $from, $end]), 'rdate');
+  // a day with work logged (expo data, design or production updates) also counts as reported
+  $done = array_merge($done, array_column(all('SELECT adate FROM ' . T('activity') . ' WHERE user_id = ? AND adate BETWEEN ? AND ?', [$user['id'], $from, $end]), 'adate'));
   $out = [];
   for ($d = $from; $d <= $end; $d = date('Y-m-d', strtotime($d . ' +1 day'))) {
     if (in_array((int) date('w', strtotime($d)), $off, true) || in_array($d, $hol, true) || in_array($d, $done, true)) continue;
