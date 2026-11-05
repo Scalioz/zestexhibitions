@@ -40,6 +40,84 @@ function inv_totals($lines, $rate) {
   return [$out, round($tax + $non, 2), $gst, round($tax + $non + $gst, 2), $tax];
 }
 
+// ---------- invoice workflow: sales request → accounts prepare → admin approve ----------
+const INV_EDITABLE = ['requested', 'draft', 'on_hold', 'rejected'];
+function need_seller() { global $ADMIN, $MODULE; if (!$ADMIN && $MODULE !== 'records') fail('Invoice requests are raised by sales.', 403); }
+function inv_row($id) {
+  $i = one('SELECT i.*, c.company, c.city, p.expo, p.owner_id, u.name AS requester FROM ' . T('invoices') . ' i JOIN ' . T('clients') . ' c ON c.id = i.client_id LEFT JOIN ' . T('projects') . ' p ON p.id = i.project_id LEFT JOIN ' . T('users') . ' u ON u.id = i.requested_by WHERE i.id = ?', [(int) $id]);
+  if (!$i) fail('Invoice not found.', 404);
+  return $i;
+}
+function inv_can_see($i) { global $ACC, $MID; return $ACC || (int) $i['requested_by'] === $MID || (int) ($i['owner_id'] ?? 0) === $MID; }
+function inv_log($id, $action, $note = null, $ver = null, $snap = null) {
+  global $MID; ins('inv_log', ['invoice_id' => (int) $id, 'user_id' => $MID, 'at' => now(), 'action' => $action, 'note' => $note, 'version' => $ver, 'snap' => $snap === null ? null : json_encode($snap, JSON_UNESCAPED_UNICODE)]);
+}
+function inv_snap($i) {
+  return ['inv_date' => $i['inv_date'], 'place_state' => $i['place_state'], 'gst_rate' => (float) $i['gst_rate'], 'notes' => (string) ($i['notes'] ?? ''),
+    'lines' => json_decode($i['lines_json'], true) ?: [], 'taxable' => (float) $i['taxable'], 'gst' => (float) $i['gst'], 'total' => (float) $i['total']];
+}
+function inv_diff($a, $b) {   // what changed between two versions, in plain words
+  $ch = []; $r = fn($n) => '₹' . inr2($n);
+  if ($a['inv_date'] !== $b['inv_date']) $ch[] = "Date: {$a['inv_date']} → {$b['inv_date']}";
+  if ((string) $a['place_state'] !== (string) $b['place_state']) $ch[] = "Place of supply: {$a['place_state']} → {$b['place_state']}";
+  if ($a['gst_rate'] != $b['gst_rate']) $ch[] = "GST rate: {$a['gst_rate']}% → {$b['gst_rate']}%";
+  $n = max(count($a['lines']), count($b['lines']));
+  for ($k = 0; $k < $n; $k++) {
+    $x = $a['lines'][$k] ?? null; $y = $b['lines'][$k] ?? null; $no = 'Line ' . ($k + 1);
+    if (!$x) { $ch[] = "$no added: {$y['desc']} — {$y['qty']} × " . $r($y['rate']); continue; }
+    if (!$y) { $ch[] = "$no removed: {$x['desc']}"; continue; }
+    if ($x['desc'] !== $y['desc']) $ch[] = "$no description: “{$x['desc']}” → “{$y['desc']}”";
+    if ((float) $x['qty'] != (float) $y['qty']) $ch[] = "$no qty: {$x['qty']} → {$y['qty']}";
+    if ((float) $x['rate'] != (float) $y['rate']) $ch[] = "$no rate: " . $r($x['rate']) . ' → ' . $r($y['rate']);
+    if ((int) $x['tax'] !== (int) $y['tax']) $ch[] = "$no GST: " . ($x['tax'] ? 'yes' : 'no') . ' → ' . ($y['tax'] ? 'yes' : 'no');
+  }
+  if (trim($a['notes']) !== trim($b['notes'])) $ch[] = 'Notes: “' . (mb_strimwidth(trim($a['notes']), 0, 120, '…') ?: 'empty') . '” → “' . (mb_strimwidth(trim($b['notes']), 0, 120, '…') ?: 'empty') . '”';
+  if ($a['total'] != $b['total']) $ch[] = 'Grand total: ' . $r($a['total']) . ' → ' . $r($b['total']);
+  return $ch;
+}
+function inv_prefill_lines($pid) {
+  $p = one('SELECT p.*, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . ' c ON c.id = p.client_id WHERE p.id = ?', [(int) $pid]) ?? fail('Order not found.');
+  $sac = setting('company', [])['sac'] ?? '998596';
+  $desc = 'Stall fabrication incl. erection, labour & transport — ' . $p['expo'] . ($p['location'] ? ", {$p['location']}" : '') . ($p['area_sqm'] ? ', ' . rtrim(rtrim($p['area_sqm'], '0'), '.') . ' sqm' : '') . ($p['stall_no'] ? ", stall {$p['stall_no']}" : '');
+  $base = (float) ($p['agreed'] ?: $p['offered']); $lines = [];
+  $ext = all('SELECT * FROM ' . T('extras') . ' WHERE project_id = ?', [$p['id']]); $extT = array_sum(array_map(fn($x) => $x['rate'] * $x['qty'], $ext));
+  if ($p['gst_on'] !== null && $p['gst_on'] !== '' && (float) $p['gst_on'] < $base + $extT) {   // GST charged only on part of the amount
+    $lines[] = ['desc' => $desc, 'sac' => $sac, 'qty' => 1, 'rate' => (float) $p['gst_on'], 'tax' => 1];
+    $lines[] = ['desc' => 'Balance amount (no GST, as agreed)', 'sac' => '', 'qty' => 1, 'rate' => round($base + $extT - (float) $p['gst_on'], 2), 'tax' => 0];
+  } else {
+    $lines[] = ['desc' => $desc, 'sac' => $sac, 'qty' => 1, 'rate' => $base, 'tax' => 1];
+    foreach ($ext as $x) $lines[] = ['desc' => 'Extra: ' . $x['item'], 'sac' => $sac, 'qty' => (float) $x['qty'], 'rate' => (float) $x['rate'], 'tax' => 1];
+  }
+  return ['client_id' => (int) $p['client_id'], 'project_id' => (int) $p['id'], 'gst_rate' => (float) ($p['gst_rate'] ?: 18), 'lines' => $lines, 'owner_id' => (int) $p['owner_id']];
+}
+function inv_issue_do($i) {   // gives the number (kept if a proforma is being revised) and posts a tax invoice to the books
+  global $MID;
+  $no = $i['inv_no'];
+  if (!$no) {
+    $pre = ($i['kind'] === 'tax' ? 'INV' : 'PI') . '/' . fy_of($i['inv_date']) . '/';
+    $last = 0; foreach (all('SELECT inv_no FROM ' . T('invoices') . ' WHERE inv_no LIKE ?', [$pre . '%']) as $r) $last = max($last, (int) substr($r['inv_no'], strlen($pre)));
+    $no = $pre . str_pad($last + 1, 3, '0', STR_PAD_LEFT);
+  }
+  $jid = $i['journal_id'] ?: null;
+  if ($i['kind'] === 'tax' && !$jid) {
+    $lines = [[party_account('client', $i['client_id'], $i['company']), $i['total'], 0, "Invoice $no"], [acc_sub('sales'), 0, $i['taxable'], "Invoice $no"]];
+    $lines = array_merge($lines, gst_lines((float) $i['gst'], $i['gst_mode'], 'out'));
+    $jid = post_journal($i['inv_date'], 'Sales', "Tax invoice $no — {$i['company']}", $lines, 'invoice', $i['id'], $i['project_id'], $MID);
+    if ($i['project_id']) upd('projects', $i['project_id'], ['invoice_no' => $no, 'invoice_date' => $i['inv_date']]);
+  }
+  upd('invoices', $i['id'], ['inv_no' => $no, 'status' => 'issued', 'journal_id' => $jid]);
+  return $no;
+}
+function inv_counts() {
+  $c = ['todo' => 0, 'pending' => 0, 'changes' => 0, 'issued' => 0, 'cancelled' => 0, 'all' => 0];
+  foreach (all('SELECT status, COUNT(*) AS n FROM ' . T('invoices') . ' GROUP BY status') as $r) {
+    $g = ['requested' => 'todo', 'draft' => 'todo', 'pending' => 'pending', 'on_hold' => 'changes', 'rejected' => 'changes', 'issued' => 'issued', 'cancelled' => 'cancelled'][$r['status']] ?? null;
+    if ($g) $c[$g] += $r['n']; $c['all'] += $r['n'];
+  }
+  return $c;
+}
+const INV_GROUPS = ['todo' => ['requested', 'draft'], 'pending' => ['pending'], 'changes' => ['on_hold', 'rejected'], 'issued' => ['issued'], 'cancelled' => ['cancelled']];
+
 try {
 switch ($A) {
 
@@ -68,7 +146,7 @@ case 'acc_home':
     'gst_net' => round($sum(['gst_out_c', 'gst_out_s', 'gst_out_i'], -1) - $sum(['gst_in_c', 'gst_in_s', 'gst_in_i']), 2), 'tds' => $sum(['tds_out'], -1),
     'income_month' => $ti, 'expense_month' => $te,
     'claims_waiting' => (int) val('SELECT COUNT(*) FROM ' . T('claims') . " WHERE status = 'submitted'"), 'claims_hold' => (int) val('SELECT COUNT(*) FROM ' . T('claims') . " WHERE status = 'on_hold'"),
-    'to_post' => $toPost, 'inv_draft' => (int) val('SELECT COUNT(*) FROM ' . T('invoices') . " WHERE status = 'draft'"),
+    'to_post' => $toPost, 'inv' => inv_counts(),
     'recent' => all('SELECT j.*, (SELECT SUM(dr) FROM ' . T('jlines') . ' l WHERE l.journal_id = j.id) AS amount FROM ' . T('journal') . ' j ORDER BY j.id DESC LIMIT 12')]);
 
 // ================= CHART OF ACCOUNTS =================
@@ -223,37 +301,59 @@ case 'acc_post_crm':
   db()->commit(); out(['id' => $jid]);
 
 // ================= INVOICES =================
+// Flow: sales raises a request → accounts prepares and sends to admin → admin approves (number given, tax invoice posted) / holds / rejects.
 case 'inv_list':
   need_acc();
-  $w = '1=1'; $p = [];
+  $g = $in['group'] ?? 'all'; $w = '1=1'; $p = [];
+  if (isset(INV_GROUPS[$g])) { $w .= ' AND i.status IN (' . implode(',', array_fill(0, count(INV_GROUPS[$g]), '?')) . ')'; $p = INV_GROUPS[$g]; }
   if (in_array($in['kind'] ?? '', ['proforma', 'tax'], true)) { $w .= ' AND i.kind = ?'; $p[] = $in['kind']; }
-  if (in_array($in['status'] ?? '', ['draft', 'issued', 'cancelled'], true)) { $w .= ' AND i.status = ?'; $p[] = $in['status']; }
   if ($qs = s($in['q'] ?? null, 100)) { $w .= ' AND (c.company LIKE ? OR i.inv_no LIKE ?)'; $p[] = "%$qs%"; $p[] = "%$qs%"; }
-  out(['invoices' => all('SELECT i.*, c.company, p.expo FROM ' . T('invoices') . ' i JOIN ' . T('clients') . ' c ON c.id = i.client_id LEFT JOIN ' . T('projects') . " p ON p.id = i.project_id WHERE $w ORDER BY i.id DESC LIMIT 500", $p)]);
+  out(['counts' => inv_counts(), 'invoices' => all('SELECT i.*, c.company, p.expo, u.name AS requester FROM ' . T('invoices') . ' i JOIN ' . T('clients') . ' c ON c.id = i.client_id LEFT JOIN ' . T('projects') . ' p ON p.id = i.project_id LEFT JOIN ' . T('users') . " u ON u.id = i.requested_by WHERE $w ORDER BY i.id DESC LIMIT 500", $p)]);
+
+case 'inv_mine':   // sales: my requests and the approved invoices for my orders
+  need_seller();
+  $rows = all('SELECT i.*, c.company, p.expo FROM ' . T('invoices') . ' i JOIN ' . T('clients') . ' c ON c.id = i.client_id LEFT JOIN ' . T('projects') . ' p ON p.id = i.project_id WHERE ' . ($ADMIN ? '1=1' : '(i.requested_by = ? OR p.owner_id = ?)') . ' ORDER BY i.id DESC LIMIT 500', $ADMIN ? [] : [$MID, $MID]);
+  $orders = all('SELECT p.id, p.expo, c.company, p.client_id FROM ' . T('projects') . ' p JOIN ' . T('clients') . " c ON c.id = p.client_id WHERE " . ($ADMIN ? '1=1' : 'p.owner_id = ?') . " AND p.status <> 'rejected' ORDER BY p.id DESC LIMIT 300", $ADMIN ? [] : [$MID]);
+  $clients = all('SELECT id, company FROM ' . T('clients') . ($ADMIN ? '' : ' WHERE owner_id = ?') . ' ORDER BY company', $ADMIN ? [] : [$MID]);
+  out(['invoices' => $rows, 'orders' => $orders, 'clients' => $clients]);
+
+case 'inv_request':   // sales asks accounts for a proforma / tax invoice
+  need_seller();
+  $kind = ($in['kind'] ?? '') === 'tax' ? 'tax' : 'proforma';
+  $note = s($in['note'] ?? null, 2000) ?? fail('Write what should be billed (e.g. 50% advance, full amount, extras).');
+  $state = setting('company', [])['state'] ?? 'Delhi';
+  if (!empty($in['from_id'])) {   // tax invoice from an approved proforma
+    $f = inv_row($in['from_id']); if (!inv_can_see($f)) fail('Not your invoice.', 403);
+    if ($f['kind'] !== 'proforma' || $f['status'] !== 'issued') fail('Only an approved proforma can be turned into a tax invoice.');
+    if ($ex = val('SELECT id FROM ' . T('invoices') . " WHERE from_id = ? AND status <> 'cancelled'", [$f['id']])) fail('A tax invoice for this proforma is already requested.');
+    $data = ['kind' => 'tax', 'inv_date' => today(), 'client_id' => $f['client_id'], 'project_id' => $f['project_id'], 'place_state' => $f['place_state'], 'gst_mode' => $f['gst_mode'], 'gst_rate' => $f['gst_rate'],
+      'lines_json' => $f['lines_json'], 'taxable' => $f['taxable'], 'gst' => $f['gst'], 'total' => $f['total'], 'notes' => $f['notes'], 'from_id' => $f['id']];
+  } elseif (!empty($in['project_id'])) {
+    $pf = inv_prefill_lines($in['project_id']); if (!$ADMIN && $pf['owner_id'] !== $MID) fail('This order is not yours.', 403);
+    [$lines, $taxable, $gst, $total] = inv_totals($pf['lines'], $pf['gst_rate']);
+    $data = ['kind' => $kind, 'inv_date' => today(), 'client_id' => $pf['client_id'], 'project_id' => $pf['project_id'], 'place_state' => $state, 'gst_mode' => 'cgst_sgst', 'gst_rate' => $pf['gst_rate'],
+      'lines_json' => json_encode($lines, JSON_UNESCAPED_UNICODE), 'taxable' => $taxable, 'gst' => $gst, 'total' => $total];
+  } else {
+    $cid = (int) ($in['client_id'] ?? 0); if (!val('SELECT COUNT(*) FROM ' . T('clients') . ' WHERE id = ?' . ($ADMIN ? '' : ' AND owner_id = ' . $MID), [$cid])) fail('Pick the order or the client.');
+    $data = ['kind' => $kind, 'inv_date' => today(), 'client_id' => $cid, 'project_id' => null, 'place_state' => $state, 'gst_mode' => 'cgst_sgst', 'gst_rate' => 18, 'lines_json' => '[]', 'taxable' => 0, 'gst' => 0, 'total' => 0];
+  }
+  $id = ins('invoices', $data + ['status' => 'requested', 'requested_by' => $MID, 'request_note' => $note, 'version' => 0, 'created_by' => $MID, 'created_at' => now()]);
+  inv_log($id, 'requested', $note);
+  out(['id' => $id]);
 
 case 'inv_get':
-  need_acc();
-  $i = one('SELECT i.*, c.company FROM ' . T('invoices') . ' i JOIN ' . T('clients') . ' c ON c.id = i.client_id WHERE i.id = ?', [(int) ($in['id'] ?? 0)]) ?? fail('Not found', 404);
+  $i = inv_row($in['id'] ?? 0); if (!inv_can_see($i)) fail('Not your invoice.', 403);
   $i['lines'] = json_decode($i['lines_json'], true) ?: []; unset($i['lines_json']);
-  out(['invoice' => $i]);
+  $um = users_map();
+  $log = array_map(function ($l) use ($um) { $l['by'] = $um[$l['user_id']] ?? '—'; $s = $l['snap'] ? json_decode($l['snap'], true) : null; $l['changes'] = $s['changes'] ?? []; $l['total'] = $s['data']['total'] ?? null; unset($l['snap']); return $l; },
+    all('SELECT * FROM ' . T('inv_log') . ' WHERE invoice_id = ? ORDER BY id', [$i['id']]));
+  out(['invoice' => $i, 'log' => $log, 'tax_child' => val('SELECT id FROM ' . T('invoices') . " WHERE from_id = ? AND status <> 'cancelled'", [$i['id']]) ?: null]);
 
 case 'inv_prefill':
   need_acc();
-  $p = one('SELECT p.*, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . ' c ON c.id = p.client_id WHERE p.id = ?', [(int) ($in['project_id'] ?? 0)]) ?? fail('Order not found.');
-  $sac = setting('company', [])['sac'] ?? '998596';
-  $desc = 'Stall fabrication incl. erection, labour & transport — ' . $p['expo'] . ($p['location'] ? ", {$p['location']}" : '') . ($p['area_sqm'] ? ', ' . rtrim(rtrim($p['area_sqm'], '0'), '.') . ' sqm' : '') . ($p['stall_no'] ? ", stall {$p['stall_no']}" : '');
-  $base = (float) ($p['agreed'] ?: $p['offered']); $lines = [];
-  $ext = all('SELECT * FROM ' . T('extras') . ' WHERE project_id = ?', [$p['id']]); $extT = array_sum(array_map(fn($x) => $x['rate'] * $x['qty'], $ext));
-  if ($p['gst_on'] !== null && $p['gst_on'] !== '' && (float) $p['gst_on'] < $base + $extT) {   // GST charged only on part of the amount
-    $lines[] = ['desc' => $desc, 'sac' => $sac, 'qty' => 1, 'rate' => (float) $p['gst_on'], 'tax' => 1];
-    $lines[] = ['desc' => 'Balance amount (no GST, as agreed)', 'sac' => '', 'qty' => 1, 'rate' => round($base + $extT - (float) $p['gst_on'], 2), 'tax' => 0];
-  } else {
-    $lines[] = ['desc' => $desc, 'sac' => $sac, 'qty' => 1, 'rate' => $base, 'tax' => 1];
-    foreach ($ext as $x) $lines[] = ['desc' => 'Extra: ' . $x['item'], 'sac' => $sac, 'qty' => (float) $x['qty'], 'rate' => (float) $x['rate'], 'tax' => 1];
-  }
-  out(['client_id' => (int) $p['client_id'], 'project_id' => (int) $p['id'], 'gst_rate' => (float) $p['gst_rate'], 'lines' => $lines]);
+  $pf = inv_prefill_lines($in['project_id'] ?? 0); unset($pf['owner_id']); out($pf);
 
-case 'inv_save':
+case 'inv_save':   // accounts prepares / corrects; optional send to admin in the same step
   need_acc();
   $kind = ($in['kind'] ?? '') === 'tax' ? 'tax' : 'proforma';
   $cid = (int) ($in['client_id'] ?? 0); if (!val('SELECT COUNT(*) FROM ' . T('clients') . ' WHERE id = ?', [$cid])) fail('Pick the client.');
@@ -261,46 +361,77 @@ case 'inv_save':
   [$lines, $taxable, $gst, $total] = inv_totals($in['lines'] ?? [], $rate); if (!$lines) fail('Add at least one line.');
   $state = s($in['place_state'] ?? null, 60) ?? (setting('company', [])['state'] ?? '');
   $mode = mb_strtolower(trim($state)) === mb_strtolower(trim(setting('company', [])['state'] ?? '')) ? 'cgst_sgst' : 'igst';
-  $data = ['kind' => $kind, 'inv_date' => d($in['inv_date'] ?? null) ?? today(), 'client_id' => $cid, 'project_id' => (int) ($in['project_id'] ?? 0) ?: null, 'place_state' => $state, 'gst_mode' => $mode, 'gst_rate' => $rate,
+  $data = ['inv_date' => d($in['inv_date'] ?? null) ?? today(), 'client_id' => $cid, 'project_id' => (int) ($in['project_id'] ?? 0) ?: null, 'place_state' => $state, 'gst_mode' => $mode, 'gst_rate' => $rate,
     'lines_json' => json_encode($lines, JSON_UNESCAPED_UNICODE), 'taxable' => $taxable, 'gst' => $gst, 'total' => $total, 'notes' => s($in['notes'] ?? null, 2000)];
-  if (!empty($in['id'])) { $i = one('SELECT * FROM ' . T('invoices') . ' WHERE id = ?', [(int) $in['id']]) ?? fail('Not found', 404); if ($i['status'] !== 'draft') fail('Only a draft can be changed.'); upd('invoices', $i['id'], $data); out(['id' => (int) $i['id']]); }
-  out(['id' => ins('invoices', $data + ['status' => 'draft', 'created_by' => $MID, 'created_at' => now(), 'from_id' => (int) ($in['from_id'] ?? 0) ?: null])]);
-
-case 'inv_issue':
-  need_acc();
-  $i = one('SELECT i.*, c.company FROM ' . T('invoices') . ' i JOIN ' . T('clients') . ' c ON c.id = i.client_id WHERE i.id = ?', [(int) ($in['id'] ?? 0)]) ?? fail('Not found', 404);
-  if ($i['status'] !== 'draft') fail('Already issued.');
-  $pre = ($i['kind'] === 'tax' ? 'INV' : 'PI') . '/' . fy_of($i['inv_date']) . '/';
-  $last = 0; foreach (all('SELECT inv_no FROM ' . T('invoices') . ' WHERE inv_no LIKE ?', [$pre . '%']) as $r) $last = max($last, (int) substr($r['inv_no'], strlen($pre)));
-  $no = $pre . str_pad($last + 1, 3, '0', STR_PAD_LEFT);
   db()->beginTransaction();
-  $jid = null;
-  if ($i['kind'] === 'tax') {
-    $lines = [[party_account('client', $i['client_id'], $i['company']), $i['total'], 0, "Invoice $no"], [acc_sub('sales'), 0, $i['taxable'], "Invoice $no"]];
-    $lines = array_merge($lines, gst_lines((float) $i['gst'], $i['gst_mode'], 'out'));
-    $jid = post_journal($i['inv_date'], 'Sales', "Tax invoice $no — {$i['company']}", $lines, 'invoice', $i['id'], $i['project_id'], $MID);
-    if ($i['project_id']) upd('projects', $i['project_id'], ['invoice_no' => $no, 'invoice_date' => $i['inv_date']]);
+  if (!empty($in['id'])) {
+    $i = inv_row($in['id']); if (!in_array($i['status'], INV_EDITABLE, true)) fail($i['status'] === 'pending' ? 'It is waiting for admin. It can be changed if admin puts it on hold or rejects it.' : 'This invoice can no longer be changed.');
+    if ($i['inv_no'] && $i['kind'] !== $kind) fail('Kind cannot change after a number is given.');
+    upd('invoices', $i['id'], $data + ['kind' => $kind, 'status' => $i['status'] === 'requested' ? 'draft' : $i['status']]);
+    if ($i['status'] === 'requested') inv_log($i['id'], 'prepared');
+    $id = (int) $i['id'];
+  } else {
+    $id = ins('invoices', $data + ['kind' => $kind, 'status' => 'draft', 'version' => 0, 'created_by' => $MID, 'created_at' => now(), 'from_id' => (int) ($in['from_id'] ?? 0) ?: null]);
+    inv_log($id, 'created');
   }
-  upd('invoices', $i['id'], ['inv_no' => $no, 'status' => 'issued', 'journal_id' => $jid]);
-  db()->commit(); out(['inv_no' => $no]);
+  if (!empty($in['submit'])) {
+    $i = inv_row($id); $ver = (int) $i['version'] + 1; $snap = inv_snap($i);
+    $prev = val('SELECT snap FROM ' . T('inv_log') . " WHERE invoice_id = ? AND action = 'submitted' AND snap IS NOT NULL ORDER BY id DESC LIMIT 1", [$id]);
+    $changes = $prev ? inv_diff(json_decode($prev, true)['data'], $snap) : [];
+    if ($prev && !$changes && in_array($i['status'], ['on_hold', 'rejected'], true) && !s($in['message'] ?? null)) fail('Nothing was changed. Make the corrections, or write a message for admin.');
+    upd('invoices', $id, ['status' => 'pending', 'version' => $ver, 'submitted_at' => now()]);
+    inv_log($id, 'submitted', s($in['message'] ?? null, 2000), $ver, ['data' => $snap, 'changes' => $changes]);
+  }
+  db()->commit(); out(['id' => $id]);
 
-case 'inv_convert':
+case 'inv_decide':   // admin: approve / hold / reject
+  need_admin();
+  $i = inv_row($in['id'] ?? 0); if ($i['status'] !== 'pending') fail('This is not waiting for approval.');
+  $act = $in['action'] ?? ''; $why = s($in['reason'] ?? null, 2000);
+  if (!in_array($act, ['approve', 'hold', 'reject'], true)) fail('Pick approve, hold or reject.');
+  if ($act !== 'approve' && !$why) fail($act === 'hold' ? 'Write what details are needed.' : 'Write why it is rejected and what to correct.');
+  db()->beginTransaction();
+  if ($act === 'approve') { $no = inv_issue_do($i); upd('invoices', $i['id'], ['decided_by' => $me['name'], 'decided_at' => now(), 'reason' => $why]); inv_log($i['id'], 'approved', $why, (int) $i['version']); db()->commit(); out(['inv_no' => $no]); }
+  upd('invoices', $i['id'], ['status' => $act === 'hold' ? 'on_hold' : 'rejected', 'decided_by' => $me['name'], 'decided_at' => now(), 'reason' => $why]);
+  inv_log($i['id'], $act === 'hold' ? 'hold' : 'rejected', $why, (int) $i['version']);
+  db()->commit(); out(['ok' => true]);
+
+case 'inv_reply':   // accounts or sales add details / comments
+  $i = inv_row($in['id'] ?? 0); if (!inv_can_see($i)) fail('Not your invoice.', 403);
+  if ($i['status'] === 'cancelled') fail('This invoice is cancelled.');
+  inv_log($i['id'], 'reply', s($in['text'] ?? null, 2000) ?? fail('Write the details.'));
+  out(['ok' => true]);
+
+case 'inv_correct':   // reopen an approved proforma for correction (number is kept, goes through approval again)
+  $i = inv_row($in['id'] ?? 0); if (!inv_can_see($i)) fail('Not your invoice.', 403);
+  if ($i['status'] !== 'issued') fail('Only an approved invoice can be reopened.');
+  if ($i['kind'] === 'tax') fail('An approved tax invoice cannot be edited. Admin can cancel it and a new one can be made.');
+  $why = s($in['reason'] ?? null, 2000) ?? fail('Write what needs to be corrected.');
+  if (val('SELECT id FROM ' . T('invoices') . " WHERE from_id = ? AND status <> 'cancelled'", [$i['id']])) fail('A tax invoice is already made from this proforma.');
+  upd('invoices', $i['id'], ['status' => $ACC ? 'draft' : 'requested']);
+  inv_log($i['id'], 'correction', $why);
+  out(['ok' => true]);
+
+case 'inv_convert':   // accounts: draft tax invoice from an approved proforma
   need_acc();
-  $i = one('SELECT * FROM ' . T('invoices') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]) ?? fail('Not found', 404);
-  if ($i['kind'] !== 'proforma' || $i['status'] !== 'issued') fail('Only an issued proforma can be turned into a tax invoice.');
+  $i = inv_row($in['id'] ?? 0);
+  if ($i['kind'] !== 'proforma' || $i['status'] !== 'issued') fail('Only an approved proforma can be turned into a tax invoice.');
   if ($ex = val('SELECT id FROM ' . T('invoices') . " WHERE from_id = ? AND status <> 'cancelled'", [$i['id']])) out(['id' => (int) $ex]);
-  $copy = $i; unset($copy['id'], $copy['inv_no'], $copy['journal_id']);
-  out(['id' => ins('invoices', array_merge($copy, ['kind' => 'tax', 'status' => 'draft', 'inv_date' => today(), 'from_id' => $i['id'], 'created_by' => $MID, 'created_at' => now()]))]);
+  $copy = array_intersect_key($i, array_flip(['client_id', 'project_id', 'place_state', 'gst_mode', 'gst_rate', 'lines_json', 'taxable', 'gst', 'total', 'notes', 'requested_by', 'request_note']));
+  $id = ins('invoices', $copy + ['kind' => 'tax', 'status' => 'draft', 'version' => 0, 'inv_date' => today(), 'from_id' => $i['id'], 'created_by' => $MID, 'created_at' => now()]);
+  inv_log($id, 'created', 'Made from proforma ' . $i['inv_no']);
+  out(['id' => $id]);
 
 case 'inv_cancel':
   need_acc();
-  $i = one('SELECT * FROM ' . T('invoices') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]) ?? fail('Not found', 404);
+  $i = inv_row($in['id'] ?? 0);
   if ($i['status'] === 'cancelled') fail('Already cancelled.');
-  if ($i['status'] === 'draft') { q('DELETE FROM ' . T('invoices') . ' WHERE id = ?', [$i['id']]); out(['deleted' => true]); }
-  $why = s($in['reason'] ?? null, 500) ?? fail('Write why the invoice is cancelled.');
+  if (!$ADMIN && !in_array($i['status'], ['requested', 'draft'], true)) fail('Only admin can cancel an invoice after it is sent for approval.');
+  $why = s($in['reason'] ?? null, 500) ?? fail('Write why it is cancelled.');
   db()->beginTransaction();
   if ($i['journal_id']) { $j = one('SELECT * FROM ' . T('journal') . ' WHERE id = ?', [$i['journal_id']]); upd('journal', $j['id'], ['ref_type' => 'invoice_x']); reverse_journal($j['id'], today(), "Invoice {$i['inv_no']} cancelled: $why", $MID); }
-  upd('invoices', $i['id'], ['status' => 'cancelled', 'notes' => trim(($i['notes'] ?? '') . "\nCancelled: $why")]);
+  upd('invoices', $i['id'], ['status' => 'cancelled']);
+  inv_log($i['id'], 'cancelled', $why);
   db()->commit(); out(['ok' => true]);
 
 // ================= EXPENSE CLAIMS =================

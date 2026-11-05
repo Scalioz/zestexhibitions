@@ -74,23 +74,23 @@ async function route() {
   try { await fn(r); } catch (e) { if (e.message !== 'signed out') view().innerHTML = `<div class="alert bad"><b>Could not load this page</b><span class="m">${esc(e.message)}</span></div>`; }
   window.scrollTo(0, 0);
 }
-const ADMIN_ONLY = { clientlog: 1, saleslog: 1, leadlog: 1, jobs: 1, reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
+const ADMIN_ONLY = { invappr: 1, clientlog: 1, saleslog: 1, leadlog: 1, jobs: 1, reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
 const RECORDS_ONLY = { clients: 1, client: 1, project: 1, newclient: 1 };
-const ACC_ROUTES = { acc: 1, entry: 1, jv: 1, invoices: 1, invnew: 1, inv: 1, claims: 1, topost: 1, books: 1, coa: 1, accset: 1 };
-const MODULE_ONLY = { myexp: ['records', 'ops'],  leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
+const ACC_ROUTES = { acc: 1, entry: 1, jv: 1, invoices: 1, invnew: 1, inv: 1, invappr: 1, claims: 1, topost: 1, books: 1, coa: 1, accset: 1 };
+const MODULE_ONLY = { myinv: ['records'], myexp: ['records', 'ops'],  leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
 async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); window.scrollTo(0, y); }
 
 function renderNav(cur) {
-  const map = { jv: 'books', inv: 'invoices', invnew: 'invoices', acc: isAdmin() ? 'acc' : 'home', client: 'clients', project: 'clients', lexpo: isAdmin() ? 'leadlog' : 'leads', opsjob: isAdmin() ? 'jobs' : 'myops' };
+  const map = { jv: 'books', inv: 'invoices', invnew: 'invoices', invd: B.acc ? 'invoices' : 'myinv', acc: isAdmin() ? 'acc' : 'home', client: 'clients', project: 'clients', lexpo: isAdmin() ? 'leadlog' : 'leads', opsjob: isAdmin() ? 'jobs' : 'myops' };
   const on = map[cur] || cur;
   const L = (k, l, b) => `<a href="#${k}" class="${on === k ? 'on' : ''}">${l}${b ? `<span class="badge">${b}</span>` : ''}</a>`;
   $('#nav').innerHTML = isAdmin()
-    ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('saleslog', 'Sales log', B.pending_approvals || '')}${L('leadlog', 'Expo data log')}${L('jobs', 'Design & production')}${L('reportlog', 'Daily reports', B.flags || '')}
+    ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('saleslog', 'Sales log', B.pending_approvals || '')}${L('invappr', 'Invoice approvals', B.inv_pending || '')}${L('leadlog', 'Expo data log')}${L('jobs', 'Design & production')}${L('reportlog', 'Daily reports', B.flags || '')}
        <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('dnq', 'Do-not-quote list')}
-       <div class="sec">Accounts</div>${L('acc', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}
+       <div class="sec">Accounts</div>${L('acc', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}
        <div class="sec">Admin</div>${L('team', 'Team')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
-    : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('report', 'Daily report', B.flags || '')}`
-    : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('report', 'Daily report', B.flags || '')}`
+    : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('report', 'Daily report', B.flags || '')}`
+    : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('report', 'Daily report', B.flags || '')}`
     : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('report', 'Daily report', B.flags || '')}`;
 }
 
@@ -131,7 +131,7 @@ async function empHome() {
     <div class="kpi hl"><span>Balance to collect</span><b>${inr(d.due)}</b></div>
   </div>
   <div class="panel"><h2>My active orders & enquiries</h2>${projTable(d.projects)}</div>`;
-  claimAlert();
+  claimAlert(); invAlert();
 }
 function claimAlert() { if (!B.claims_attention) return; const w = $('.welcome'); if (w) w.insertAdjacentHTML('afterend', `<div class="alert warn"><b>${B.claims_attention} expense claim${B.claims_attention > 1 ? 's need' : ' needs'} your attention</b><span class="m">Accounts rejected it or asked for more details. <a href="#myexp">Open my expenses →</a></span></div>`); }
 
@@ -144,6 +144,7 @@ async function adminHome(r) {
   view().innerHTML = `
   <div class="head"><div><h1>Business dashboard</h1><p>${f.from || f.to ? `Expos from ${f.from ? fd(f.from) : 'start'} to ${f.to ? fd(f.to) : 'today'}` : 'All time · all employees'}</p></div>
    <form class="row" id="dashf"><label class="f">From<input type="date" name="from" value="${f.from}"></label><label class="f">To<input type="date" name="to" value="${f.to}"></label><button class="btn ghost sm" style="align-self:flex-end">Apply</button>${f.from || f.to ? '<button type="button" class="btn link" id="dashclear" style="align-self:flex-end">Clear</button>' : ''}</form></div>
+  ${B.inv_pending ? `<div class="alert warn"><b>${B.inv_pending} invoice${B.inv_pending > 1 ? 's' : ''} waiting for your approval</b><div><a class="btn sm" href="#invappr">Review invoices</a></div></div>` : ''}
   ${B.pending_approvals ? `<div class="alert warn"><b>${B.pending_approvals} design / quote approval${B.pending_approvals > 1 ? 's' : ''} waiting</b><div><a class="btn sm" href="#saleslog">Open sales log</a></div></div>` : ''}
   ${flags.length ? `<div class="alert bad"><b>Daily reports not received</b><span class="m">${flags.map(e => `${esc(e.name)} — ${e.missing.slice(-5).map(fd).join(', ')}${e.missing.length > 5 ? ` (+${e.missing.length - 5} more)` : ''}`).join('<br>')}</span><div><a class="btn sm" href="#reportlog">Open report log</a></div></div>` : ''}
   <div class="kpis">
@@ -750,6 +751,7 @@ routes.acc = async () => {
   const vt = { Sales: 'p-ok', Receipt: 'p-ok', Payment: 'p-quoted', Expense: 'p-quoted', Claim: 'p-quoted', Salary: 'p-enquiry', Tax: 'p-bad', Contra: 'p-off', Journal: 'p-off', Reversal: 'p-bad' };
   view().innerHTML = `
   <div class="head"><div><h1>Accounts</h1><p>${longDate(B.today)}</p></div><div class="row"><a class="btn ghost" href="#invnew-proforma">+ Proforma</a><a class="btn ghost" href="#invnew-tax">+ Tax invoice</a><a class="btn" href="#entry">+ New entry</a></div></div>
+  ${d.inv.todo + d.inv.changes ? `<div class="alert warn"><b>${d.inv.todo} invoice request${d.inv.todo === 1 ? '' : 's'} to prepare${d.inv.changes ? ` · ${d.inv.changes} sent back by admin` : ''}</b><div><a class="btn sm" href="#invoices">Open invoices</a></div></div>` : ''}${d.inv.pending ? `<div class="alert"><b>${d.inv.pending} invoice${d.inv.pending > 1 ? 's' : ''} with admin for approval</b></div>` : ''}
   ${d.claims_waiting ? `<div class="alert warn"><b>${d.claims_waiting} expense claim${d.claims_waiting > 1 ? 's' : ''} waiting for approval</b><div><a class="btn sm" href="#claims">Review claims</a></div></div>` : ''}
   ${d.to_post ? `<div class="alert warn"><b>${d.to_post} payment${d.to_post > 1 ? 's' : ''} / expense${d.to_post > 1 ? 's' : ''} recorded in orders are not in the books yet</b><div><a class="btn sm" href="#topost">Post them</a></div></div>` : ''}
   <div class="kpis">${d.money.map(a => `<div class="kpi ${a.sub === 'bank' ? 'hl' : ''}"><span>${esc(a.name)}</span><b>${inr2(a.balance)}</b></div>`).join('')}
@@ -807,30 +809,51 @@ routes.jv = async ({ id }) => {
   C.jv = j;
 };
 
-// ---------- invoices ----------
+// ---------- invoices: sales request → accounts prepare → admin approve ----------
+const INV_ST = { requested: ['p-enquiry', 'requested by sales'], draft: ['p-pending', 'being prepared'], pending: ['p-quoted', 'waiting for admin'], on_hold: ['p-quoted', 'on hold · details needed'], rejected: ['p-bad', 'rejected · needs correction'], issued: ['p-ok', 'approved'], cancelled: ['p-bad', 'cancelled'] };
+const invPill = i => `<span class="pill ${(INV_ST[i.status] || ['p-off'])[0]}">${(INV_ST[i.status] || [0, i.status])[1]}</span>`;
+const invKind = i => i.kind === 'tax' ? 'Tax invoice' : 'Proforma';
+const INV_EDIT = ['requested', 'draft', 'on_hold', 'rejected'];
+const INV_ACT = { requested: 'requested', prepared: 'started preparing', created: 'created it', submitted: 'sent to admin for approval', approved: 'approved', hold: 'put on hold', rejected: 'rejected', reply: 'added details', correction: 'asked for a correction', cancelled: 'cancelled' };
+const invDl = i => `<a class="btn sm" href="invoice.php?id=${i.id}" target="_blank" rel="noopener">View / download</a>`;
+function invTimeline(log) {
+  return `<div class="tl">${log.map(l => `<div class="inset" style="margin-top:8px;${['hold', 'rejected'].includes(l.action) ? 'border-left:3px solid var(--bad)' : l.action === 'approved' ? 'border-left:3px solid var(--ok)' : ''}">
+   <div><b>${esc(l.by)}</b> ${INV_ACT[l.action] || esc(l.action)}${l.version ? ` <span class="pill p-off">V${l.version}</span>` : ''} <span class="sub">· ${fd(l.at)} ${String(l.at).slice(11, 16)}</span>${l.total !== null && l.total !== undefined ? ` <span class="sub">· total ${inr2(l.total)}</span>` : ''}</div>
+   ${l.note ? `<div style="margin-top:4px">${esc(l.note)}</div>` : ''}
+   ${l.changes && l.changes.length ? `<div class="sub" style="margin-top:4px"><b>Changes from the previous version:</b><br>${l.changes.map(esc).join('<br>')}</div>` : ''}</div>`).join('')}</div>`;
+}
+function invLinesTable(i) {
+  return i.lines.length ? `<div class="tw"><table><tr><th>Description</th><th>SAC</th><th class="r">Qty</th><th class="r">Rate</th><th class="r">Amount</th></tr>${i.lines.map(l => `<tr><td>${esc(l.desc)}${+l.tax ? '' : ' <span class="sub">(no GST)</span>'}</td><td>${esc(l.sac || '')}</td><td class="r num">${num(l.qty)}</td><td class="r num">${inr2(l.rate)}</td><td class="r num">${inr2(l.amount)}</td></tr>`).join('')}
+   <tr><td colspan="4">Taxable value</td><td class="r num">${inr2(i.taxable)}</td></tr><tr><td colspan="4">${i.gst_mode === 'igst' ? 'IGST' : 'CGST + SGST'} @ ${num(i.gst_rate)}%</td><td class="r num">${inr2(i.gst)}</td></tr><tr><td colspan="4"><b>Grand total</b></td><td class="r num"><b>${inr2(i.total)}</b></td></tr></table></div>` : blank('Accounts will add the lines.');
+}
+
+// accounts: invoice log
 routes.invoices = async () => {
-  const f = C.invf || (C.invf = { kind: '', status: '', q: '' });
-  const d = await api('inv_list', f);
-  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#acc">← Accounts</a></div><h1>Invoices</h1><p>Proforma invoices don't touch the books. Issuing a tax invoice posts the sale and GST.</p></div><div class="row"><a class="btn ghost" href="#invnew-proforma">+ Proforma</a><a class="btn" href="#invnew-tax">+ Tax invoice</a></div></div>
-  <form class="panel row" id="invf" style="align-items:flex-end"><label class="f" style="flex:1">Search client / number<input name="q" value="${esc(f.q)}"></label><label class="f">Kind<select name="kind"><option value="">All</option><option value="proforma" ${f.kind === 'proforma' ? 'selected' : ''}>Proforma</option><option value="tax" ${f.kind === 'tax' ? 'selected' : ''}>Tax invoice</option></select></label>
-   <label class="f">Status<select name="status"><option value="">All</option>${['draft', 'issued', 'cancelled'].map(s => `<option value="${s}" ${f.status === s ? 'selected' : ''}>${cap(s)}</option>`).join('')}</select></label><button class="btn ghost">Apply</button></form>
-  <div class="panel">${d.invoices.length ? `<div class="tw"><table><tr><th>Number</th><th>Kind</th><th>Date</th><th>Client · expo</th><th class="r">Taxable</th><th class="r">GST</th><th class="r">Total</th><th>Status</th><th></th></tr>
-   ${d.invoices.map(i => `<tr><td class="num"><b>${esc(i.inv_no || 'Draft')}</b></td><td>${i.kind === 'tax' ? 'Tax invoice' : 'Proforma'}</td><td class="num">${fd(i.inv_date)}</td><td>${esc(i.company)}<div class="sub">${esc(i.expo || '')}</div></td><td class="r num">${inr2(i.taxable)}</td><td class="r num">${inr2(i.gst)}</td><td class="r num"><b>${inr2(i.total)}</b></td>
-    <td><span class="pill ${i.status === 'issued' ? 'p-ok' : i.status === 'draft' ? 'p-pending' : 'p-bad'}">${i.status}</span></td>
-    <td class="r" style="white-space:nowrap"><a class="btn ghost sm" href="invoice.php?id=${i.id}" target="_blank" rel="noopener">View / print</a>${i.status === 'draft' ? `<a class="btn ghost sm" href="#inv-${i.id}">Edit</a><button class="btn sm" data-invissue="${i.id}">Issue</button>` : ''}${i.status === 'issued' && i.kind === 'proforma' ? `<button class="btn ghost sm" data-invconv="${i.id}">Make tax invoice</button>` : ''}${i.status !== 'cancelled' ? `<button class="btn link" data-invcancel="${i.id}" data-st="${i.status}">${i.status === 'draft' ? 'Delete' : 'Cancel'}</button>` : ''}</td></tr>`).join('')}</table></div>` : blank('No invoices yet.')}</div>`;
-  $('#invf').onsubmit = e => { e.preventDefault(); C.invf = Object.fromEntries(new FormData(e.target)); refresh(); };
+  const f = C.invf || (C.invf = { group: isAdmin() ? 'all' : 'todo', kind: '', q: '' });
+  const d = await api('inv_list', f); B.inv_todo = (d.counts.todo || 0) + (d.counts.changes || 0); renderNav('invoices');
+  const tabs = [['todo', 'To prepare'], ['pending', 'With admin'], ['changes', 'Needs changes'], ['issued', 'Approved'], ['cancelled', 'Cancelled'], ['all', 'All']];
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#acc">← Accounts</a></div><h1>Invoices</h1><p>Sales requests come here. Prepare, send to admin, and download once approved.</p></div><div class="row"><a class="btn ghost" href="#invnew-proforma">+ Proforma</a><a class="btn ghost" href="#invnew-tax">+ Tax invoice</a></div></div>
+  <div class="tabs" style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:0 8px">${tabs.map(([k, l]) => `<a href="#invoices" data-invt="${k}" class="${f.group === k ? 'on' : ''}">${l}${d.counts[k] && k !== 'all' && k !== 'cancelled' ? ` <span class="badge" style="${['todo', 'changes'].includes(k) ? '' : 'background:var(--navy-soft);color:var(--navy)'}">${d.counts[k]}</span>` : ''}</a>`).join('')}</div>
+  <form class="panel row" id="invf" style="align-items:flex-end"><label class="f" style="flex:1">Search client / number<input name="q" value="${esc(f.q)}"></label><label class="f">Kind<select name="kind"><option value="">All</option><option value="proforma" ${f.kind === 'proforma' ? 'selected' : ''}>Proforma</option><option value="tax" ${f.kind === 'tax' ? 'selected' : ''}>Tax invoice</option></select></label><button class="btn ghost">Apply</button></form>
+  <div class="panel">${d.invoices.length ? `<div class="tw"><table><tr><th>Number</th><th>Kind</th><th>Date</th><th>Client · expo</th><th>Requested by</th><th class="r">Total</th><th>Status</th><th></th></tr>
+   ${d.invoices.map(i => `<tr class="click" data-go="invd-${i.id}"><td class="num"><b>${esc(i.inv_no || '—')}</b>${+i.version ? ` <span class="sub">V${i.version}</span>` : ''}</td><td>${invKind(i)}</td><td class="num">${fd(i.inv_date)}</td><td>${esc(i.company)}<div class="sub">${esc(i.expo || '')}</div></td><td>${esc(i.requester || '—')}</td><td class="r num"><b>${inr2(i.total)}</b></td><td>${invPill(i)}</td>
+    <td class="r" style="white-space:nowrap">${INV_EDIT.includes(i.status) ? `<a class="btn sm" href="#inv-${i.id}">${i.status === 'requested' ? 'Prepare' : 'Edit'}</a>` : ''}${i.status === 'issued' ? invDl(i) : ''}<a class="btn ghost sm" href="#invd-${i.id}">Details</a></td></tr>`).join('')}</table></div>` : blank('Nothing here.')}</div>`;
+  $('#invf').onsubmit = e => { e.preventDefault(); Object.assign(C.invf, Object.fromEntries(new FormData(e.target))); refresh(); };
 };
 routes.invnew = async () => routes.inv({ id: null, kind: location.hash.split('-')[1] || 'proforma' });
 routes.inv = async ({ id, kind }) => {
   const m = await accMeta(true);
-  const i = id ? (await api('inv_get', { id })).invoice : { kind: kind === 'tax' ? 'tax' : 'proforma', inv_date: B.today, client_id: '', project_id: '', place_state: m.company.state || 'Delhi', gst_rate: 18, lines: [{ desc: '', sac: m.company.sac || '998596', qty: 1, rate: '', tax: 1 }], notes: '' };
-  if (i.status && i.status !== 'draft') { location.href = 'invoice.php?id=' + i.id; return; }
-  C.inv = i; drawInv();
+  let i, log = [];
+  if (id) { const r = await api('inv_get', { id }); i = r.invoice; log = r.log; } else i = { kind: kind === 'tax' ? 'tax' : 'proforma', inv_date: B.today, client_id: '', project_id: '', place_state: m.company.state || 'Delhi', gst_rate: 18, lines: [], notes: '' };
+  if (i.status && !INV_EDIT.includes(i.status)) { location.hash = '#invd-' + i.id; return; }
+  if (!i.lines.length) i.lines = [{ desc: '', sac: m.company.sac || '998596', qty: 1, rate: '', tax: 1 }];
+  C.inv = i; C.invlog = log; drawInv();
 };
-function invCapture() { const f = $('#invform'); if (!f) return; const g = k => f.querySelector(`[name=${k}]`).value; Object.assign(C.inv, { inv_date: g('inv_date'), project_id: g('project_id'), client_id: g('client_id'), place_state: g('place_state'), gst_rate: g('gst_rate'), notes: g('notes'), lines: invLines() }); }
 function drawInv() {
-  const m = C.am, i = C.inv, id = i.id;
-  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#invoices">← Invoices</a></div><h1>${id ? 'Edit draft' : 'New'} ${i.kind === 'tax' ? 'tax invoice' : 'proforma invoice'}</h1><p>Number is given when you issue it.</p></div></div>
+  const m = C.am, i = C.inv, id = i.id, last = [...(C.invlog || [])].reverse().find(l => ['hold', 'rejected'].includes(l.action));
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#invoices">← Invoices</a>${id ? ` · <a href="#invd-${id}">Details & history</a>` : ''}</div><h1>${id ? (i.status === 'requested' ? 'Prepare' : 'Edit') : 'New'} ${i.kind === 'tax' ? 'tax invoice' : 'proforma invoice'}${i.inv_no ? ' ' + esc(i.inv_no) : ''}</h1><p>It goes to admin for approval. The number is given when admin approves.</p></div>${id ? invPill(i) : ''}</div>
+  ${i.request_note ? `<div class="alert"><b>Request from ${esc(i.requester || 'sales')}</b><span class="m">${esc(i.request_note)}</span></div>` : ''}
+  ${last && ['on_hold', 'rejected'].includes(i.status) ? `<div class="alert bad"><b>Admin ${last.action === 'hold' ? 'needs more details' : 'rejected it'} (${esc(last.by)}, ${fd(last.at)})</b><span class="m">${esc(last.note || '')}</span></div>` : ''}
   <form class="panel" id="invform"><div class="grid g3">
    <label class="f">Date *<input type="date" name="inv_date" required value="${esc(i.inv_date)}"></label>
    <label class="f">Order<select name="project_id" id="inv-proj">${projOpts(m, i.project_id)}</select></label>
@@ -842,9 +865,72 @@ function drawInv() {
     ${i.lines.map((l, k) => `<tr><td><input data-il="desc" value="${esc(l.desc)}"></td><td><input data-il="sac" value="${esc(l.sac || '')}"></td><td><input type="number" step="any" data-il="qty" value="${esc(l.qty)}" data-invcalc></td><td><input type="number" step="any" data-il="rate" value="${esc(l.rate)}" data-invcalc></td><td style="text-align:center"><input type="checkbox" data-il="tax" ${+l.tax || l.tax === undefined ? 'checked' : ''} data-invcalc></td><td class="r num" data-ilamt></td><td>${i.lines.length > 1 ? `<button type="button" class="btn link" data-ildel="${k}">✕</button>` : ''}</td></tr>`).join('')}</table></div>
    <div class="row" style="margin-top:6px"><button type="button" class="btn ghost sm" id="inv-addline">+ Add line</button></div>
    <div class="grid" style="margin-top:14px"><label class="f">Notes / terms on this invoice<textarea name="notes">${esc(i.notes || '')}</textarea></label><div class="inset" id="inv-tot"></div></div>
-   <div class="row" style="margin-top:12px"><button class="btn ghost" data-invsave="draft">Save draft</button><button class="btn" data-invsave="issue">Save & issue</button></div></form>`;
+   <label class="f" style="margin-top:12px">Message for admin (optional)<input name="message" placeholder="${['on_hold', 'rejected'].includes(i.status) ? 'e.g. Corrected the rate as asked' : 'e.g. 50% advance as agreed with client'}"></label>
+   <div class="row" style="margin-top:12px"><button class="btn ghost" data-invsave="draft">Save draft</button><button class="btn" data-invsave="submit">Send to admin for approval</button></div></form>`;
   invCalc();
 }
+
+// all roles: one invoice with its full history
+routes.invd = async ({ id }) => {
+  const { invoice: i, log, tax_child } = await api('inv_get', { id });
+  const acc = B.acc, admin = isAdmin(), seller = B.module === 'records' || admin;
+  const back = acc ? '#invoices' : '#myinv';
+  const acts = [];
+  if (i.status === 'issued') acts.push(invDl(i));
+  else if (i.status !== 'cancelled') acts.push(`<a class="btn ghost sm" href="invoice.php?id=${i.id}" target="_blank" rel="noopener">Preview</a>`);
+  if (acc && INV_EDIT.includes(i.status)) acts.push(`<a class="btn sm" href="#inv-${i.id}">${i.status === 'requested' ? 'Prepare invoice' : 'Edit & correct'}</a>`);
+  if (i.status === 'issued' && i.kind === 'proforma' && !tax_child) acts.push(acc ? `<button class="btn ghost sm" data-invconv="${i.id}">Make tax invoice</button>` : `<button class="btn ghost sm" data-invreqtax="${i.id}">Request tax invoice</button>`);
+  if (tax_child) acts.push(`<a class="btn ghost sm" href="#invd-${tax_child}">Open tax invoice</a>`);
+  const canReply = i.status !== 'cancelled' && i.status !== 'issued';
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="${back}">← ${acc ? 'Invoices' : 'My invoices'}</a></div><h1>${invKind(i)} ${esc(i.inv_no || '')} · ${esc(i.company)}</h1><p>${esc(i.expo || 'No order linked')} · dated ${fd(i.inv_date)}${+i.version ? ` · version ${i.version}` : ''}${i.requester ? ` · requested by ${esc(i.requester)}` : ''}</p></div><div class="row" style="align-items:center">${invPill(i)}${acts.join('')}</div></div>
+  ${i.status === 'pending' && admin ? `<form class="panel" data-invdec="${i.id}" style="border:2px solid var(--warn)"><h2>Your decision</h2><label class="f">Reason / details needed (needed for hold or reject)<textarea name="reason" placeholder="e.g. Rate should be ₹4,50,000 · Add PO number"></textarea></label>
+    <div class="row" style="margin-top:10px"><button class="btn" data-iact="approve">Approve</button><button class="btn ghost" data-iact="hold">Put on hold — ask for details</button><button class="btn danger" data-iact="reject">Reject — send back for correction</button></div></form>` : ''}
+  ${['on_hold', 'rejected'].includes(i.status) ? `<div class="alert bad"><b>${i.status === 'on_hold' ? 'Admin needs more details' : 'Admin rejected it'}</b><span class="m">${esc(i.reason || '')}${acc ? ' — correct it and send again.' : ' — add the details below for accounts.'}</span></div>` : ''}
+  ${i.status === 'requested' && !acc ? `<div class="alert"><b>Waiting for accounts</b><span class="m">Accounts will prepare it and send it to admin.</span></div>` : ''}
+  ${i.status === 'pending' && !admin ? `<div class="alert warn"><b>Waiting for admin approval</b><span class="m">You will be able to download it once approved.</span></div>` : ''}
+  ${i.status === 'issued' ? `<div class="alert" style="background:var(--ok-bg);color:var(--ok)"><b>Approved${i.decided_by ? ` by ${esc(i.decided_by)} on ${fd(i.decided_at)}` : ''}</b><span class="m">Download the PDF and send it to the customer on email or WhatsApp.</span></div>` : ''}
+  <div class="grid g2">
+   <div class="panel"><h2>${+i.version ? 'Version ' + i.version : 'Draft'}</h2>${i.request_note ? `<div class="inset" style="margin-bottom:10px"><b>Sales request:</b> ${esc(i.request_note)}</div>` : ''}${invLinesTable(i)}</div>
+   <div class="panel"><h2>History & changes</h2>${invTimeline(log)}
+    ${canReply ? `<form class="inset" data-invreply="${i.id}" style="margin-top:12px"><label class="f">Add details / comment<textarea name="text" required placeholder="${acc ? 'Note for sales and admin' : 'Details for accounts and admin'}"></textarea></label><div style="margin-top:8px"><button class="btn sm">Send</button></div></form>` : ''}
+    ${i.status === 'issued' && i.kind === 'proforma' && !tax_child && (acc || seller) ? `<details style="margin-top:12px"><summary class="btn link">Needs a correction?</summary><form class="inset" data-invcorr="${i.id}" style="margin-top:8px"><label class="f">What should change? *<textarea name="reason" required></textarea></label><div class="sub">The proforma goes back ${acc ? 'to you to correct' : 'to accounts'} and then to admin again. The number stays the same.</div><div style="margin-top:8px"><button class="btn sm">${acc ? 'Reopen for correction' : 'Ask for correction'}</button></div></form></details>` : ''}
+    ${(admin && i.status !== 'cancelled') || (acc && ['requested', 'draft'].includes(i.status)) ? `<details style="margin-top:12px"><summary class="btn link">Cancel this ${i.kind === 'tax' ? 'invoice' : 'proforma'}</summary><form class="inset" data-invcan="${i.id}" style="margin-top:8px"><label class="f">Reason *<input name="reason" required></label>${i.status === 'issued' && i.kind === 'tax' ? '<div class="sub">The sale and GST will be reversed in the books.</div>' : ''}<div style="margin-top:8px"><button class="btn danger sm">Cancel it</button></div></form></details>` : ''}
+   </div></div>`;
+};
+
+// admin: invoices waiting for approval
+routes.invappr = async () => {
+  const d = await api('inv_list', { group: 'pending' }); B.inv_pending = d.counts.pending; renderNav('invappr');
+  const det = await Promise.all(d.invoices.map(i => api('inv_get', { id: i.id })));
+  view().innerHTML = `<div class="head"><div><h1>Invoice approvals</h1><p>Prepared by accounts. Approve to give the number — then accounts and sales can download it.</p></div><a class="btn ghost" href="#invoices">All invoices</a></div>
+  ${det.length ? det.map(({ invoice: i, log }) => { const sub = [...log].reverse().find(l => l.action === 'submitted') || {}; return `<div class="panel"><div class="ph"><h3>${invKind(i)} · ${esc(i.company)} <span class="sub">· ${esc(i.expo || '')} · V${i.version}</span></h3><b class="num">${inr2(i.total)}</b></div>
+    <div class="sub">Requested by ${esc(i.requester || '—')} · sent by ${esc(sub.by || '—')} on ${sub.at ? fd(sub.at) : '—'}</div>
+    ${i.request_note ? `<div class="inset" style="margin-top:8px"><b>Sales request:</b> ${esc(i.request_note)}</div>` : ''}
+    ${sub.note ? `<div class="inset" style="margin-top:8px"><b>Accounts says:</b> ${esc(sub.note)}</div>` : ''}
+    ${sub.changes && sub.changes.length ? `<div class="inset" style="margin-top:8px"><b>Changed since last version:</b><br>${sub.changes.map(esc).join('<br>')}</div>` : ''}
+    <div style="margin-top:10px">${invLinesTable(i)}</div>
+    <form data-invdec="${i.id}" style="margin-top:10px"><label class="f">Reason / details needed (for hold or reject)<input name="reason"></label>
+     <div class="row" style="margin-top:8px"><button class="btn" data-iact="approve">Approve</button><button class="btn ghost" data-iact="hold">Hold</button><button class="btn danger" data-iact="reject">Reject</button><a class="btn ghost sm" href="invoice.php?id=${i.id}" target="_blank" rel="noopener">Preview</a><a class="btn link" href="#invd-${i.id}">Full history</a></div></form></div>`; }).join('') : `<div class="panel">${blank('Nothing waiting for approval.')}</div>`}`;
+};
+
+// sales: request invoices and download approved ones
+routes.myinv = async () => {
+  const d = await api('inv_mine'); B.inv_attention = d.invoices.filter(i => ['on_hold', 'rejected'].includes(i.status)).length; renderNav('myinv');
+  const pre = C.invreq || {};
+  view().innerHTML = `<div class="head"><div><h1>My invoices</h1><p>Ask accounts for a proforma or tax invoice. Once admin approves, download it here and send it to the customer.</p></div></div>
+  <form class="panel" id="invreqf"><h2>Request an invoice</h2><div class="grid g3">
+   <label class="f">Type *<select name="kind"><option value="proforma">Proforma invoice</option><option value="tax">Tax invoice</option></select></label>
+   <label class="f">Order<select name="project_id"><option value="">— pick order —</option>${d.orders.map(o => `<option value="${o.id}" ${+pre.project_id === +o.id ? 'selected' : ''}>${esc(o.company + ' · ' + o.expo)}</option>`).join('')}</select></label>
+   <label class="f">or Client (if no order)<select name="client_id"><option value="">—</option>${d.clients.map(c => `<option value="${c.id}">${esc(c.company)}</option>`).join('')}</select></label></div>
+   <label class="f" style="margin-top:10px">What should be billed? *<textarea name="note" required placeholder="e.g. 50% advance of agreed amount · client GST no. · PO reference · any special terms"></textarea></label>
+   <div style="margin-top:10px"><button class="btn">Send to accounts</button></div></form>
+  <div class="panel"><h2>My requests & invoices</h2>${d.invoices.length ? `<div class="tw"><table><tr><th>Number</th><th>Type</th><th>Client · expo</th><th class="r">Total</th><th>Status</th><th></th></tr>
+   ${d.invoices.map(i => `<tr class="click" data-go="invd-${i.id}"><td class="num"><b>${esc(i.inv_no || '—')}</b></td><td>${invKind(i)}</td><td>${esc(i.company)}<div class="sub">${esc(i.expo || '')}</div></td><td class="r num">${+i.total ? inr2(i.total) : '—'}</td><td>${invPill(i)}</td>
+    <td class="r" style="white-space:nowrap">${i.status === 'issued' ? invDl(i) : ''}<a class="btn ghost sm" href="#invd-${i.id}">Details</a></td></tr>`).join('')}</table></div>` : blank('No invoice requests yet.')}</div>`;
+};
+function invAlert() { const n = B.inv_attention; if (!n) return; const w = $('.welcome'); if (w) w.insertAdjacentHTML('afterend', `<div class="alert warn"><b>${n} invoice${n > 1 ? 's need' : ' needs'} your attention</b><span class="m">Admin put it on hold or rejected it. <a href="#myinv">Open my invoices →</a></span></div>`); }
+
+function invCapture() { const f = $('#invform'); if (!f) return; const g = k => f.querySelector(`[name=${k}]`).value; Object.assign(C.inv, { inv_date: g('inv_date'), project_id: g('project_id'), client_id: g('client_id'), place_state: g('place_state'), gst_rate: g('gst_rate'), notes: g('notes'), lines: invLines() }); }
 function invLines() { return [...document.querySelectorAll('#invlines tr')].slice(1).map(tr => { const g = k => tr.querySelector(`[data-il="${k}"]`); return { desc: g('desc').value, sac: g('sac').value, qty: g('qty').value, rate: g('rate').value, tax: g('tax').checked ? 1 : 0 }; }); }
 function invCalc() {
   const box = $('#inv-tot'); if (!box) return;
@@ -1058,7 +1144,7 @@ routes.account = async () => {
 
 // ---------- EVENTS ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-clt],[data-invissue],[data-invconv],[data-invcancel],[data-ildel],[data-post],[data-postskip],[data-coaedit],[data-cledit],[data-cldel],[data-adec],[data-acancel],[data-asent],[data-slt],[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
+  const t = e.target.closest('[data-clt],[data-invt],[data-invreqtax],[data-invconv],[data-ildel],[data-post],[data-postskip],[data-coaedit],[data-cledit],[data-cldel],[data-adec],[data-acancel],[data-asent],[data-slt],[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
   if (!t) return;
   const ds = t.dataset;
   try {
@@ -1066,11 +1152,9 @@ document.addEventListener('click', async e => {
     if (ds.go) { if (e.target.closest('a,button,input,select,label')) return; location.hash = '#' + ds.go; return; }
     if (ds.coaedit) { e.stopPropagation(); C.coaEdit = +ds.coaedit; await refresh(); window.scrollTo(0, 0); return; }
     if (ds.clt) { e.preventDefault(); C.clf = { ...(C.clf || {}), status: ds.clt }; return refresh(); }
-    if (ds.invissue) { if (!confirm('Issue this invoice? A number is given and a tax invoice is posted to the books.')) return; const r = await act(() => api('inv_issue', { id: ds.invissue })); toast('Issued ' + r.inv_no); return refresh(); }
-    if (ds.invconv) { const r = await act(() => api('inv_convert', { id: ds.invconv }), 'Tax invoice draft created'); location.hash = '#inv-' + r.id; return; }
-    if (ds.invcancel) { const draft = ds.st === 'draft'; let reason = '';
-      if (!draft) { reason = prompt('Why is this invoice being cancelled?') || ''; if (!reason.trim()) return; } else if (!confirm('Delete this draft?')) return;
-      await act(() => api('inv_cancel', { id: ds.invcancel, reason }), draft ? 'Draft deleted' : 'Invoice cancelled and reversed in the books'); return refresh(); }
+    if (ds.invt) { e.preventDefault(); C.invf = { ...(C.invf || {}), group: ds.invt }; return refresh(); }
+    if (ds.invreqtax) { const note = prompt('Anything accounts should know for the tax invoice?', 'Tax invoice as per approved proforma'); if (note === null) return; const r = await act(() => api('inv_request', { from_id: ds.invreqtax, note: note || 'Tax invoice as per approved proforma' }), 'Request sent to accounts'); location.hash = '#invd-' + r.id; return; }
+    if (ds.invconv) { const r = await act(() => api('inv_convert', { id: ds.invconv }), 'Tax invoice draft created — send it to admin when ready'); location.hash = '#inv-' + r.id; return; }
     if (ds.ildel !== undefined) { invCapture(); C.inv.lines.splice(+ds.ildel, 1); return drawInv(); }
     if (ds.post || ds.postskip) { const key = ds.post || ds.postskip, [rt, rid] = key.split(':');
       const pm = document.querySelector(`[data-pm="${key}"]`), pa = document.querySelector(`[data-pa="${key}"]`);
@@ -1230,10 +1314,23 @@ document.addEventListener('submit', async e => {
   if (f.id === 'jv-rev') { e.preventDefault(); const r = await act(() => api('acc_reverse', { id: C.jv.id, ...Object.fromEntries(new FormData(f)) }), 'Reversed').catch(() => null); if (r) location.hash = '#jv-' + r.id; return; }
   if (f.id === 'invform') {
     e.preventDefault(); invCapture(); const how = e.submitter?.dataset.invsave || 'draft';
-    const r = await act(() => api('inv_save', { ...C.inv })).catch(() => null); if (!r) return;
-    if (how === 'issue') { if (!confirm('Issue now? The number is given and the invoice cannot be edited after.')) { location.hash = '#inv-' + r.id; return; } const x = await act(() => api('inv_issue', { id: r.id })).catch(() => null); if (x) { toast('Issued ' + x.inv_no); location.hash = '#invoices'; } return; }
-    toast('Draft saved'); location.hash = '#invoices'; return;
+    const r = await act(() => api('inv_save', { ...C.inv, submit: how === 'submit' ? 1 : 0, message: f.querySelector('[name=message]').value }), how === 'submit' ? 'Sent to admin for approval' : 'Draft saved').catch(() => null); if (!r) return;
+    await reboot(); location.hash = '#invd-' + r.id; return;
   }
+  if (f.id === 'invreqf') {
+    e.preventDefault(); const o = Object.fromEntries(new FormData(f));
+    if (!o.project_id && !o.client_id) return toast('Pick the order or the client', true);
+    const r = await act(() => api('inv_request', o), 'Request sent to accounts').catch(() => null); if (r) { C.invreq = null; location.hash = '#invd-' + r.id; } return;
+  }
+  if (f.dataset.invdec) {
+    e.preventDefault(); const action = e.submitter?.dataset.iact; const reason = f.querySelector('[name=reason]').value;
+    if (action !== 'approve' && !reason.trim()) return toast(action === 'hold' ? 'Write what details are needed' : 'Write why it is rejected', true);
+    const r = await act(() => api('inv_decide', { id: f.dataset.invdec, action, reason }), action === 'approve' ? 'Approved' : action === 'hold' ? 'On hold — sent to accounts and sales' : 'Rejected — sent to accounts and sales').catch(() => null);
+    if (r) { if (r.inv_no) toast('Approved · ' + r.inv_no); await reboot(); refresh(); } return;
+  }
+  if (f.dataset.invreply) { e.preventDefault(); const ok = await act(() => api('inv_reply', { id: f.dataset.invreply, text: f.querySelector('[name=text]').value }), 'Sent').catch(() => null); if (ok) refresh(); return; }
+  if (f.dataset.invcorr) { e.preventDefault(); const ok = await act(() => api('inv_correct', { id: f.dataset.invcorr, reason: f.querySelector('[name=reason]').value }), 'Reopened for correction').catch(() => null); if (ok) { await reboot(); refresh(); } return; }
+  if (f.dataset.invcan) { e.preventDefault(); const ok = await act(() => api('inv_cancel', { id: f.dataset.invcan, reason: f.querySelector('[name=reason]').value }), 'Cancelled').catch(() => null); if (ok) { await reboot(); refresh(); } return; }
   if (f.dataset.cdec) {
     e.preventDefault(); const action = e.submitter?.dataset.cact; const o = Object.fromEntries(new FormData(f));
     if (action !== 'approve' && !(o.reason || '').trim()) return toast(action === 'reject' ? 'Write the reason for rejecting' : 'Write what details you need', true);

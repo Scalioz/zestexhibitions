@@ -5,9 +5,11 @@ require_once __DIR__ . '/lib/acc.php';
 $me = current_user();
 if (!$me) { header('Location: login.php'); exit; }
 $isAcc = $me['role'] === 'admin' || (setting('dept_modules', [])[$me['department']] ?? '') === 'accounts';
-if (!$isAcc) { http_response_code(403); exit('Only accounts can open invoices.'); }
-$i = one('SELECT i.*, c.company, c.location, c.city, c.gst_no, c.person, c.phone, c.email, p.expo FROM ' . T('invoices') . ' i JOIN ' . T('clients') . ' c ON c.id = i.client_id LEFT JOIN ' . T('projects') . ' p ON p.id = i.project_id WHERE i.id = ?', [(int) ($_GET['id'] ?? 0)]);
+$i = one('SELECT i.*, c.company, c.location, c.city, c.gst_no, c.person, c.phone, c.email, p.expo, p.owner_id FROM ' . T('invoices') . ' i JOIN ' . T('clients') . ' c ON c.id = i.client_id LEFT JOIN ' . T('projects') . ' p ON p.id = i.project_id WHERE i.id = ?', [(int) ($_GET['id'] ?? 0)]);
 if (!$i) { http_response_code(404); exit('Invoice not found.'); }
+if (!$isAcc && (int) $i['requested_by'] !== (int) $me['id'] && (int) $i['owner_id'] !== (int) $me['id']) { http_response_code(403); exit('This invoice is not yours.'); }
+$ok = $i['status'] === 'issued';
+$fname = preg_replace('/[^A-Za-z0-9]+/', '-', ($i['inv_no'] ?: 'Draft') . ' ' . $i['company']) . '.pdf';
 $L = json_decode($i['lines_json'], true) ?: []; $co = setting('company', []);
 $h = fn($s) => htmlspecialchars((string) ($s ?? ''), ENT_QUOTES);
 $m = fn($n) => inr2($n);
@@ -26,6 +28,8 @@ body{font-family:Arial,Helvetica,sans-serif;color:#1b2340;font-size:11.5px;margi
 .hdr img{height:56px}.addr{text-align:right;font-size:10.5px;line-height:1.55;color:#333}.addr b{font-size:14px;color:#1b2a5c}
 h1{text-align:center;font-size:16px;letter-spacing:3px;margin:16px 0 12px;color:#1b2a5c}
 .draft{color:#b4232c;font-size:12px;letter-spacing:2px}
+.warnbar{font:600 13px Arial;color:#8a5300;background:#fff3d6;border:1px solid #f0d08a;padding:8px 12px;border-radius:6px}
+.page{position:relative}.wm{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;font:bold 70px Arial;color:rgba(180,35,44,.10);transform:rotate(-30deg);letter-spacing:6px}
 .meta{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid #9aa3b5;margin-bottom:12px}
 .meta div{padding:8px 12px;line-height:1.6}.meta div+div{border-left:1px solid #9aa3b5}
 table{width:100%;border-collapse:collapse}th{background:#1b2a5c;color:#fff;padding:7px 6px;font-size:11px;border:1px solid #1b2a5c}
@@ -35,11 +39,12 @@ tr.t td{font-weight:bold;background:#eef1f7}tr.g td{font-weight:bold;background:
 .foot{display:flex;justify-content:space-between;gap:20px;margin-top:30px}.sig{text-align:center;min-width:220px}.sig .ln{border-top:1px solid #333;margin-top:46px;padding-top:5px}
 @media print{body{background:#fff}.page{box-shadow:none;margin:0;padding:0;max-width:none}.bar{display:none}}
 </style></head><body>
-<div class="bar"><a href="index.php#invoices">← Back</a><button onclick="window.print()">Print / Save as PDF</button></div>
+<div class="bar"><a href="index.php#invd-<?= (int) $i['id'] ?>">← Back</a><?php if ($ok): ?><button id="dl">⬇ Download PDF</button><button id="sh" hidden>Share (WhatsApp / email)</button><a href="#" onclick="window.print();return false">Print</a><?php else: ?><span class="warnbar">Not approved yet — download is available after admin approves it.</span><?php endif; ?></div>
 <div class="page">
 <div class="hdr"><img src="assets/logo.png" alt="<?= $h($co['name'] ?? 'Zest Exhibitions') ?>">
 <div class="addr"><b><?= $h(strtoupper($co['name'] ?? 'ZEST EXHIBITIONS')) ?></b><br><?= nl2br($h($co['address'] ?? '')) ?><br>Tel: <?= $h($co['phone'] ?? '') ?><?= !empty($co['gstin']) ? '<br>GSTIN: ' . $h($co['gstin']) : '' ?><?= !empty($co['pan']) ? ' · PAN: ' . $h($co['pan']) : '' ?></div></div>
-<h1><?= $title ?><?= $i['status'] === 'draft' ? ' <span class="draft">(DRAFT)</span>' : ($i['status'] === 'cancelled' ? ' <span class="draft">(CANCELLED)</span>' : '') ?></h1>
+<?php if (!$ok): ?><div class="wm"><?= $i['status'] === 'cancelled' ? 'CANCELLED' : 'NOT APPROVED' ?></div><?php endif; ?>
+<h1><?= $title ?><?= $i['status'] === 'cancelled' ? ' <span class="draft">(CANCELLED)</span>' : (!$ok ? ' <span class="draft">(DRAFT — NOT APPROVED)</span>' : '') ?></h1>
 <div class="meta">
  <div><b>Bill to</b><br><?= $h($i['company']) ?><br><?= nl2br($h($i['location'] ?: $i['city'])) ?><?= $i['gst_no'] ? '<br>GSTIN: ' . $h($i['gst_no']) : '' ?><?= $i['person'] ? '<br>Attn: ' . $h($i['person']) : '' ?></div>
  <div><b><?= $i['kind'] === 'tax' ? 'Invoice' : 'Proforma' ?> no.:</b> <?= $h($i['inv_no'] ?: '—') ?><br><b>Date:</b> <?= date('d-M-Y', strtotime($i['inv_date'])) ?><br><b>Place of supply:</b> <?= $h($i['place_state']) ?><?= $i['expo'] ? '<br><b>Event:</b> ' . $h($i['expo']) : '' ?></div>
@@ -54,4 +59,21 @@ tr.t td{font-weight:bold;background:#eef1f7}tr.g td{font-weight:bold;background:
 <?php if (!empty($co['bank_name']) || !empty($co['bank_acno'])): ?><div class="small"><b>Bank details:</b> <?= $h($co['bank_name']) ?> · A/c <?= $h($co['bank_acno']) ?> · IFSC <?= $h($co['bank_ifsc']) ?></div><?php endif; ?>
 <?php if ($i['notes'] || !empty($co['terms'])): ?><div class="small" style="margin-top:6px"><b>Terms:</b> <?= nl2br($h(trim(($co['terms'] ?? '') . "\n" . ($i['notes'] ?? '')))) ?></div><?php endif; ?>
 <div class="foot"><div class="small">This is a computer-generated <?= $i['kind'] === 'tax' ? 'invoice' : 'proforma invoice' ?>.</div><div class="sig">For <?= $h($co['name'] ?? 'Zest Exhibitions') ?><div class="ln">Authorised Signatory</div></div></div>
-</div></body></html>
+</div>
+<?php if ($ok): ?><script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script>
+const FN = <?= json_encode($fname) ?>, PG = document.querySelector('.page');
+const opt = { margin: [8, 8, 8, 8], filename: FN, image: { type: 'jpeg', quality: 0.96 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
+const prep = () => { PG.style.boxShadow = 'none'; PG.style.margin = '0'; };
+const done = () => { PG.style.boxShadow = ''; PG.style.margin = ''; };
+document.getElementById('dl').onclick = async () => {
+  if (!window.html2pdf) { window.print(); return; }   // library not reachable: use the browser's Save as PDF
+  prep(); try { await html2pdf().set(opt).from(PG).save(); } finally { done(); }
+};
+const sh = document.getElementById('sh');
+if (window.html2pdf && navigator.canShare && navigator.canShare({ files: [new File([''], 'x.pdf', { type: 'application/pdf' })] })) {
+  sh.hidden = false;
+  sh.onclick = async () => { prep(); try { const b = await html2pdf().set(opt).from(PG).outputPdf('blob'); await navigator.share({ files: [new File([b], FN, { type: 'application/pdf' })], title: FN }); } catch (e) {} finally { done(); } };
+}
+</script><?php endif; ?>
+</body></html>
