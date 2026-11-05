@@ -1,0 +1,57 @@
+<?php
+// Printable proforma / tax invoice with Zest letterhead.
+require_once __DIR__ . '/lib/auth.php';
+require_once __DIR__ . '/lib/acc.php';
+$me = current_user();
+if (!$me) { header('Location: login.php'); exit; }
+$isAcc = $me['role'] === 'admin' || (setting('dept_modules', [])[$me['department']] ?? '') === 'accounts';
+if (!$isAcc) { http_response_code(403); exit('Only accounts can open invoices.'); }
+$i = one('SELECT i.*, c.company, c.location, c.city, c.gst_no, c.person, c.phone, c.email, p.expo FROM ' . T('invoices') . ' i JOIN ' . T('clients') . ' c ON c.id = i.client_id LEFT JOIN ' . T('projects') . ' p ON p.id = i.project_id WHERE i.id = ?', [(int) ($_GET['id'] ?? 0)]);
+if (!$i) { http_response_code(404); exit('Invoice not found.'); }
+$L = json_decode($i['lines_json'], true) ?: []; $co = setting('company', []);
+$h = fn($s) => htmlspecialchars((string) ($s ?? ''), ENT_QUOTES);
+$m = fn($n) => inr2($n);
+$title = $i['kind'] === 'tax' ? 'TAX INVOICE' : 'PROFORMA INVOICE';
+$half = round($i['gst'] / 2, 2);
+?><!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title><?= $h(($i['inv_no'] ?: 'Draft') . ' · ' . $i['company']) ?></title><link rel="icon" href="assets/mark.svg">
+<style>
+@page{size:A4;margin:12mm}
+body{font-family:Arial,Helvetica,sans-serif;color:#1b2340;font-size:11.5px;margin:0;background:#e9ebf0}
+.page{background:#fff;max-width:820px;margin:20px auto;padding:28px 32px;box-shadow:0 2px 14px rgba(0,0,0,.08)}
+.bar{max-width:820px;margin:16px auto 0;display:flex;gap:8px;justify-content:flex-end}
+.bar button,.bar a{font:600 13px Arial;padding:8px 14px;border-radius:6px;border:1px solid #1b2a5c;background:#1b2a5c;color:#fff;cursor:pointer;text-decoration:none}.bar a{background:#fff;color:#1b2a5c}
+.hdr{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #1b2a5c;padding-bottom:10px;gap:16px}
+.hdr img{height:56px}.addr{text-align:right;font-size:10.5px;line-height:1.55;color:#333}.addr b{font-size:14px;color:#1b2a5c}
+h1{text-align:center;font-size:16px;letter-spacing:3px;margin:16px 0 12px;color:#1b2a5c}
+.draft{color:#b4232c;font-size:12px;letter-spacing:2px}
+.meta{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid #9aa3b5;margin-bottom:12px}
+.meta div{padding:8px 12px;line-height:1.6}.meta div+div{border-left:1px solid #9aa3b5}
+table{width:100%;border-collapse:collapse}th{background:#1b2a5c;color:#fff;padding:7px 6px;font-size:11px;border:1px solid #1b2a5c}
+td{border:1px solid #9aa3b5;padding:7px 6px;vertical-align:top}td.n{text-align:right;white-space:nowrap}td.c{text-align:center}
+tr.t td{font-weight:bold;background:#eef1f7}tr.g td{font-weight:bold;background:#fff7c2;font-size:13px}
+.words{margin:10px 0;font-weight:bold}.small{color:#555;font-size:10.5px;line-height:1.6}
+.foot{display:flex;justify-content:space-between;gap:20px;margin-top:30px}.sig{text-align:center;min-width:220px}.sig .ln{border-top:1px solid #333;margin-top:46px;padding-top:5px}
+@media print{body{background:#fff}.page{box-shadow:none;margin:0;padding:0;max-width:none}.bar{display:none}}
+</style></head><body>
+<div class="bar"><a href="index.php#invoices">← Back</a><button onclick="window.print()">Print / Save as PDF</button></div>
+<div class="page">
+<div class="hdr"><img src="assets/logo.png" alt="<?= $h($co['name'] ?? 'Zest Exhibitions') ?>">
+<div class="addr"><b><?= $h(strtoupper($co['name'] ?? 'ZEST EXHIBITIONS')) ?></b><br><?= nl2br($h($co['address'] ?? '')) ?><br>Tel: <?= $h($co['phone'] ?? '') ?><?= !empty($co['gstin']) ? '<br>GSTIN: ' . $h($co['gstin']) : '' ?><?= !empty($co['pan']) ? ' · PAN: ' . $h($co['pan']) : '' ?></div></div>
+<h1><?= $title ?><?= $i['status'] === 'draft' ? ' <span class="draft">(DRAFT)</span>' : ($i['status'] === 'cancelled' ? ' <span class="draft">(CANCELLED)</span>' : '') ?></h1>
+<div class="meta">
+ <div><b>Bill to</b><br><?= $h($i['company']) ?><br><?= nl2br($h($i['location'] ?: $i['city'])) ?><?= $i['gst_no'] ? '<br>GSTIN: ' . $h($i['gst_no']) : '' ?><?= $i['person'] ? '<br>Attn: ' . $h($i['person']) : '' ?></div>
+ <div><b><?= $i['kind'] === 'tax' ? 'Invoice' : 'Proforma' ?> no.:</b> <?= $h($i['inv_no'] ?: '—') ?><br><b>Date:</b> <?= date('d-M-Y', strtotime($i['inv_date'])) ?><br><b>Place of supply:</b> <?= $h($i['place_state']) ?><?= $i['expo'] ? '<br><b>Event:</b> ' . $h($i['expo']) : '' ?></div>
+</div>
+<table><tr><th style="width:5%">Sl</th><th>Description</th><th style="width:10%">SAC</th><th style="width:7%">Qty</th><th style="width:14%">Rate (₹)</th><th style="width:15%">Amount (₹)</th></tr>
+<?php foreach ($L as $k => $l): ?><tr><td class="c"><?= $k + 1 ?></td><td><?= $h($l['desc']) ?><?= empty($l['tax']) ? ' <span class="small">(no GST)</span>' : '' ?></td><td class="c"><?= $h($l['sac']) ?></td><td class="c"><?= rtrim(rtrim(number_format($l['qty'], 2, '.', ''), '0'), '.') ?></td><td class="n"><?= $m($l['rate']) ?></td><td class="n"><?= $m($l['amount']) ?></td></tr><?php endforeach; ?>
+<tr class="t"><td></td><td colspan="4">Total before tax</td><td class="n"><?= $m($i['taxable']) ?></td></tr>
+<?php if ($i['gst_mode'] === 'igst'): ?><tr><td></td><td colspan="4">IGST @ <?= rtrim(rtrim($i['gst_rate'], '0'), '.') ?>%</td><td class="n"><?= $m($i['gst']) ?></td></tr>
+<?php else: ?><tr><td></td><td colspan="4">CGST @ <?= rtrim(rtrim($i['gst_rate'] / 2, '0'), '.') ?>%</td><td class="n"><?= $m($half) ?></td></tr><tr><td></td><td colspan="4">SGST @ <?= rtrim(rtrim($i['gst_rate'] / 2, '0'), '.') ?>%</td><td class="n"><?= $m($i['gst'] - $half) ?></td></tr><?php endif; ?>
+<tr class="g"><td></td><td colspan="4">Grand total</td><td class="n">₹<?= $m($i['total']) ?></td></tr></table>
+<div class="words">Amount in words: Rupees <?= amount_words($i['total']) ?> Only</div>
+<?php if (!empty($co['bank_name']) || !empty($co['bank_acno'])): ?><div class="small"><b>Bank details:</b> <?= $h($co['bank_name']) ?> · A/c <?= $h($co['bank_acno']) ?> · IFSC <?= $h($co['bank_ifsc']) ?></div><?php endif; ?>
+<?php if ($i['notes'] || !empty($co['terms'])): ?><div class="small" style="margin-top:6px"><b>Terms:</b> <?= nl2br($h(trim(($co['terms'] ?? '') . "\n" . ($i['notes'] ?? '')))) ?></div><?php endif; ?>
+<div class="foot"><div class="small">This is a computer-generated <?= $i['kind'] === 'tax' ? 'invoice' : 'proforma invoice' ?>.</div><div class="sig">For <?= $h($co['name'] ?? 'Zest Exhibitions') ?><div class="ln">Authorised Signatory</div></div></div>
+</div></body></html>

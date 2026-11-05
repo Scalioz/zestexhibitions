@@ -28,10 +28,11 @@ $MID = (int) $me['id'];
 // records = clients & orders, leads = expo data research, calls = telecalling, design = design jobs, ops = production jobs, none = daily report only
 $MODULE = $ADMIN ? 'admin' : (setting('dept_modules', default_dept_modules())[$me['department']] ?? 'none');
 $RECORDS = $ADMIN || $MODULE === 'records';
+$ACC = $ADMIN || $MODULE === 'accounts';
 $RECORD_ACTIONS = ['clients', 'client', 'client_save', 'dup', 'dnq', 'contact_add', 'contact_del', 'project_create', 'project', 'project_save',
   'child_add', 'child_update', 'child_del', 'vq_select', 'vendor_add'];
 if (in_array($A, $RECORD_ACTIONS, true) && !$RECORDS) fail('Your department does not have access to client records.', 403);
-if ($A === 'upload' && !$RECORDS && !in_array($in['entity'] ?? '', ['ritem', 'final', 'wd'], true)) fail('Your department does not have access to client records.', 403);
+if ($A === 'upload' && !$RECORDS && !in_array($in['entity'] ?? '', ['ritem', 'final', 'wd', 'claim', 'voucher'], true)) fail('Your department does not have access to client records.', 403);
 
 // ---------- helpers ----------
 function touch_activity() {   // marks today as a working day with work logged
@@ -95,6 +96,7 @@ function clean($type, $v) { return match ($type) { 'd' => d($v), 'n' => n($v), '
 define('ZEST_API', 1);
 if (in_array($A, ['lexpos', 'lexpo', 'lexpo_save', 'lead_add', 'lead_bulk', 'lead_update', 'lead_del', 'design_jobs', 'design_save', 'assign_designer', 'assign_ops',
   'ops_jobs', 'ops_job', 'ops_save', 'jobs_board'], true)) require __DIR__ . '/lib/work_api.php';
+if (str_starts_with($A, 'acc_') || str_starts_with($A, 'inv_') || str_starts_with($A, 'claim_')) require __DIR__ . '/lib/acc_api.php';
 if (in_array($A, ['appr_request', 'appr_cancel', 'appr_decide', 'appr_sent', 'sales_log'], true)) require __DIR__ . '/lib/appr_api.php';
 
 // ---------- actions ----------
@@ -114,6 +116,9 @@ case 'boot':
     'module' => $MODULE,
     'dept_modules' => setting('dept_modules', default_dept_modules()),
     'furniture_items' => setting('furniture_items', default_furniture()),
+    'acc' => $ACC,
+    'claims_attention' => (int) val('SELECT COUNT(*) FROM ' . T('claims') . " WHERE user_id = ? AND status IN ('on_hold','rejected')", [$MID]),
+    'claims_waiting' => $ACC ? (int) val('SELECT COUNT(*) FROM ' . T('claims') . " WHERE status = 'submitted'") : 0,
     'pending_approvals' => $ADMIN ? (int) val('SELECT COUNT(*) FROM ' . T('approvals') . " WHERE status = 'pending'") : 0,
   ]);
 
@@ -515,6 +520,12 @@ case 'upload':
   switch ($ent) {
     case 'card': case 'brief': case 'gstcert': client_row($eid); break;
     case 'floor': case 'pbrief': project_row($eid); break;
+    case 'claim':   // bill / proof for an expense claim: owner while not yet approved
+      $cl = one('SELECT user_id, status FROM ' . T('claims') . ' WHERE id = ?', [$eid]);
+      if (!$cl || ((int) $cl['user_id'] !== $MID && !$ACC)) fail('Not found', 404);
+      if ($cl['status'] === 'approved' && !$ACC) fail('This expense is already approved.', 403); break;
+    case 'voucher':
+      if (!$ACC || !val('SELECT COUNT(*) FROM ' . T('journal') . ' WHERE id = ?', [$eid])) fail('Not found', 404); break;
     case 'appr':
       $ap = one('SELECT project_id, status FROM ' . T('approvals') . ' WHERE id = ?', [$eid]); if (!$ap) fail('Not found', 404); project_row($ap['project_id']);
       if ($ap['status'] !== 'pending' && !$ADMIN) fail('This version is already decided. Send a new version instead.', 403); break;

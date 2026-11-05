@@ -83,6 +83,60 @@ function migrate() {
     set_setting('schema_v', 6);
   }
   if ($v < 7) { create_approvals_table(); set_setting('schema_v', 7); }
+  if ($v < 8) {
+    create_accounts_tables(); seed_accounts();
+    $m = setting('dept_modules', default_dept_modules());
+    if (($m['Accounts'] ?? 'none') === 'none' && in_array('Accounts', setting('departments', []), true)) { $m['Accounts'] = 'accounts'; set_setting('dept_modules', $m); }
+    set_setting('schema_v', 8);
+  }
+}
+
+// ---------- ACCOUNTS (double entry) ----------
+function create_accounts_tables() {
+  $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
+  $PK = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT UNSIGNED AUTO_INCREMENT PRIMARY KEY';
+  $E = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+  $M = 'DECIMAL(14,2)';
+  foreach ([
+    // type: asset | liability | equity | income | expense.  sub marks special accounts (bank, cash, petty, debtor, creditor, employee, gst_in, gst_out, tds ...)
+    'CREATE TABLE IF NOT EXISTS ' . T('accounts') . " (id $PK, code VARCHAR(20), name VARCHAR(160) NOT NULL, type VARCHAR(10) NOT NULL, sub VARCHAR(20), party_type VARCHAR(10), party_id INT, opening $M NOT NULL DEFAULT 0, active TINYINT NOT NULL DEFAULT 1, created_at DATETIME NOT NULL)$E",
+    'CREATE INDEX zc_acc_party ON ' . T('accounts') . ' (party_type, party_id)',
+    'CREATE TABLE IF NOT EXISTS ' . T('journal') . " (id $PK, jdate DATE NOT NULL, vtype VARCHAR(20) NOT NULL, vno VARCHAR(30), narration TEXT, ref_type VARCHAR(20), ref_id INT, project_id INT, created_by INT, created_at DATETIME NOT NULL, reversed_by INT)$E",
+    'CREATE INDEX zc_j_date ON ' . T('journal') . ' (jdate)',
+    'CREATE INDEX zc_j_ref ON ' . T('journal') . ' (ref_type, ref_id)',
+    'CREATE TABLE IF NOT EXISTS ' . T('jlines') . " (id $PK, journal_id INT NOT NULL, account_id INT NOT NULL, dr $M NOT NULL DEFAULT 0, cr $M NOT NULL DEFAULT 0, memo VARCHAR(255))$E",
+    'CREATE INDEX zc_jl_j ON ' . T('jlines') . ' (journal_id)',
+    'CREATE INDEX zc_jl_a ON ' . T('jlines') . ' (account_id)',
+    'CREATE TABLE IF NOT EXISTS ' . T('invoices') . " (id $PK, kind VARCHAR(10) NOT NULL, inv_no VARCHAR(40), inv_date DATE NOT NULL, client_id INT NOT NULL, project_id INT, place_state VARCHAR(60), gst_mode VARCHAR(10) NOT NULL DEFAULT 'cgst_sgst', gst_rate DECIMAL(5,2) NOT NULL DEFAULT 18,
+      lines_json TEXT NOT NULL, taxable $M NOT NULL DEFAULT 0, gst $M NOT NULL DEFAULT 0, total $M NOT NULL DEFAULT 0, status VARCHAR(10) NOT NULL DEFAULT 'draft', notes TEXT, from_id INT, journal_id INT, created_by INT, created_at DATETIME NOT NULL)$E",
+    'CREATE TABLE IF NOT EXISTS ' . T('claims') . " (id $PK, user_id INT NOT NULL, edate DATE NOT NULL, particular VARCHAR(255) NOT NULL, category VARCHAR(40), rate $M NOT NULL, qty DECIMAL(10,2) NOT NULL DEFAULT 1, total $M NOT NULL, gst $M NOT NULL DEFAULT 0, grand $M NOT NULL,
+      project_id INT, note TEXT, status VARCHAR(10) NOT NULL DEFAULT 'submitted', submitted_at DATETIME NOT NULL, decided_by VARCHAR(120), decided_at DATETIME, reason TEXT, journal_id INT, created_at DATETIME NOT NULL)$E",
+    'CREATE INDEX zc_claims_user ON ' . T('claims') . ' (user_id)',
+    'CREATE TABLE IF NOT EXISTS ' . T('claim_notes') . " (id $PK, claim_id INT NOT NULL, user_id INT NOT NULL, at DATETIME NOT NULL, kind VARCHAR(12) NOT NULL, text TEXT)$E",
+    'CREATE TABLE IF NOT EXISTS ' . T('post_skip') . " (ref_type VARCHAR(10) NOT NULL, ref_id INT NOT NULL, PRIMARY KEY (ref_type, ref_id))$E",
+    'CREATE TABLE IF NOT EXISTS ' . T('salaries') . " (id $PK, user_id INT NOT NULL, month VARCHAR(7) NOT NULL, gross $M NOT NULL, deductions $M NOT NULL DEFAULT 0, deduction_note VARCHAR(255), net $M NOT NULL, paid_on DATE NOT NULL, journal_id INT, created_at DATETIME NOT NULL)$E",
+  ] as $q) { try { db()->exec($q); } catch (PDOException $e) { if (stripos($q, 'CREATE INDEX') !== 0) throw $e; } }
+}
+
+function seed_accounts() {
+  if (val('SELECT COUNT(*) FROM ' . T('accounts'))) return;
+  $A = [
+    ['1100', 'Bank - Current A/c', 'asset', 'bank'], ['1200', 'Cash in hand', 'asset', 'cash'], ['1210', 'Petty cash', 'asset', 'petty'],
+    ['1300', 'Sundry debtors (other)', 'asset', null], ['1400', 'Input CGST', 'asset', 'gst_in_c'], ['1401', 'Input SGST', 'asset', 'gst_in_s'], ['1402', 'Input IGST', 'asset', 'gst_in_i'],
+    ['1450', 'TDS receivable', 'asset', 'tds_in'], ['1500', 'Advances to staff', 'asset', null], ['1600', 'Security deposits', 'asset', null],
+    ['2100', 'Sundry creditors (other)', 'liability', null], ['2200', 'Output CGST', 'liability', 'gst_out_c'], ['2201', 'Output SGST', 'liability', 'gst_out_s'], ['2202', 'Output IGST', 'liability', 'gst_out_i'],
+    ['2300', 'TDS payable', 'liability', 'tds_out'], ['2400', 'Salary deductions payable (PF/ESI)', 'liability', 'sal_ded'], ['2500', 'Expense claims payable (staff)', 'liability', 'claims_pay'],
+    ['3100', 'Capital account', 'equity', null],
+    ['4100', 'Stall fabrication income', 'income', 'sales'], ['4200', 'Other income', 'income', null],
+    ['5100', 'Fabrication cost (vendors)', 'expense', 'fab'], ['5200', 'Salaries & wages', 'expense', 'salary'], ['5300', 'Office rent', 'expense', null], ['5310', 'Electricity', 'expense', null],
+    ['5320', 'Internet & phone', 'expense', null], ['5400', 'Travel - flight / train', 'expense', 'exp_travel'], ['5410', 'Hotel & stay', 'expense', 'exp_hotel'], ['5420', 'Local conveyance', 'expense', 'exp_local'],
+    ['5430', 'Food & meals', 'expense', 'exp_food'], ['5440', 'Courier & transport', 'expense', 'exp_courier'], ['5450', 'Printing & stationery', 'expense', 'exp_print'], ['5460', 'Site materials & labour', 'expense', 'exp_site'],
+    ['5500', 'Office expenses', 'expense', null], ['5510', 'Marketing & advertising', 'expense', null], ['5520', 'Professional fees', 'expense', null], ['5530', 'Bank charges', 'expense', null],
+    ['5540', 'Repairs & maintenance', 'expense', null], ['5900', 'Miscellaneous expenses', 'expense', 'exp_misc'],
+  ];
+  foreach ($A as [$c, $n, $t, $sub]) ins('accounts', ['code' => $c, 'name' => $n, 'type' => $t, 'sub' => $sub, 'opening' => 0, 'active' => 1, 'created_at' => now()]);
+  if (setting('company') === null) set_setting('company', ['name' => 'Zest Exhibitions', 'address' => 'G-79/1, Third Floor, Front Side, Glam Apartment, Shaheen Bagh, Okhla, New Delhi - 110025', 'phone' => '9311966189',
+    'gstin' => '', 'pan' => '', 'state' => 'Delhi', 'bank_name' => '', 'bank_acno' => '', 'bank_ifsc' => '', 'sac' => '998596', 'terms' => 'Payment due as per agreed schedule.', 'books_from' => date('Y') . '-04-01']);
 }
 
 // Design and quote versions that sales send to admin for approval before they go to the customer
@@ -102,7 +156,7 @@ function create_approvals_table() {
 // What each department works on. records = clients & orders; leads = expo data research; calls = telecalling;
 // design = design jobs; ops = production jobs; none = daily report only.
 function default_dept_modules() {
-  return ['Sales' => 'records', 'Telecalling' => 'calls', 'Design' => 'design', 'Data Research' => 'leads', 'Operations' => 'ops', 'Accounts' => 'none'];
+  return ['Sales' => 'records', 'Telecalling' => 'calls', 'Design' => 'design', 'Data Research' => 'leads', 'Operations' => 'ops', 'Accounts' => 'accounts'];
 }
 function default_furniture() {
   return ['Sofa', 'Chairs', 'Table', 'Coffee table', 'Bar stools', 'TV / LED screen', 'Reception desk', 'Storage / cabinet', 'Brochure stand',
@@ -135,6 +189,7 @@ function seed_defaults() {
   create_audit_table();
   create_work_tables();
   create_approvals_table();
+  create_accounts_tables(); seed_accounts();
   if (setting('dept_modules') === null) set_setting('dept_modules', default_dept_modules());
   if (setting('furniture_items') === null) set_setting('furniture_items', default_furniture());
   if (!val('SELECT COUNT(*) FROM ' . T('reasons'))) {
