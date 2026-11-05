@@ -593,7 +593,11 @@ routes.mydesign = async () => {
     <div class="grid" style="margin-top:12px"><div><h3 style="margin-bottom:6px">Design (PDF)</h3><div class="row">${pdf('final', j.id, 'Upload design PDF')}${fileChips(j.files.final)}</div></div>
      <div><h3 style="margin-bottom:6px">Working drawing (PDF)</h3><div class="row">${pdf('wd', j.id, 'Upload working drawing PDF')}${fileChips(j.files.wd)}</div></div></div>
     <div class="row" style="margin-top:12px"><button class="btn">Save</button>${j.design_approved_by ? `<span class="sub">Approved by ${esc(j.design_approved_by)}</span>` : ''}</div></form>`).join('')
-  : `<div class="panel">${blank('No design jobs assigned to you yet. Admin assigns them from the order’s Design tab.')}</div>`}`;
+  : `<div class="alert warn"><b>No design job assigned to you yet</b><span class="m">Your jobs appear here as soon as admin assigns one: admin opens the order → <b>Design</b> tab → <b>Assign designer</b> → picks your name.</span></div>
+    <div class="panel" aria-label="Preview of a design job" style="opacity:.6"><div class="ph"><h2>Sample job · how each job will look</h2><span class="pill p-pending">pending</span></div>
+     <div class="grid g3 sub" style="margin-bottom:12px">${['Expo name', 'Company name', 'Area', 'No. of sides open', 'Design assigned by', 'Design assign date'].map(l => `<div><b>${l}</b><br>filled in automatically</div>`).join('')}</div>
+     <div class="grid"><label class="f">Design submission date<input type="date" disabled></label><label class="f wide">Notes / comments<textarea disabled placeholder="e.g. need more inputs or details"></textarea></label></div>
+     <div class="grid" style="margin-top:12px"><div><h3 style="margin-bottom:6px">Design (PDF)</h3><span class="up">⬆ Upload design PDF</span></div><div><h3 style="margin-bottom:6px">Working drawing (PDF)</h3><span class="up">⬆ Upload working drawing PDF</span></div></div></div>`}`;
 };
 
 // ---------- PRODUCTION JOBS (operations) ----------
@@ -602,7 +606,7 @@ routes.myops = async () => {
   view().innerHTML = `<div class="head"><div><h1>My production jobs</h1><p>Open a job to fill stall dimensions, furniture and artwork details.</p></div></div>
   <div class="panel">${d.jobs.length ? `<div class="tw"><table><tr><th>Expo</th><th>Company</th><th>Expo date</th><th class="r">Area</th><th>Sides open</th><th>Vendor</th><th>Assigned</th><th>Details</th></tr>
    ${d.jobs.map(j => `<tr class="click" data-go="opsjob-${j.id}"><td><b>${esc(j.expo)}</b><div class="sub">${esc(j.location || '')}</div></td><td>${esc(j.company)}</td><td class="num">${fd(j.start_date)}</td><td class="r num">${j.area_sqm ? num(j.area_sqm) + ' sqm' : '—'}</td><td>${sidesTxt(j.sides_open)}</td><td>${j.vendor ? esc(j.vendor.name) : '<span class="sub">not assigned</span>'}</td><td class="sub">${esc(j.ops_assigned_by || '')}<br>${fd(j.ops_assigned_on)}</td><td>${j.ops_updated_at ? `<span class="pill p-ok">filled</span><div class="sub">${fd(j.ops_updated_at)}</div>` : '<span class="pill p-pending">to fill</span>'}</td></tr>`).join('')}</table></div>`
-  : blank('No production jobs assigned to you yet. Admin assigns them from the order’s Production tab.')}</div>`;
+  : `<div class="alert warn" style="margin-bottom:12px"><b>No production job assigned to you yet</b><span class="m">Admin opens the order → <b>Production</b> tab → <b>Assign production person</b> → picks your name. The job then opens here with dimensions, furniture, backlit walls and vinyl artwork fields.</span></div>${blank('Waiting for your first job.')}`}</div>`;
 };
 routes.opsjob = async ({ id }) => {
   const { job } = await api('ops_job', { id });
