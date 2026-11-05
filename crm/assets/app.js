@@ -651,15 +651,16 @@ routes.jobs = async () => {
   const needs = d.jobs.filter(j => ['won', 'quoted'].includes(j.status) && !j.designer_id).length;
   view().innerHTML = `
   <div class="head"><div><h1>Design & production</h1><p>Who is designing and producing each order, and how far they are.</p></div>
-   <form class="row" id="jobsf"><input name="q" placeholder="Search client or expo" value="${esc(f.q)}" style="min-width:220px"><select name="show"><option value="open" ${f.show === 'open' ? 'selected' : ''}>Open orders</option><option value="all" ${f.show === 'all' ? 'selected' : ''}>Include completed</option></select><button class="btn ghost sm">Apply</button></form></div>
+  </div>
+  <form class="panel row" id="jobsf" style="align-items:flex-end"><label class="f" style="flex:1;min-width:200px">Search client or expo<input name="q" value="${esc(f.q)}"></label><label class="f">Show<select name="show"><option value="open" ${f.show === 'open' ? 'selected' : ''}>Open orders</option><option value="all" ${f.show === 'all' ? 'selected' : ''}>Include completed</option></select></label><button class="btn ghost">Apply</button></form>
   ${needs ? `<div class="alert warn"><b>${needs} order${needs > 1 ? 's' : ''} without a designer</b><span class="m">Open the order → Design tab → Assign designer.</span></div>` : ''}
-  <div class="panel">${d.jobs.length ? `<div class="tw"><table><tr><th>Client · expo</th><th>Expo date</th><th>Area · sides</th><th>Status</th><th>Sales</th><th>Designer</th><th>Design submitted</th><th>Files</th><th>Production</th><th>Vendor</th></tr>
+  <div class="panel">${d.jobs.length ? `<p class="sub" style="margin-top:0">Pick a designer or production person in the row to assign the job. Click a row to open the order.</p><div class="tw"><table><tr><th>Client · expo</th><th>Expo date</th><th>Area · sides</th><th>Status</th><th>Sales</th><th>Designer</th><th>Design submitted</th><th>Files</th><th>Production</th><th>Vendor</th></tr>
    ${d.jobs.map(j => `<tr class="click" data-go="project-${j.id}-design"><td><b>${esc(j.company)}</b><div class="sub">${esc(j.expo)}</div></td><td class="num">${fd(j.start_date)}</td><td>${j.area_sqm ? num(j.area_sqm) + ' sqm' : '—'}<div class="sub">${j.sides_open ? sidesTxt(j.sides_open) : ''}</div></td><td>${pill(j.status)}</td><td>${esc(j.owner)}</td>
-    <td>${j.designer ? `<b>${esc(j.designer)}</b><div class="sub">by ${esc(j.design_assigned_by || '—')} · ${fd(j.assigned_on)}</div>` : '<span class="pill p-quoted">not assigned</span>'}</td>
+    <td><select data-jassign="designer:${j.id}" aria-label="Designer for ${esc(j.expo)}"><option value="0">Not assigned</option>${usersOfMod('design').map(u => `<option value="${u.id}" ${+u.id === +j.designer_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>${j.designer ? `<div class="sub">by ${esc(j.design_assigned_by || '—')} · ${fd(j.assigned_on)}</div>` : ''}</td>
     <td>${j.design_submitted_on ? `<span class="pill p-ok">${fd(j.design_submitted_on)}</span>` : j.designer ? '<span class="pill p-pending">pending</span>' : '—'}${j.design_notes ? `<div class="sub" title="${esc(j.design_notes)}">💬 ${esc(j.design_notes.slice(0, 40))}${j.design_notes.length > 40 ? '…' : ''}</div>` : ''}</td>
     <td class="sub">Design ${j.final_n}<br>WD ${j.wd_n}</td>
-    <td>${j.ops_person ? `<b>${esc(j.ops_person)}</b><div class="sub">${j.ops_filled ? 'details filled ' + fd(j.ops_updated_at) : 'details pending'}</div>` : '<span class="sub">not assigned</span>'}</td>
-    <td>${j.vendor ? `${esc(j.vendor.name)}<div class="sub">${inr(j.vendor.amount)}</div>` : '—'}</td></tr>`).join('')}</table></div>` : blank('No orders in this view.')}</div>`;
+    <td><select data-jassign="ops:${j.id}" aria-label="Production person for ${esc(j.expo)}"><option value="0">Not assigned</option>${usersOfMod('ops').map(u => `<option value="${u.id}" ${+u.id === +j.ops_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>${j.ops_person ? `<div class="sub">${j.ops_filled ? 'details filled ' + fd(j.ops_updated_at) : 'details pending'}</div>` : ''}</td>
+    <td>${j.vendor ? `${esc(j.vendor.name)}<div class="sub">${inr(j.vendor.amount)}</div>` : '—'}</td></tr>`).join('')}</table></div>` : blank('No expo orders yet. Jobs come from orders: add a client with its expo under <a href="#newclient">+ New client</a>, or open a client and click “+ New expo order”. The order then shows here to assign a designer and production person.')}</div>`;
   $('#jobsf').onsubmit = e => { e.preventDefault(); C.jobsf = Object.fromEntries(new FormData(e.target)); refresh(); };
 };
 
@@ -860,6 +861,7 @@ document.addEventListener('change', async e => {
     if (ds.woff !== undefined) { const i = +ds.woff; const w = t.checked ? [...B.weekly_off, i] : B.weekly_off.filter(x => x !== i); await act(() => api('settings_save', { weekly_off: w }), 'Weekly off saved'); await reboot(); return; }
     if (t.id === 'fm-dept') { C.fmDept = t.value; return refresh(); }
     if (ds.deptmod !== undefined) { await act(() => api('settings_save', { dept_modules: { [ds.deptmod]: t.value } }), `${ds.deptmod}: ${MOD_LABEL[t.value]}`); await reboot(); return refresh(); }
+    if (ds.jassign) { const [kind, pid] = ds.jassign.split(':'); await act(() => api(kind === 'designer' ? 'assign_designer' : 'assign_ops', { project_id: pid, user_id: t.value }), +t.value ? 'Assigned' : 'Unassigned'); return refresh(); }
     if (ds.assign && C.project) { await act(() => api(ds.assign === 'designer' ? 'assign_designer' : 'assign_ops', { project_id: C.project.id, user_id: t.value }), +t.value ? 'Assigned' : 'Unassigned'); return refresh(); }
     if (t.id === 'lxu') { C.lxu = t.value; return refresh(); }
     if (ds.furn !== undefined && C.ops) { const it = ds.furn; C.ops.furniture = t.checked ? [...C.ops.furniture.filter(f => f.item !== it), { item: it, qty: 1 }] : C.ops.furniture.filter(f => f.item !== it); return drawOps(); }
