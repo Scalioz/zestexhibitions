@@ -18,7 +18,10 @@ if (!$allowed) {
     case 'revision': $pid = val('SELECT project_id FROM ' . T('revisions') . ' WHERE id = ?', [$f['entity_id']]); break;
     case 'ritem': $allowed = (int) val('SELECT r.user_id FROM ' . T('report_items') . ' i JOIN ' . T('reports') . ' r ON r.id = i.report_id WHERE i.id = ?', [$f['entity_id']]) === $uid; break;
   }
-  if ($pid) $allowed = (int) val('SELECT owner_id FROM ' . T('projects') . ' WHERE id = ?', [$pid]) === $uid;
+  if ($pid) {   // order owner (sales), or the designer / production person assigned to it
+    $pp = one('SELECT owner_id, designer_id, ops_id FROM ' . T('projects') . ' WHERE id = ?', [$pid]);
+    $allowed = $pp && ((int) $pp['owner_id'] === $uid || (in_array($f['entity'], ['floor', 'final', 'wd', 'pbrief'], true) && ((int) $pp['designer_id'] === $uid || (int) $pp['ops_id'] === $uid)));
+  }
 }
 if (!$allowed) { http_response_code(403); exit('You do not have access to this file.'); }
 

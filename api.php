@@ -24,14 +24,20 @@ $in = $isUpload ? $_POST : (json_decode(file_get_contents('php://input'), true) 
 $A = $_GET['a'] ?? '';
 $ADMIN = $me['role'] === 'admin';
 $MID = (int) $me['id'];
-// Client & order records are for admin + departments the admin allows (default: Sales). Others only do daily reports.
-$RECORDS = $ADMIN || in_array($me['department'], setting('record_depts', ['Sales']), true);
+// What this person works on, set per department by admin (Team page):
+// records = clients & orders, leads = expo data research, calls = telecalling, design = design jobs, ops = production jobs, none = daily report only
+$MODULE = $ADMIN ? 'admin' : (setting('dept_modules', default_dept_modules())[$me['department']] ?? 'none');
+$RECORDS = $ADMIN || $MODULE === 'records';
 $RECORD_ACTIONS = ['clients', 'client', 'client_save', 'dup', 'dnq', 'contact_add', 'contact_del', 'project_create', 'project', 'project_save',
-  'child_add', 'child_update', 'child_del', 'vq_select', 'file_del', 'vendor_add'];
+  'child_add', 'child_update', 'child_del', 'vq_select', 'vendor_add'];
 if (in_array($A, $RECORD_ACTIONS, true) && !$RECORDS) fail('Your department does not have access to client records.', 403);
-if ($A === 'upload' && !$RECORDS && ($in['entity'] ?? '') !== 'ritem') fail('Your department does not have access to client records.', 403);
+if ($A === 'upload' && !$RECORDS && !in_array($in['entity'] ?? '', ['ritem', 'final', 'wd'], true)) fail('Your department does not have access to client records.', 403);
 
 // ---------- helpers ----------
+function touch_activity() {   // marks today as a working day with work logged
+  global $ADMIN, $MID; if ($ADMIN) return;
+  if (!val('SELECT COUNT(*) FROM ' . T('activity') . ' WHERE user_id = ? AND adate = ?', [$MID, today()])) { try { ins('activity', ['user_id' => $MID, 'adate' => today()]); } catch (PDOException $e) { /* already marked */ } }
+}
 function need_admin() { global $ADMIN; if (!$ADMIN) fail('Only admin can do this.', 403); }
 function s($v, $max = 2000) { $v = trim((string) ($v ?? '')); return $v === '' ? null : mb_substr($v, 0, $max); }
 function d($v) { $v = trim((string) ($v ?? '')); return preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) ? $v : null; }
@@ -63,7 +69,7 @@ function visible_projects($where = '1=1', $p = []) {
 function create_project($clientId, $ownerId, $in) {
   $st = s($in['space_type'] ?? null); if (!in_array($st, ['Bare space', 'Shell scheme'], true)) $st = null;
   return ins('projects', ['client_id' => $clientId, 'owner_id' => (int) $ownerId, 'expo' => s($in['expo'] ?? null, 200), 'location' => s($in['location'] ?? null),
-    'start_date' => d($in['start_date'] ?? null), 'area_sqm' => n($in['area_sqm'] ?? null), 'space_type' => $st, 'stall_no' => s($in['stall_no'] ?? null, 40),
+    'start_date' => d($in['start_date'] ?? null), 'area_sqm' => n($in['area_sqm'] ?? null), 'space_type' => $st, 'sides_open' => in_array((int) ($in['sides_open'] ?? 0), [1, 2, 3, 4], true) ? (int) $in['sides_open'] : null, 'stall_no' => s($in['stall_no'] ?? null, 40),
     'status' => 'enquiry', 'gst_rate' => 18, 'created_at' => now()]);
 }
 function users_map() { $m = []; foreach (all('SELECT id, name FROM ' . T('users')) as $u) $m[$u['id']] = $u['name']; return $m; }
@@ -80,11 +86,15 @@ $KINDS = [
   'loss' => ['losses', ['ldate' => 'd', 'ltype' => 's', 'note' => 's', 'amount' => 'n'], ['ldate', 'ltype', 'amount']],
 ];
 $ADMIN_DELETE_ONLY = ['payment', 'vpayment'];
-$PROJECT_FIELDS = ['expo' => 's', 'location' => 's', 'start_date' => 'd', 'end_date' => 'd', 'area_sqm' => 'n', 'space_type' => 's', 'stall_no' => 's',
+$PROJECT_FIELDS = ['expo' => 's', 'location' => 's', 'start_date' => 'd', 'end_date' => 'd', 'area_sqm' => 'n', 'space_type' => 's', 'sides_open' => 'i', 'stall_no' => 's',
   'designed_by' => 's', 'assigned_on' => 'd', 'design_approved_by' => 's', 'status' => 's', 'offered' => 'n', 'agreed' => 'n',
   'gst_rate' => 'n', 'gst_on' => 'n', 'approved_by' => 's', 'invoice_no' => 's', 'invoice_date' => 'd', 'rejected_by' => 's', 'reason' => 's', 'rejection_note' => 's'];
 $CLIENT_FIELDS = ['company', 'email', 'phone', 'person', 'designation', 'location', 'city', 'gst_no', 'notes'];
 function clean($type, $v) { return match ($type) { 'd' => d($v), 'n' => n($v), 'i' => ($v === null || $v === '') ? null : (int) $v, default => s($v) }; }
+
+define('ZEST_API', 1);
+if (in_array($A, ['lexpos', 'lexpo', 'lexpo_save', 'lead_add', 'lead_bulk', 'lead_update', 'lead_del', 'design_jobs', 'design_save', 'assign_designer', 'assign_ops',
+  'ops_jobs', 'ops_job', 'ops_save', 'jobs_board'], true)) require __DIR__ . '/lib/work_api.php';
 
 // ---------- actions ----------
 switch ($A) {
@@ -100,7 +110,9 @@ case 'boot':
     'users' => all('SELECT id, name, role, designation, department, active FROM ' . T('users') . ' ORDER BY name'),
     'today' => today(),
     'records' => $RECORDS,
-    'record_depts' => setting('record_depts', ['Sales']),
+    'module' => $MODULE,
+    'dept_modules' => setting('dept_modules', default_dept_modules()),
+    'furniture_items' => setting('furniture_items', default_furniture()),
   ]);
 
 // ----- HOME / DASHBOARD -----
@@ -113,6 +125,13 @@ case 'home':
       'today_working' => is_working_day(today()),
       'reports_month' => (int) val('SELECT COUNT(*) FROM ' . T('reports') . ' WHERE user_id = ? AND rdate >= ?', [$MID, date('Y-m-01')]),
       'entries_month' => (int) val('SELECT COUNT(*) FROM ' . T('report_items') . ' i JOIN ' . T('reports') . ' r ON r.id = i.report_id WHERE r.user_id = ? AND r.rdate >= ?', [$MID, date('Y-m-01')]),
+      'today_work' => (bool) val('SELECT COUNT(*) FROM ' . T('activity') . ' WHERE user_id = ? AND adate = ?', [$MID, today()]),
+      'leads_today' => (int) val('SELECT COUNT(*) FROM ' . T('leads') . ' WHERE user_id = ? AND created_at >= ?', [$MID, today() . ' 00:00:00']),
+      'leads_month' => (int) val('SELECT COUNT(*) FROM ' . T('leads') . ' WHERE user_id = ? AND created_at >= ?', [$MID, date('Y-m-01') . ' 00:00:00']),
+      'expos_n' => (int) val('SELECT COUNT(DISTINCT expo_id) FROM ' . T('leads') . ' WHERE user_id = ?', [$MID]),
+      'design_pending' => (int) val('SELECT COUNT(*) FROM ' . T('projects') . ' WHERE designer_id = ? AND design_submitted_on IS NULL', [$MID]),
+      'design_done' => (int) val('SELECT COUNT(*) FROM ' . T('projects') . ' WHERE designer_id = ? AND design_submitted_on IS NOT NULL', [$MID]),
+      'ops_jobs' => (int) val('SELECT COUNT(*) FROM ' . T('projects') . " WHERE ops_id = ? AND status <> 'completed'", [$MID]),
     ]);
     $ps = visible_projects(); $b = bills_for($ps);
     $won = array_filter($ps, fn($p) => is_won($p['status']));
@@ -225,6 +244,7 @@ case 'client_full':
     $o['quotes'] = $tb('quotes', 'version'); $o['revisions'] = $tb('revisions', 'rdate'); $o['vquotes'] = $tb('vendor_quotes', 'amount'); $o['extras'] = $tb('extras', 'id');
     $o['payments'] = $tb('client_payments', 'pdate'); $o['vpayments'] = $tb('vendor_payments', 'pdate'); $o['expenses'] = $tb('expenses', 'edate'); $o['losses'] = $tb('losses', 'ldate');
     foreach (['vquotes', 'vpayments'] as $k) foreach ($o[$k] as &$r) { $r['vendor'] = $vn[$r['vendor_id']] ?? '—'; } unset($r);
+    $o['ops_person'] = $um[$o['ops_id']] ?? null;
     $o['files'] = ['pbrief' => files_of('pbrief', [$id])[$id] ?? [], 'floor' => files_of('floor', [$id])[$id] ?? [], 'final' => files_of('final', [$id])[$id] ?? [], 'wd' => files_of('wd', [$id])[$id] ?? [],
       'quote' => files_of('quote', array_column($o['quotes'], 'id'))];
     $X = $o['expo'];
@@ -405,6 +425,9 @@ case 'project':
   ];
   $p['bill'] = project_bill($p, $p['extras'], $p['payments'], $p['vpayments'], $p['expenses'], $p['losses']);
   $um = users_map();
+  $p['designer'] = $um[$p['designer_id']] ?? null; $p['ops_person'] = $um[$p['ops_id']] ?? null;
+  $p['ops'] = json_decode($p['ops_json'] ?? '', true) ?: null; unset($p['ops_json']);
+  $p['chosen_vendor'] = one('SELECT v.name, q.amount FROM ' . T('vendor_quotes') . ' q JOIN ' . T('vendors') . ' v ON v.id = q.vendor_id WHERE q.project_id = ? AND q.selected = 1', [$id]);
   $p['history'] = array_map(fn($h) => $h + ['by' => $um[$h['user_id']] ?? '—'], all('SELECT * FROM ' . T('audit') . ' WHERE project_id = ? ORDER BY id DESC LIMIT 50', [$id]));
   $c = one('SELECT id, company, dnq FROM ' . T('clients') . ' WHERE id = ?', [$p['client_id']]);
   $p['client'] = $c; $p['owner'] = users_map()[$p['owner_id']] ?? '—';
@@ -479,7 +502,12 @@ case 'upload':
   $ent = $in['entity'] ?? ''; $eid = (int) ($in['entity_id'] ?? 0);
   switch ($ent) {
     case 'card': case 'brief': case 'gstcert': client_row($eid); break;
-    case 'floor': case 'final': case 'wd': case 'pbrief': project_row($eid); break;
+    case 'floor': case 'pbrief': project_row($eid); break;
+    case 'final': case 'wd':   // sales owner, admin, or the designer assigned to this order
+      $pp = one('SELECT owner_id, designer_id FROM ' . T('projects') . ' WHERE id = ?', [$eid]);
+      if (!$pp || !($ADMIN || ($RECORDS && (int) $pp['owner_id'] === $MID) || (int) $pp['designer_id'] === $MID)) fail('Order not found or not yours.', 404);
+      if (!$RECORDS && strtolower(pathinfo($_FILES['file']['name'] ?? '', PATHINFO_EXTENSION)) !== 'pdf') fail('Please upload the design as a PDF.');
+      touch_activity(); break;
     case 'quote': case 'vquote': case 'revision':
       $tbl = ['quote' => 'quotes', 'vquote' => 'vendor_quotes', 'revision' => 'revisions'][$ent];
       $r = one('SELECT project_id FROM ' . T($tbl) . ' WHERE id = ?', [$eid]); if (!$r) fail('Not found', 404); project_row($r['project_id']); break;
@@ -556,6 +584,8 @@ case 'report_log':
   $byKey = []; foreach ($rs as $r) $byKey[$r['user_id'] . '|' . $r['rdate']] = $r;
   $off = setting('weekly_off', [0]); $hol = []; foreach (all('SELECT hdate, reason FROM ' . T('holidays') . ' WHERE hdate BETWEEN ? AND ?', [$from, $to]) as $h) $hol[$h['hdate']] = $h['reason'];
   $track = setting('track_from', today());
+  $act = []; foreach (all('SELECT user_id, adate FROM ' . T('activity') . ' WHERE adate BETWEEN ? AND ?', [$from, $to]) as $a) $act[$a['user_id'] . '|' . $a['adate']] = 1;
+  $leadN = []; foreach (all('SELECT user_id, created_at FROM ' . T('leads') . ' WHERE created_at BETWEEN ? AND ?', ["$from 00:00:00", "$to 23:59:59"]) as $l) { $k = $l['user_id'] . '|' . substr($l['created_at'], 0, 10); $leadN[$k] = ($leadN[$k] ?? 0) + 1; }
   $days = [];
   for ($dd = $to; $dd >= $from; $dd = date('Y-m-d', strtotime($dd . ' -1 day'))) {
     $isOff = in_array((int) date('w', strtotime($dd)), $off, true);
@@ -565,6 +595,8 @@ case 'report_log':
       if ($r) {
         $day['rows'][] = ['user' => $u, 'status' => 'received', 'at' => substr($r['submitted_at'], 11, 5), 'fields' => json_decode($r['fields_json'], true),
           'items' => array_map(fn($it) => json_decode($it['data_json'], true) + ['_files' => $fl[$it['id']] ?? []], $items[$r['id']] ?? [])];
+      } elseif (isset($act[$u['id'] . '|' . $dd])) {
+        $day['rows'][] = ['user' => $u, 'status' => 'work', 'leads' => $leadN[$u['id'] . '|' . $dd] ?? 0];
       } elseif (!$day['off'] && $dd >= $u['joined_on'] && $dd >= $track) {
         $day['rows'][] = ['user' => $u, 'status' => $dd === today() ? 'pending' : 'missing'];
       }
@@ -639,7 +671,12 @@ case 'settings_save':
     }
     set_setting('templates', $clean);
   }
-  if (isset($in['record_depts'])) set_setting('record_depts', array_values(array_intersect(array_map('strval', (array) $in['record_depts']), setting('departments', []))));
+  if (isset($in['dept_modules'])) {
+    $m = setting('dept_modules', default_dept_modules());
+    foreach ((array) $in['dept_modules'] as $dname => $mod) if (in_array($dname, setting('departments', []), true) && in_array($mod, ['records', 'leads', 'calls', 'design', 'ops', 'none'], true)) $m[$dname] = $mod;
+    set_setting('dept_modules', $m);
+  }
+  if (isset($in['furniture_items'])) set_setting('furniture_items', array_values(array_unique(array_filter(array_map(fn($x) => s($x, 80), (array) $in['furniture_items'])))));
   if (isset($in['track_from']) && d($in['track_from'])) set_setting('track_from', d($in['track_from']));
   out(['ok' => true]);
 

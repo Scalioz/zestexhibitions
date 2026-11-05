@@ -26,8 +26,9 @@ function create_schema($driver) {
 "CREATE INDEX zc_contacts_client ON {$t('contacts')} (client_id)",
 "CREATE TABLE IF NOT EXISTS {$t('projects')} (
   id $PK, client_id $FK NOT NULL, owner_id $FK NOT NULL,
-  expo VARCHAR(200) NOT NULL, location VARCHAR(120), start_date DATE, end_date DATE, area_sqm DECIMAL(10,2), space_type VARCHAR(20), stall_no VARCHAR(40),
-  designed_by VARCHAR(120), assigned_on DATE, design_approved_by VARCHAR(120),
+  expo VARCHAR(200) NOT NULL, location VARCHAR(120), start_date DATE, end_date DATE, area_sqm DECIMAL(10,2), space_type VARCHAR(20), sides_open INT, stall_no VARCHAR(40),
+  designed_by VARCHAR(120), assigned_on DATE, design_approved_by VARCHAR(120), designer_id INT, design_assigned_by VARCHAR(120), design_submitted_on DATE, design_notes TEXT,
+  ops_id INT, ops_assigned_by VARCHAR(120), ops_assigned_on DATE, ops_json TEXT, ops_updated_at DATETIME,
   status VARCHAR(12) NOT NULL DEFAULT 'enquiry', offered $M, agreed $M, gst_rate DECIMAL(5,2) NOT NULL DEFAULT 18, gst_on $M,
   approved_by VARCHAR(120), invoice_no VARCHAR(40), invoice_date DATE, rejected_by VARCHAR(10), reason VARCHAR(160), rejection_note TEXT,
   created_at DATETIME NOT NULL)$E",
@@ -67,6 +68,44 @@ function migrate() {
     set_setting('schema_v', 4);
   }
   if ($v < 5) { create_audit_table(); set_setting('schema_v', 5); }
+  if ($v < 6) {
+    foreach (['sides_open INT', 'designer_id INT', 'design_assigned_by VARCHAR(120)', 'design_submitted_on DATE', 'design_notes TEXT',
+              'ops_id INT', 'ops_assigned_by VARCHAR(120)', 'ops_assigned_on DATE', 'ops_json TEXT', 'ops_updated_at DATETIME'] as $col) {
+      try { db()->exec('ALTER TABLE ' . T('projects') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ }
+    }
+    create_work_tables();
+    if (setting('dept_modules') === null) {
+      $m = default_dept_modules();
+      foreach ((array) setting('record_depts', []) as $dname) $m[$dname] = 'records';   // keep what admin had ticked
+      set_setting('dept_modules', $m);
+    }
+    if (setting('furniture_items') === null) set_setting('furniture_items', default_furniture());
+    set_setting('schema_v', 6);
+  }
+}
+
+// What each department works on. records = clients & orders; leads = expo data research; calls = telecalling;
+// design = design jobs; ops = production jobs; none = daily report only.
+function default_dept_modules() {
+  return ['Sales' => 'records', 'Telecalling' => 'calls', 'Design' => 'design', 'Data Research' => 'leads', 'Operations' => 'ops', 'Accounts' => 'none'];
+}
+function default_furniture() {
+  return ['Sofa', 'Chairs', 'Table', 'Coffee table', 'Bar stools', 'TV / LED screen', 'Reception desk', 'Storage / cabinet', 'Brochure stand',
+          '3D acrylic logo', 'Plotter cut letters', 'Plants'];
+}
+
+// Expo data (research + telecalling) and a per-day activity marker
+function create_work_tables() {
+  $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
+  $PK = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT UNSIGNED AUTO_INCREMENT PRIMARY KEY';
+  $E = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+  foreach ([
+    'CREATE TABLE IF NOT EXISTS ' . T('expos') . " (id $PK, name VARCHAR(200) NOT NULL, edate DATE, city VARCHAR(80), website VARCHAR(255), created_by INT NOT NULL, created_at DATETIME NOT NULL)$E",
+    'CREATE TABLE IF NOT EXISTS ' . T('leads') . " (id $PK, expo_id INT NOT NULL, user_id INT NOT NULL, dept VARCHAR(60) NOT NULL, company VARCHAR(200) NOT NULL, person VARCHAR(120), phone VARCHAR(60), email VARCHAR(160), notes TEXT, created_at DATETIME NOT NULL, updated_at DATETIME)$E",
+    'CREATE INDEX zc_leads_expo ON ' . T('leads') . ' (expo_id)',
+    'CREATE INDEX zc_leads_user ON ' . T('leads') . ' (user_id, created_at)',
+    'CREATE TABLE IF NOT EXISTS ' . T('activity') . " (user_id INT NOT NULL, adate DATE NOT NULL, PRIMARY KEY (user_id, adate))$E",
+  ] as $q) { try { db()->exec($q); } catch (PDOException $e) { if (stripos($q, 'CREATE INDEX') !== 0) throw $e; } }
 }
 
 // Change history: who corrected which money entry, before → after
@@ -79,6 +118,9 @@ function create_audit_table() {
 
 function seed_defaults() {
   create_audit_table();
+  create_work_tables();
+  if (setting('dept_modules') === null) set_setting('dept_modules', default_dept_modules());
+  if (setting('furniture_items') === null) set_setting('furniture_items', default_furniture());
   if (!val('SELECT COUNT(*) FROM ' . T('reasons'))) {
     foreach (['Payment history issue / dues pending','Unreasonable price expectation','Difficult to work with','Timeline not feasible',
               'Scope not suitable for us','Price too high (client chose other vendor)','Client cancelled expo participation',

@@ -51,7 +51,7 @@ async function act(fn, okMsg) { try { const r = await fn(); if (okMsg) toast(okM
 
 const fileChips = (list, canDel) => list && list.length
   ? `<div class="files">${list.map(f => `<a class="chip" href="file.php?id=${f.id}" target="_blank" rel="noopener" title="${esc(f.orig_name)}">📎 <span>${esc(f.orig_name)}</span></a>${canDel ? `<button class="btn link" data-delfile="${f.id}" title="Remove file" aria-label="Remove ${esc(f.orig_name)}">✕</button>` : ''}`).join('')}</div>` : '<span class="sub">No file yet</span>';
-const upBtn = (entity, id, label = 'Upload') => `<label class="up">⬆ ${esc(label)}<input type="file" multiple data-upload="${entity}" data-eid="${id}" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.xlsx,.xls,.csv,.doc,.docx,.ppt,.pptx,.dwg,.dxf,.skp,.zip"></label>`;
+const upBtn = (entity, id, label = 'Upload', accept) => `<label class="up">⬆ ${esc(label)}<input type="file" multiple data-upload="${entity}" data-eid="${id}" accept="${accept || '.pdf,.jpg,.jpeg,.png,.webp,.heic,.xlsx,.xls,.csv,.doc,.docx,.ppt,.pptx,.dwg,.dxf,.skp,.zip'}"></label>`;
 
 // line drawing of an exhibition stall, used in empty states
 const STALL = `<svg viewBox="0 0 160 110" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M20 90 L80 105 L140 90 L80 75 Z" opacity=".5"/><path d="M20 90 V35 L80 50 V105"/><path d="M80 50 L140 35 V90"/><path d="M20 35 L80 20 L140 35"/><rect x="30" y="52" width="38" height="18" transform="skewY(14)" opacity=".7"/><path d="M95 62 h28 v16 h-28z" opacity=".6"/><circle cx="109" cy="55" r="4"/></svg>`;
@@ -63,7 +63,9 @@ const routes = {};
 function parseHash() { const h = (location.hash || '#home').slice(1); const [name, id, tab] = h.split('-'); return { name: name || 'home', id: id ? +id : null, tab }; }
 async function route() {
   const r = parseHash();
-  C.editing = null;
+  C.editing = null; C.leditId = null; C.lxu = '';
+  if (isAdmin() && ({ leads: 'leadlog', mydesign: 'jobs', myops: 'jobs' })[r.name]) { location.hash = '#' + ({ leads: 'leadlog', mydesign: 'jobs', myops: 'jobs' })[r.name]; return; }
+  if (!isAdmin() && MODULE_ONLY[r.name] && !MODULE_ONLY[r.name].includes(B.module)) { location.hash = '#home'; return; }
   renderNav(r.name);
   const fn = routes[r.name] || routes.home;
   if ((r.name in ADMIN_ONLY) && !isAdmin()) { location.hash = '#home'; return; }
@@ -71,20 +73,21 @@ async function route() {
   try { await fn(r); } catch (e) { if (e.message !== 'signed out') view().innerHTML = `<div class="alert bad"><b>Could not load this page</b><span class="m">${esc(e.message)}</span></div>`; }
   window.scrollTo(0, 0);
 }
-const ADMIN_ONLY = { clientlog: 1, reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
+const ADMIN_ONLY = { clientlog: 1, leadlog: 1, jobs: 1, reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
 const RECORDS_ONLY = { clients: 1, client: 1, project: 1, newclient: 1 };
+const MODULE_ONLY = { leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
 async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); window.scrollTo(0, y); }
 
 function renderNav(cur) {
-  const map = { client: 'clients', project: 'clients' };
+  const map = { client: 'clients', project: 'clients', lexpo: isAdmin() ? 'leadlog' : 'leads', opsjob: isAdmin() ? 'jobs' : 'myops' };
   const on = map[cur] || cur;
   const L = (k, l, b) => `<a href="#${k}" class="${on === k ? 'on' : ''}">${l}${b ? `<span class="badge">${b}</span>` : ''}</a>`;
   $('#nav').innerHTML = isAdmin()
-    ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('reportlog', 'Daily reports', B.flags || '')}
+    ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('leadlog', 'Expo data log')}${L('jobs', 'Design & production')}${L('reportlog', 'Daily reports', B.flags || '')}
        <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('dnq', 'Do-not-quote list')}
        <div class="sec">Admin</div>${L('team', 'Team')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
     : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('report', 'Daily report', B.flags || '')}`
-    : `${L('home', 'My dashboard')}${L('report', 'Daily report', B.flags || '')}`;
+    : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') : ''}${L('report', 'Daily report', B.flags || '')}`;
 }
 
 // ---------- HOME ----------
@@ -95,13 +98,20 @@ async function empHome() {
   const first = B.me.name.split(' ')[0];
   const hr = new Date().getHours(); const greet = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
   if (!B.records) {
+    const M = B.module, work = M !== 'none';
+    const go = ['leads', 'calls'].includes(M) ? ['#leads', 'Open expo data'] : M === 'design' ? ['#mydesign', 'Open my design jobs'] : M === 'ops' ? ['#myops', 'Open my production jobs'] : ['#report', 'Open daily report'];
+    const kpi = ['leads', 'calls'].includes(M) ? `<div class="kpi hl"><span>Entries today</span><b>${d.leads_today}</b></div><div class="kpi"><span>Entries this month</span><b>${d.leads_month}</b></div><div class="kpi"><span>Expos worked on</span><b>${d.expos_n}</b></div>`
+      : M === 'design' ? `<div class="kpi hl"><span>Jobs pending</span><b>${d.design_pending}</b></div><div class="kpi"><span>Jobs submitted</span><b>${d.design_done}</b></div>`
+      : M === 'ops' ? `<div class="kpi hl"><span>Active production jobs</span><b>${d.ops_jobs}</b></div>`
+      : `<div class="kpi"><span>Reports this month</span><b>${d.reports_month}</b></div><div class="kpi"><span>Entries this month</span><b>${d.entries_month}</b></div>`;
+    const doneToday = d.today_done || d.today_work;
     view().innerHTML = `
     <div class="welcome">${PLAN}<div><h1>${greet}, ${esc(first)}</h1><p>${longDate(B.today)} · ${esc(B.me.department)}</p></div>
-     <div class="row"><a class="btn" href="#report">Open daily report</a></div></div>
-    ${d.missing.length ? `<div class="alert bad"><b>Daily report not submitted</b><span class="m">Missing for: ${d.missing.map(fd).join(', ')}. Admin can see this.</span></div>` : ''}
-    ${!d.today_done && d.today_working ? `<div class="alert warn"><b>Today's report is pending</b><span class="m">Submit before you leave for the day. <a href="#report">Open daily report →</a></span></div>` : ''}
-    ${d.today_done ? '<div class="alert" style="background:var(--ok-bg);color:var(--ok)"><b>Today\'s report is submitted</b></div>' : ''}
-    <div class="kpis"><div class="kpi"><span>Reports this month</span><b>${d.reports_month}</b></div><div class="kpi"><span>Entries this month</span><b>${d.entries_month}</b></div><div class="kpi hl"><span>Missed days</span><b>${d.missing.length}</b></div></div>`;
+     <div class="row"><a class="btn" href="${go[0]}">${go[1]}</a></div></div>
+    ${d.missing.length ? `<div class="alert bad"><b>${work ? 'No work or report logged' : 'Daily report not submitted'}</b><span class="m">Missing for: ${d.missing.map(fd).join(', ')}. Admin can see this.</span></div>` : ''}
+    ${!doneToday && d.today_working ? `<div class="alert warn"><b>${work ? 'Nothing logged today yet' : "Today's report is pending"}</b><span class="m">${work ? `Add today's work in <a href="${go[0]}">${go[1].replace('Open ', '')}</a> or submit a <a href="#report">daily report</a>.` : 'Submit before you leave for the day. <a href="#report">Open daily report →</a>'}</span></div>` : ''}
+    ${doneToday ? `<div class="alert" style="background:var(--ok-bg);color:var(--ok)"><b>${d.today_done ? "Today's report is submitted" : "Today's work is logged"}</b></div>` : ''}
+    <div class="kpis">${kpi}<div class="kpi"><span>Missed days</span><b>${d.missing.length}</b></div></div>`;
     return;
   }
   view().innerHTML = `
@@ -176,7 +186,7 @@ routes.dnq = async () => {
 };
 
 routes.newclient = async () => {
-  const n = newClient || (newClient = { company: '', email: '', phone: '', person: '', designation: '', city: '', location: '', gst_no: '', notes: '', owner_id: '', contacts: [], cards: [], briefs: [], gstcert: [], expo: { expo: '', location: '', start_date: '', area_sqm: '', space_type: '', stall_no: '' } });
+  const n = newClient || (newClient = { company: '', email: '', phone: '', person: '', designation: '', city: '', location: '', gst_no: '', notes: '', owner_id: '', contacts: [], cards: [], briefs: [], gstcert: [], expo: { expo: '', location: '', start_date: '', area_sqm: '', space_type: '', sides_open: '', stall_no: '' } });
   const F = (k, l, t = 'text') => `<label class="f">${l}<input data-nc="${k}" type="${t}" value="${esc(n[k])}"></label>`;
   view().innerHTML = `
   <div class="head"><div><h1>New client</h1><p>As you type the company, email or phone, the CRM checks every past record, including other employees' clients.</p></div></div>
@@ -189,6 +199,7 @@ routes.newclient = async () => {
   </div>
   <div class="panel"><h2>Expo enquiry</h2><p class="sub" style="margin-top:0">The expo this client is talking to us about. This creates their first expo order.</p>
    <div class="grid g3">${[['expo', 'Expo name *'], ['location', 'Expo location / city'], ['start_date', 'Expo start date', 'date'], ['area_sqm', 'Area chosen (sqm)', 'number'], ['stall_no', 'Stall no.']].map(([k, l, t]) => `<label class="f">${l}<input data-nce="${k}" type="${t || 'text'}" value="${esc(n.expo[k])}"></label>`).join('')}
+   <label class="f">No. of sides open<select data-nce="sides_open"><option value="">Select</option>${[1, 2, 3, 4].map(k => `<option value="${k}" ${+n.expo.sides_open === k ? 'selected' : ''}>${SIDES[k]}</option>`).join('')}</select></label>
    <label class="f">Space type<select data-nce="space_type"><option value="">Select</option>${['Bare space', 'Shell scheme'].map(o => `<option ${n.expo.space_type === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label></div></div>
   <div class="panel"><div class="ph"><h2>Others involved in the deal</h2><button class="btn ghost sm" id="nc-addc">+ Add person</button></div>
    ${n.contacts.length ? n.contacts.map((o, i) => `<div class="grid g3" style="margin-bottom:8px">${['name', 'designation', 'phone', 'email'].map(k => `<label class="f">${cap(k)}<input data-ncc="${i}" data-k="${k}" value="${esc(o[k])}"></label>`).join('')}</div>`).join('') : '<div class="sub">Purchase head, director, consultant — anyone else in the decision.</div>'}
@@ -224,7 +235,7 @@ routes.client = async ({ id }) => {
    <div class="row">${isAdmin() ? '<button class="btn link" id="client-del">Delete client</button>' : ''}<a class="btn ghost" href="ledger.php?client=${c.id}" target="_blank" rel="noopener">Ledger</a>${+c.dnq || !isAdmin() ? '' : '<button class="btn ghost" id="dnq-open">Mark “Do not quote”</button>'}<button class="btn" id="np-open">+ New expo order</button></div></div>
   ${+c.dnq ? `<div class="alert bad"><b>⛔ Do not quote</b><span class="m">Since ${fd(c.dnq_on)} · ${esc(c.dnq_reason)}${c.dnq_note ? ' — ' + esc(c.dnq_note) : ''} · flagged by ${esc(c.dnq_by)}</span>${isAdmin() ? '<div><button class="btn sm ghost" id="dnq-off">Remove flag</button></div>' : ''}</div>` : ''}
   <div id="dnq-form"></div>
-  <form class="panel" id="np-form" hidden><h3>New expo order</h3><div class="grid g3"><label class="f">Expo name *<input name="expo" required></label><label class="f">Location<input name="location"></label><label class="f">Start date<input type="date" name="start_date"></label><label class="f">Area chosen (sqm)<input type="number" step="0.01" name="area_sqm"></label><label class="f">Space type<select name="space_type"><option value="">Select</option><option>Bare space</option><option>Shell scheme</option></select></label><label class="f">Stall no.<input name="stall_no"></label></div><div class="row" style="margin-top:10px"><button class="btn">Create order</button><button type="button" class="btn ghost" id="np-cancel">Cancel</button></div></form>
+  <form class="panel" id="np-form" hidden><h3>New expo order</h3><div class="grid g3"><label class="f">Expo name *<input name="expo" required></label><label class="f">Location<input name="location"></label><label class="f">Start date<input type="date" name="start_date"></label><label class="f">Area chosen (sqm)<input type="number" step="0.01" name="area_sqm"></label><label class="f">Space type<select name="space_type"><option value="">Select</option><option>Bare space</option><option>Shell scheme</option></select></label><label class="f">No. of sides open<select name="sides_open"><option value="">Select</option>${[1, 2, 3, 4].map(k => `<option value="${k}">${SIDES[k]}</option>`).join('')}</select></label><label class="f">Stall no.<input name="stall_no"></label></div><div class="row" style="margin-top:10px"><button class="btn">Create order</button><button type="button" class="btn ghost" id="np-cancel">Cancel</button></div></form>
   <div class="kpis"><div class="kpi"><span>Orders</span><b>${won.length} won / ${c.projects.length}</b></div><div class="kpi hl"><span>Total business</span><b>${inr(T.t)}</b></div><div class="kpi"><span>Received</span><b>${inr(T.r)}</b></div><div class="kpi"><span>Outstanding</span><b style="color:${T.b > 0.5 ? 'var(--bad)' : 'var(--ok)'}">${inr(T.b)}</b></div></div>
   <div class="panel"><h2>Orders</h2>${projTable(c.projects.map(p => ({ ...p, company: c.company })), isAdmin(), false)}</div>
   <div class="grid">
@@ -246,7 +257,7 @@ routes.client = async ({ id }) => {
 };
 
 // ---------- PROJECT ----------
-const TABS = [['expo', 'Expo'], ['design', 'Design'], ['order', 'Quote & order'], ['vendors', 'Vendor quotes'], ['extras', 'Extras'], ['money', 'Payments & costs']];
+const TABS = [['expo', 'Expo'], ['design', 'Design'], ['order', 'Quote & order'], ['vendors', 'Vendor quotes'], ['production', 'Production'], ['extras', 'Extras'], ['money', 'Payments & costs']];
 routes.project = async ({ id, tab }) => {
   const { project: p } = await api('project', { id });
   C.project = p; tab = TABS.some(t => t[0] === tab) ? tab : 'expo';
@@ -298,17 +309,30 @@ function rowOr(kind, r, cols, html) {
 const canDelMoney = () => isAdmin();
 const vendorOpts = () => '<option value="">Select vendor</option>' + B.vendors.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('') + '<option value="__new">+ Add new vendor…</option>';
 const PT = {};
-PT.expo = p => `<div class="grid">${PF(p, 'expo', 'Expo name')}${PF(p, 'location', 'Location')}${PF(p, 'start_date', 'Start date', 'date')}${PF(p, 'end_date', 'End date', 'date')}${PF(p, 'area_sqm', 'Area (sqm)', 'number', 'step="0.01"')}<label class="f">Space type<select data-pf="space_type"><option value="">Select</option>${['Bare space', 'Shell scheme'].map(o => `<option ${p.space_type === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label>${PF(p, 'stall_no', 'Stall no.')}
+PT.expo = p => `<div class="grid">${PF(p, 'expo', 'Expo name')}${PF(p, 'location', 'Location')}${PF(p, 'start_date', 'Start date', 'date')}${PF(p, 'end_date', 'End date', 'date')}${PF(p, 'area_sqm', 'Area (sqm)', 'number', 'step="0.01"')}<label class="f">Space type<select data-pf="space_type"><option value="">Select</option>${['Bare space', 'Shell scheme'].map(o => `<option ${p.space_type === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label><label class="f">No. of sides open<select data-pf="sides_open"><option value="">Select</option>${[1, 2, 3, 4].map(n => `<option value="${n}" ${+p.sides_open === n ? 'selected' : ''}>${SIDES[n]}</option>`).join('')}</select></label>${PF(p, 'stall_no', 'Stall no.')}
   ${isAdmin() ? `<label class="f">Handled by<select data-pf="owner_id">${B.users.filter(u => +u.active).map(u => `<option value="${u.id}" ${+u.id === +p.owner_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>` : ''}</div>
   <h3 style="margin:18px 0 8px">Client brief for this expo</h3><div class="row">${upBtn('pbrief', p.id, 'Upload brief (PDF / image / Word / Excel / PPT)')}${fileChips(p.files.pbrief, isAdmin())}</div>
   <h3 style="margin:18px 0 8px">Floor plan</h3><div class="row">${upBtn('floor', p.id, 'Upload floor plan (JPG / PDF)')}${fileChips(p.files.floor, isAdmin())}</div>`;
-PT.design = p => `<div class="grid">${PF(p, 'designed_by', 'Designed by')}${PF(p, 'assigned_on', 'Design assigned on', 'date')}${PF(p, 'design_approved_by', 'Design approved by (Zest)')}</div>
+PT.design = p => `<div class="inset" style="margin-bottom:14px"><div class="grid g3">
+   ${isAdmin() ? `<label class="f">Assign designer<select data-assign="designer"><option value="0">Not assigned</option>${usersOfMod('design').map(u => `<option value="${u.id}" ${+u.id === +p.designer_id ? 'selected' : ''}>${esc(u.name)} · ${esc(u.department)}</option>`).join('')}</select></label>`
+     : `<div class="sub"><b>Designer</b><br>${esc(p.designer || '—')}</div>`}
+   <div class="sub"><b>Assigned by</b><br>${esc(p.design_assigned_by || '—')}${p.designer_id ? ' · ' + fd(p.assigned_on) : ''}</div>
+   <div class="sub"><b>Design submitted</b><br>${p.design_submitted_on ? fd(p.design_submitted_on) : p.designer_id ? '<span class="pill p-pending">pending</span>' : '—'}</div></div>
+   ${p.design_notes ? `<div class="sub" style="margin-top:8px"><b>Designer notes:</b> ${esc(p.design_notes)}</div>` : ''}</div>
+  <div class="grid">${PF(p, 'designed_by', 'Designed by')}${PF(p, 'assigned_on', 'Design assigned on', 'date')}${PF(p, 'design_approved_by', 'Design approved by (Zest)')}</div>
   <h3 style="margin:18px 0 8px">Corrections</h3>
   ${p.revisions.length ? `<div class="tw"><table><tr><th>#</th><th>Date</th><th>Done by</th><th>What changed</th><th>File</th><th></th></tr>${p.revisions.map((r, i) => rowOr('revision', r, 6, `<tr><td>R${i + 1}</td><td class="num">${fd(r.rdate)}</td><td>${esc(r.done_by || '')}</td><td>${esc(r.changes)}</td><td>${fileChips(p.files.revision[r.id], isAdmin())}</td><td class="r">${acts('revision', r.id)}</td></tr>`)).join('')}</table></div>` : '<div class="sub">No corrections yet.</div>'}
   <form class="inset" data-add="revision" style="margin-top:10px"><div class="grid g3"><label class="f">Date<input type="date" name="rdate" value="${B.today}" required></label><label class="f">Done by<input name="done_by"></label><label class="f">What changed *<input name="changes" required></label></div>
    <div class="row" style="margin-top:8px"><label class="up">⬆ Attach file<input type="file" name="file" multiple></label><button class="btn ghost sm">+ Add correction</button></div></form>
   <div class="grid" style="margin-top:18px"><div><h3 style="margin-bottom:8px">Final design</h3><div class="row">${upBtn('final', p.id)}${fileChips(p.files.final, isAdmin())}</div></div>
   <div><h3 style="margin-bottom:8px">Working drawing <span class="sub">(if order executed)</span></h3><div class="row">${upBtn('wd', p.id)}${fileChips(p.files.wd, isAdmin())}</div></div></div>`;
+PT.production = p => `<div class="inset" style="margin-bottom:14px"><div class="grid g3">
+   ${isAdmin() ? `<label class="f">Assign production person<select data-assign="ops"><option value="0">Not assigned</option>${usersOfMod('ops').map(u => `<option value="${u.id}" ${+u.id === +p.ops_id ? 'selected' : ''}>${esc(u.name)} · ${esc(u.department)}</option>`).join('')}</select></label>`
+     : `<div class="sub"><b>Production person</b><br>${esc(p.ops_person || '—')}</div>`}
+   <div class="sub"><b>Assigned by</b><br>${esc(p.ops_assigned_by || '—')}${p.ops_id ? ' · ' + fd(p.ops_assigned_on) : ''}</div>
+   <div class="sub"><b>Vendor assigned</b><br>${p.chosen_vendor ? `${esc(p.chosen_vendor.name)} · ${inr(p.chosen_vendor.amount)}` : 'Choose one in <a href="#project-' + p.id + '-vendors">Vendor quotes</a>'}</div></div></div>
+  ${opsForm({ id: p.id, expo: p.expo, location: p.location, start_date: p.start_date, company: p.client.company, area_sqm: p.area_sqm, sides_open: p.sides_open, stall_no: p.stall_no, status: p.status,
+    ops_person: p.ops_person, ops_assigned_by: p.ops_assigned_by, ops_assigned_on: p.ops_assigned_on, ops_updated_at: p.ops_updated_at, vendor: p.chosen_vendor, ops: p.ops })}`;
 PT.order = p => { const c = calcBill(p); return `<div class="grid">${PF(p, 'offered', 'Offered price (₹)', 'number')}${PF(p, 'agreed', 'Agreed price (₹)', 'number')}
   ${PF(p, 'gst_rate', 'GST rate (%)', 'number')}
   <label class="f">GST amount (auto)<input id="calc-gst" readonly tabindex="-1" value="${inr(c.gst)}"></label>
@@ -397,7 +421,7 @@ routes.reportlog = async () => {
   <div class="log">${d.days.map(day => `<h3 class="num">${fd(day.date)} ${day.off ? `<span class="pill p-off">${esc(day.off)}</span>` : ''}</h3>
    ${day.rows.length ? day.rows.map(r => r.status === 'received'
      ? `<details><summary><b>${esc(r.user.name)}</b><span class="sub">${esc(r.user.department)}</span><span class="pill p-received">received ${r.at}</span><span class="sub" style="margin-left:auto">${r.items.length} entr${r.items.length === 1 ? 'y' : 'ies'}</span></summary><div class="in">${reportTable(r.items, r.fields)}</div></details>`
-     : `<details><summary><b>${esc(r.user.name)}</b><span class="sub">${esc(r.user.department)}</span><span class="pill p-${r.status}">${r.status === 'pending' ? 'pending today' : 'report not received'}</span></summary></details>`).join('')
+     : `<details><summary><b>${esc(r.user.name)}</b><span class="sub">${esc(r.user.department)}</span><span class="pill p-${r.status === 'work' ? 'received' : r.status}">${r.status === 'work' ? 'work logged' : r.status === 'pending' ? 'pending today' : 'report not received'}</span>${r.status === 'work' && r.leads ? `<span class="sub" style="margin-left:auto">${r.leads} expo entr${r.leads === 1 ? 'y' : 'ies'}</span>` : ''}</summary></details>`).join('')
      : `<div class="sub">${day.off ? 'No report expected.' : 'No employees to track on this day.'}</div>`}`).join('')}</div>`;
   $('#logf').onsubmit = e => { e.preventDefault(); const fm = new FormData(e.target); C.log = { from: fm.get('from'), to: fm.get('to'), user_id: fm.get('user_id') }; refresh(); };
 };
@@ -442,7 +466,7 @@ async function loadFull(id) {
     ${c.orders.map(o => { const b = o.bill; return `<div class="inset" style="margin-top:12px"><div class="ph"><h3>${esc(o.expo)}${o.location ? ', ' + esc(o.location) : ''} ${pill(o.status)}</h3><a class="btn ghost sm" href="#project-${o.id}">Open order</a></div>
       <div class="grid g3 sub">
        <div><b>Expo</b><br>${fd(o.start_date)} – ${fd(o.end_date)}<br>${o.area_sqm ? num(o.area_sqm) + ' sqm' : '—'} · ${esc(o.space_type || '—')} · Stall ${esc(o.stall_no || '—')}</div>
-       <div><b>People</b><br>Sales: ${esc(o.owner)}<br>Designer: ${esc(o.designed_by || '—')} (${o.revisions.length} correction${o.revisions.length === 1 ? '' : 's'})<br>Design approved: ${esc(o.design_approved_by || '—')}</div>
+       <div><b>People</b><br>Sales: ${esc(o.owner)}<br>Designer: ${esc(o.designed_by || '—')} (${o.revisions.length} correction${o.revisions.length === 1 ? '' : 's'})<br>Design approved: ${esc(o.design_approved_by || '—')}${o.design_submitted_on ? '<br>Design submitted: ' + fd(o.design_submitted_on) : ''}<br>Production: ${esc(o.ops_person || '—')}</div>
        <div><b>Fabrication</b><br>Vendor: ${esc(o.fabricator || '—')}<br>Vendor quotes: ${o.vquotes.length ? o.vquotes.map(v => `${esc(v.vendor)} ${inr(v.amount)}${+v.selected ? ' ✓' : ''}`).join(', ') : '—'}</div>
        <div><b>Price</b><br>Offered ${inr(o.offered)} · Agreed ${inr(o.agreed)}<br>Quotes: ${o.quotes.map(q => `V${q.version} ${inr(q.amount)}`).join(', ') || '—'}<br>Approved by: ${esc(o.approved_by || '—')}</div>
        <div><b>Money</b><br>Bill ${inr(b.total)} (GST ${inr(b.gst)}, extras ${inr(b.extras)})<br>Received ${inr(b.received)} · <span style="color:${b.balance > 0.5 ? 'var(--bad)' : 'var(--ok)'}">Balance ${inr(b.balance)}</span></div>
@@ -453,6 +477,188 @@ async function loadFull(id) {
   } catch (e) { box.innerHTML = `<div class="alert bad"><span class="m">${esc(e.message)}</span></div>`; }
 }
 
+// ---------- DEPARTMENT WORK: shared bits ----------
+const MOD_LABEL = { records: 'Clients & orders', leads: 'Expo data (research)', calls: 'Expo data (telecalling)', design: 'Design jobs', ops: 'Production jobs', none: 'Daily report only' };
+const modOf = dept => (B.dept_modules || {})[dept] || 'none';
+const usersOfMod = m => { const u = B.users.filter(x => +x.active && x.role === 'employee' && modOf(x.department) === m); return u.length ? u : B.users.filter(x => +x.active && x.role === 'employee'); };
+const SIDES = { 1: '1 side open', 2: '2 sides open (corner)', 3: '3 sides open', 4: '4 sides open (island)' };
+const sidesTxt = v => SIDES[+v] || '—';
+const UNITS = ['ft', 'm', 'in', 'cm', 'mm'];
+const unitSel = (path, u) => `<select data-op="${path}" aria-label="Unit" style="max-width:80px">${UNITS.map(x => `<option ${x === (u || 'ft') ? 'selected' : ''}>${x}</option>`).join('')}</select>`;
+const link = u => u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\//, '').replace(/\/$/, ''))}</a>` : '—';
+function setPath(o, path, v) { const k = path.split('.'); let x = o; for (let i = 0; i < k.length - 1; i++) x = x[k[i]] = x[k[i]] ?? (isNaN(k[i + 1]) ? {} : []); x[k[k.length - 1]] = v; }
+
+// ---------- EXPO DATA (research + telecalling) ----------
+routes.leads = async () => {
+  const d = await api('lexpos', { q: C.lq || '' });
+  const calls = B.module === 'calls';
+  view().innerHTML = `
+  <div class="head"><div><h1>Expo data</h1><p>${calls ? 'Expos you are calling exhibitors for.' : 'Expos you are collecting exhibitor data for.'} Open an expo to add or correct entries.</p></div></div>
+  <form class="panel" id="lx-new"><h2>Add an expo</h2><p class="sub" style="margin-top:0">If a colleague already added the same expo, pick it from the suggestions — your entries will sit under the same expo.</p>
+   <div class="grid g3"><label class="f">Expo name *<input name="name" required list="expo-list" autocomplete="off"></label><label class="f">Expo date<input type="date" name="edate"></label><label class="f">Expo location / city<input name="city"></label><label class="f">Expo website<input name="website" placeholder="www.example.com"></label></div>
+   <datalist id="expo-list">${d.all_expos.map(e => `<option value="${esc(e.name)}">${esc([e.city, e.edate ? fd(e.edate) : ''].filter(Boolean).join(' · '))}</option>`).join('')}</datalist>
+   <div style="margin-top:10px"><button class="btn">+ Add expo</button></div></form>
+  <div class="panel"><div class="ph"><h2>My expos</h2><input id="lq" placeholder="Search expo or city" value="${esc(C.lq || '')}" style="max-width:260px"></div>
+   ${d.expos.length ? `<div class="tw"><table><tr><th>Expo</th><th>Date</th><th>City</th><th>Website</th><th class="r">My entries</th><th>Last entry</th></tr>
+   ${d.expos.map(e => `<tr class="click" data-go="lexpo-${e.id}"><td><b>${esc(e.name)}</b></td><td class="num">${fd(e.edate)}</td><td>${esc(e.city || '—')}</td><td>${link(e.website)}</td><td class="r num">${e.entries}</td><td class="num">${fd(e.last)}</td></tr>`).join('')}</table></div>`
+   : blank('No expos yet. Add the expo you are working on above.')}</div>`;
+  $('#lx-new').onsubmit = async e => { e.preventDefault(); const r = await act(() => api('lexpo_save', Object.fromEntries(new FormData(e.target))), 'Expo ready').catch(() => null); if (r) location.hash = '#lexpo-' + r.id; };
+  let tq; $('#lq').oninput = e => { clearTimeout(tq); tq = setTimeout(() => { C.lq = e.target.value.trim(); refresh().then(() => { const i = $('#lq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 350); };
+};
+
+routes.lexpo = async ({ id }) => {
+  const d = await api('lexpo', { id, user_id: isAdmin() ? (C.lxu || '') : '' });
+  C.lexpo = d; const x = d.expo;
+  const admin = isAdmin();
+  const showNotes = admin ? true : B.module === 'calls';
+  const canDel = e => admin || (+e.user_id === +B.me.id && String(e.created_at).slice(0, 10) === B.today);
+  const cols = 6 + (showNotes ? 1 : 0) + (admin ? 1 : 0);
+  const people = admin ? [...new Map(d.entries.map(e => [e.user_id, e.entered_by])).entries()] : [];
+  const row = (e, i) => C.leditId === +e.id
+    ? `<tr><td colspan="${cols + 1}" style="background:var(--gold-soft)"><form data-ledit="${e.id}"><div class="grid g3">
+        <label class="f">Company name *<input name="company" required value="${esc(e.company)}"></label><label class="f">Contact person<input name="person" value="${esc(e.person || '')}"></label>
+        <label class="f">Phone<input name="phone" value="${esc(e.phone || '')}"></label><label class="f">Email<input name="email" type="email" value="${esc(e.email || '')}"></label>
+        ${showNotes ? `<label class="f wide">Comments / notes<textarea name="notes">${esc(e.notes || '')}</textarea></label>` : ''}</div>
+        <div class="row" style="margin-top:8px"><button class="btn sm">Save changes</button><button type="button" class="btn ghost sm" data-lcancel="1">Cancel</button></div></form></td></tr>`
+    : `<tr><td class="num">${i + 1}</td><td><b>${esc(e.company)}</b></td><td>${esc(e.person || '')}</td><td class="num">${esc(e.phone || '')}</td><td>${esc(e.email || '')}</td>${showNotes ? `<td>${esc(e.notes || '')}</td>` : ''}${admin ? `<td>${esc(e.entered_by || '—')}<div class="sub">${esc(e.dept)}</div></td>` : ''}<td class="num">${fd(e.created_at)}${e.updated_at ? '<div class="sub">edited</div>' : ''}</td>
+       <td class="r" style="white-space:nowrap">${admin || +e.user_id === +B.me.id ? `<button class="btn link" data-ledit-open="${e.id}">✎ Edit</button>` : ''}${canDel(e) ? `<button class="btn link" data-ldel="${e.id}" aria-label="Delete">✕</button>` : ''}</td></tr>`;
+  view().innerHTML = `
+  <div class="head"><div><div class="crumb"><a href="#${admin ? 'leadlog' : 'leads'}">← ${admin ? 'Expo data log' : 'Expo data'}</a></div><h1>${esc(x.name)}</h1>
+   <p>${fd(x.edate)} · ${esc(x.city || 'city not set')} · ${link(x.website)}${admin ? ` · added by ${esc(x.created_by_name)}` : ''}</p></div>
+   <div class="row">${d.can_edit_expo ? '<button class="btn ghost" id="lx-edit-open">Edit expo details</button>' : ''}${admin ? `<a class="btn" href="export_leads.php?expo_id=${x.id}${C.lxu ? '&user_id=' + C.lxu : ''}">⬇ Export to Excel</a>` : ''}</div></div>
+  <form class="panel" id="lx-edit" hidden><h3>Expo details</h3><div class="grid g3"><label class="f">Expo name *<input name="name" required value="${esc(x.name)}"></label><label class="f">Expo date<input type="date" name="edate" value="${esc(x.edate || '')}"></label><label class="f">Expo location / city<input name="city" value="${esc(x.city || '')}"></label><label class="f">Expo website<input name="website" value="${esc(x.website || '')}"></label></div>
+   <div class="row" style="margin-top:10px"><button class="btn">Save</button><button type="button" class="btn ghost" id="lx-edit-cancel">Cancel</button></div></form>
+  <div class="panel"><div class="ph"><h2>${admin ? 'All entries' : 'My entries'} <span class="sub">(${d.entries.length})</span></h2>
+   ${admin && people.length > 1 || C.lxu ? `<label class="f" style="min-width:200px">Entered by<select id="lxu"><option value="">Everyone</option>${(people.length ? people : []).map(([uid, nm]) => `<option value="${uid}" ${+C.lxu === +uid ? 'selected' : ''}>${esc(nm)}</option>`).join('')}${C.lxu && !people.some(([u]) => +u === +C.lxu) ? `<option value="${C.lxu}" selected>${esc(userName(C.lxu))}</option>` : ''}</select></label>` : ''}</div>
+   ${d.entries.length ? `<div class="tw"><table><tr><th>Sl</th><th>Company</th><th>Contact person</th><th>Phone</th><th>Email</th>${showNotes ? '<th>Comments / notes</th>' : ''}${admin ? '<th>Entered by</th>' : ''}<th>Added</th><th></th></tr>${d.entries.map(row).join('')}</table></div>` : '<div class="empty">No entries yet. Add the first one below.</div>'}
+   <form class="inset" id="lead-add" style="margin-top:12px"><div class="grid g3"><label class="f">Company name *<input name="company" required></label><label class="f">Contact person<input name="person"></label><label class="f">Phone number<input name="phone" type="tel"></label><label class="f">Email<input name="email" type="email"></label>
+    ${showNotes ? '<label class="f wide">Comments / notes <span class="sub" style="font-weight:400">(after speaking to the person)</span><textarea name="notes"></textarea></label>' : ''}</div>
+    <div class="row" style="margin-top:8px"><button class="btn">+ Add entry</button><span class="sub">Tip: press Enter to add and start the next one.</span></div></form>
+   <details class="inset" style="margin-top:12px"><summary><b>Paste many rows from Excel</b> <span class="sub">— copy the rows in Excel and paste here</span></summary>
+    <p class="sub">Column order: <b>Company | Contact person | Phone | Email${showNotes ? ' | Comments' : ''}</b>. A header row is skipped. Companies already in this expo are skipped.</p>
+    <textarea id="lx-paste" style="min-height:120px" placeholder="Paste here"></textarea><div class="row" style="margin-top:8px"><button class="btn ghost sm" id="lx-paste-go">Add pasted rows</button><span class="sub" id="lx-paste-n"></span></div></details>
+  </div>`;
+};
+
+routes.leadlog = async () => {
+  const f = C.llog || (C.llog = { q: '', user_id: '', dept: '', from: '', to: '' });
+  const d = await api('lexpos', f);
+  const depts = B.departments.filter(x => ['leads', 'calls'].includes(modOf(x)));
+  const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
+  const total = d.expos.reduce((s, e) => s + e.entries, 0), today = d.people.reduce((s, p) => s + p.today, 0);
+  view().innerHTML = `
+  <div class="head"><div><h1>Expo data log</h1><p>Exhibitor data collected by research and telecalling. Open an expo to see every entry.</p></div><a class="btn" href="export_leads.php${qs ? '?' + qs : ''}">⬇ Export to Excel</a></div>
+  <form class="panel row" id="llogf" style="align-items:flex-end">
+   <label class="f" style="flex:1;min-width:180px">Search expo / city<input name="q" value="${esc(f.q)}"></label>
+   <label class="f">Employee<select name="user_id"><option value="">Everyone</option>${d.people.map(p => `<option value="${p.id}" ${+f.user_id === +p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+   <label class="f">Department<select name="dept"><option value="">All</option>${depts.map(x => `<option ${f.dept === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
+   <label class="f">Entered from<input type="date" name="from" value="${f.from}"></label><label class="f">to<input type="date" name="to" value="${f.to}"></label>
+   <button class="btn ghost">Apply</button>${Object.values(f).some(Boolean) ? '<button type="button" class="btn link" id="llogclear">Clear</button>' : ''}</form>
+  <div class="kpis"><div class="kpi"><span>Expos</span><b>${d.expos.length}</b></div><div class="kpi hl"><span>Entries</span><b>${total}</b><small>in this view</small></div><div class="kpi"><span>Entries today</span><b>${today}</b><small>all employees</small></div></div>
+  ${d.people.length ? `<div class="panel"><h2>By employee</h2><div class="tw"><table><tr><th>Employee</th><th>Department</th><th class="r">Today</th><th class="r">This month</th><th class="r">All time</th></tr>${d.people.map(p => `<tr><td><b>${esc(p.name)}</b></td><td>${esc(p.dept)}</td><td class="r num">${p.today}</td><td class="r num">${p.month}</td><td class="r num">${p.total}</td></tr>`).join('')}</table></div></div>` : ''}
+  <div class="log">${d.expos.length ? d.expos.map(e => `<details data-lx="${e.id}"><summary><b>${esc(e.name)}</b><span class="sub">${fd(e.edate)} · ${esc(e.city || '—')}</span><span class="sub">${esc(e.by.map(b => `${b.name} (${b.n})`).join(', ') || 'no entries yet')}</span>
+     <span style="margin-left:auto" class="row"><span class="num">${e.entries} entr${e.entries === 1 ? 'y' : 'ies'}</span><span class="sub">last ${fd(e.last)}</span></span></summary>
+     <div class="in"><div class="row" style="margin-bottom:8px"><span class="sub">${link(e.website)}</span><a class="btn ghost sm" href="#lexpo-${e.id}">Open & edit</a><a class="btn ghost sm" href="export_leads.php?expo_id=${e.id}${f.user_id ? '&user_id=' + f.user_id : ''}">⬇ Export this expo</a></div><div data-lxbody="${e.id}"><div class="loading">Loading entries…</div></div></div></details>`).join('') : blank('No expo data in this view.')}</div>`;
+  $('#llogf').onsubmit = e => { e.preventDefault(); C.llog = Object.fromEntries(new FormData(e.target)); refresh(); };
+  if ($('#llogclear')) $('#llogclear').onclick = () => { C.llog = null; refresh(); };
+  document.querySelectorAll('details[data-lx]').forEach(el => el.addEventListener('toggle', async () => {
+    if (!el.open || el.dataset.loaded) return; el.dataset.loaded = 1;
+    const box = el.querySelector('[data-lxbody]');
+    try {
+      const r = await api('lexpo', { id: el.dataset.lx, user_id: f.user_id || '' });
+      box.innerHTML = r.entries.length ? `<div class="tw"><table><tr><th>Sl</th><th>Company</th><th>Contact person</th><th>Phone</th><th>Email</th><th>Comments / notes</th><th>Entered by</th><th>Added</th></tr>${r.entries.map((x, i) => `<tr><td class="num">${i + 1}</td><td><b>${esc(x.company)}</b></td><td>${esc(x.person || '')}</td><td class="num">${esc(x.phone || '')}</td><td>${esc(x.email || '')}</td><td>${esc(x.notes || '')}</td><td>${esc(x.entered_by || '—')}<div class="sub">${esc(x.dept)}</div></td><td class="num">${fd(x.created_at)}</td></tr>`).join('')}</table></div>` : '<div class="sub">No entries.</div>';
+    } catch (err) { box.innerHTML = `<div class="alert bad"><span class="m">${esc(err.message)}</span></div>`; }
+  }));
+};
+
+// ---------- DESIGN JOBS (designer) ----------
+routes.mydesign = async () => {
+  const d = await api('design_jobs');
+  const pdf = (ent, id, label) => upBtn(ent, id, label, '.pdf');
+  view().innerHTML = `
+  <div class="head"><div><h1>My design jobs</h1><p>Jobs assigned to you by Zest. Fill the submission date and notes, and upload your design and working drawing as PDF.</p></div></div>
+  ${d.jobs.length ? d.jobs.map(j => `<form class="panel" data-dsave="${j.id}">
+    <div class="ph"><h2>${esc(j.expo)} · ${esc(j.company)}</h2>${j.design_submitted_on ? '<span class="pill p-ok">submitted</span>' : '<span class="pill p-pending">pending</span>'}</div>
+    <div class="grid g3 sub" style="margin-bottom:12px">
+     <div><b>Expo name</b><br>${esc(j.expo)}${j.location ? ', ' + esc(j.location) : ''}<br>${fd(j.start_date)}</div>
+     <div><b>Company name</b><br>${esc(j.company)}</div>
+     <div><b>Area</b><br>${j.area_sqm ? num(j.area_sqm) + ' sqm' : '—'}${j.space_type ? ' · ' + esc(j.space_type) : ''}${j.stall_no ? '<br>Stall ' + esc(j.stall_no) : ''}</div>
+     <div><b>No. of sides open</b><br>${sidesTxt(j.sides_open)}</div>
+     <div><b>Design assigned by</b><br>${esc(j.design_assigned_by || '—')}</div>
+     <div><b>Design assign date</b><br>${fd(j.assigned_on)}</div>
+    </div>
+    ${j.files.pbrief.length || j.files.floor.length ? `<div class="row" style="margin-bottom:12px">${j.files.pbrief.length ? '<span class="sub">Client brief:</span>' + fileChips(j.files.pbrief) : ''}${j.files.floor.length ? '<span class="sub">Floor plan:</span>' + fileChips(j.files.floor) : ''}</div>` : ''}
+    <div class="grid"><label class="f">Design submission date<input type="date" name="submitted_on" value="${esc(j.design_submitted_on || '')}"></label>
+     <label class="f wide">Notes / comments <span class="sub" style="font-weight:400">(e.g. need more inputs or details)</span><textarea name="notes">${esc(j.design_notes || '')}</textarea></label></div>
+    <div class="grid" style="margin-top:12px"><div><h3 style="margin-bottom:6px">Design (PDF)</h3><div class="row">${pdf('final', j.id, 'Upload design PDF')}${fileChips(j.files.final)}</div></div>
+     <div><h3 style="margin-bottom:6px">Working drawing (PDF)</h3><div class="row">${pdf('wd', j.id, 'Upload working drawing PDF')}${fileChips(j.files.wd)}</div></div></div>
+    <div class="row" style="margin-top:12px"><button class="btn">Save</button>${j.design_approved_by ? `<span class="sub">Approved by ${esc(j.design_approved_by)}</span>` : ''}</div></form>`).join('')
+  : `<div class="panel">${blank('No design jobs assigned to you yet. Admin assigns them from the order’s Design tab.')}</div>`}`;
+};
+
+// ---------- PRODUCTION JOBS (operations) ----------
+routes.myops = async () => {
+  const d = await api('ops_jobs');
+  view().innerHTML = `<div class="head"><div><h1>My production jobs</h1><p>Open a job to fill stall dimensions, furniture and artwork details.</p></div></div>
+  <div class="panel">${d.jobs.length ? `<div class="tw"><table><tr><th>Expo</th><th>Company</th><th>Expo date</th><th class="r">Area</th><th>Sides open</th><th>Vendor</th><th>Assigned</th><th>Details</th></tr>
+   ${d.jobs.map(j => `<tr class="click" data-go="opsjob-${j.id}"><td><b>${esc(j.expo)}</b><div class="sub">${esc(j.location || '')}</div></td><td>${esc(j.company)}</td><td class="num">${fd(j.start_date)}</td><td class="r num">${j.area_sqm ? num(j.area_sqm) + ' sqm' : '—'}</td><td>${sidesTxt(j.sides_open)}</td><td>${j.vendor ? esc(j.vendor.name) : '<span class="sub">not assigned</span>'}</td><td class="sub">${esc(j.ops_assigned_by || '')}<br>${fd(j.ops_assigned_on)}</td><td>${j.ops_updated_at ? `<span class="pill p-ok">filled</span><div class="sub">${fd(j.ops_updated_at)}</div>` : '<span class="pill p-pending">to fill</span>'}</td></tr>`).join('')}</table></div>`
+  : blank('No production jobs assigned to you yet. Admin assigns them from the order’s Production tab.')}</div>`;
+};
+routes.opsjob = async ({ id }) => {
+  const { job } = await api('ops_job', { id });
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#${isAdmin() ? 'jobs' : B.records ? 'project-' + job.id + '-production' : 'myops'}">← Back</a></div><h1>${esc(job.expo)} · ${esc(job.company)}</h1><p>${fd(job.start_date)}${job.location ? ' · ' + esc(job.location) : ''}${job.stall_no ? ' · Stall ' + esc(job.stall_no) : ''}</p></div>${pill(job.status)}</div>
+   <div class="panel">${opsForm(job)}</div>`;
+};
+const OPS_BLANK = () => ({ length: { v: '', u: 'ft' }, width: { v: '', u: 'ft' }, wall_h: { v: '', u: 'ft' }, fascia_h: { v: '', u: 'ft' }, vendor_cost: '', furniture: [], backlit_walls: '', vinyl_total: 0, vinyl: [], notes: '' });
+function opsForm(job) {   // used on the production job page and in the order's Production tab
+  C.opsJob = job; C.ops = Object.assign(OPS_BLANK(), JSON.parse(JSON.stringify(job.ops || {})));
+  if ((C.ops.vendor_cost === '' || C.ops.vendor_cost === null) && job.vendor) C.ops.vendor_cost = job.vendor.amount;
+  return `<form id="opsform" data-pid="${job.id}"><div id="opsbox">${opsInner()}</div>
+   <div class="row" style="margin-top:14px"><button class="btn">Save production details</button>${job.ops_updated_at ? `<span class="sub">Last saved ${fd(job.ops_updated_at)} ${String(job.ops_updated_at).slice(11, 16)}</span>` : ''}</div></form>`;
+}
+function opsInner() {
+  const j = C.opsJob, o = C.ops;
+  const dim = (k, l) => `<label class="f">${l}<span class="row" style="flex-wrap:nowrap;gap:6px"><input type="number" step="any" data-op="${k}.v" value="${esc(o[k]?.v ?? '')}">${unitSel(k + '.u', o[k]?.u)}</span></label>`;
+  const items = [...new Set([...(B.furniture_items || []), ...o.furniture.map(f => f.item)])];
+  const has = it => o.furniture.find(f => f.item === it);
+  return `<div class="grid g3 sub">
+    <div><b>Expo name</b><br>${esc(j.expo)}</div><div><b>Company name</b><br>${esc(j.company)}</div><div><b>Area</b><br>${j.area_sqm ? num(j.area_sqm) + ' sqm' : '—'}</div>
+    <div><b>No. of sides open</b><br>${sidesTxt(j.sides_open)}</div><div><b>Vendor assigned</b><br>${j.vendor ? esc(j.vendor.name) : 'Not assigned yet (chosen in Vendor quotes)'}</div>
+    <div><b>Production person</b><br>${esc(j.ops_person || '—')}${j.ops_assigned_by ? `<br>assigned by ${esc(j.ops_assigned_by)}` : ''}</div></div>
+   <div class="grid g3" style="margin-top:12px;max-width:360px"><label class="f">Vendor cost agreed (₹)<input type="number" step="any" data-op="vendor_cost" value="${esc(o.vendor_cost ?? '')}"></label></div>
+   <h3 style="margin:18px 0 8px">Stall dimensions</h3>
+   <div class="grid">${dim('length', 'Length')}${dim('width', 'Width')}${dim('wall_h', 'Wall height')}${dim('fascia_h', 'Fascia height')}</div>
+   <h3 style="margin:18px 0 8px">Furniture & fixtures</h3>
+   <div class="grid g3">${items.map(it => { const f = has(it); return `<label class="row inset" style="gap:8px;padding:8px 10px;flex-wrap:nowrap"><input type="checkbox" data-furn="${esc(it)}" ${f ? 'checked' : ''}><span style="flex:1">${esc(it)}</span>${f ? `<input type="number" min="0" data-furnq="${esc(it)}" value="${f.qty}" aria-label="Quantity of ${esc(it)}" style="max-width:70px">` : ''}</label>`; }).join('')}</div>
+   <div class="row" style="margin-top:8px"><input id="ops-furn-new" placeholder="Other item, e.g. Podium" style="max-width:260px"><button type="button" class="btn ghost sm" id="ops-furn-add">+ Add item</button></div>
+   <h3 style="margin:18px 0 8px">Graphics</h3>
+   <div class="grid g3"><label class="f">Total backlit walls<input type="number" min="0" data-op="backlit_walls" value="${esc(o.backlit_walls ?? '')}"></label><label class="f">Total vinyl artworks<input type="number" min="0" max="50" data-op="vinyl_total" value="${esc(o.vinyl_total || '')}"></label></div>
+   ${o.vinyl.length ? `<div class="tw" style="margin-top:10px"><table><tr><th>Vinyl artwork</th><th>Width</th><th>Height</th></tr>${o.vinyl.map((a, i) => `<tr><td><b>Artwork ${i + 1}</b></td>
+     <td><span class="row" style="flex-wrap:nowrap;gap:6px"><input type="number" step="any" data-op="vinyl.${i}.w" value="${esc(a.w ?? '')}" aria-label="Artwork ${i + 1} width" style="max-width:110px">${unitSel(`vinyl.${i}.wu`, a.wu)}</span></td>
+     <td><span class="row" style="flex-wrap:nowrap;gap:6px"><input type="number" step="any" data-op="vinyl.${i}.h" value="${esc(a.h ?? '')}" aria-label="Artwork ${i + 1} height" style="max-width:110px">${unitSel(`vinyl.${i}.hu`, a.hu)}</span></td></tr>`).join('')}</table></div>` : ''}
+   <label class="f" style="margin-top:14px">Notes<textarea data-op="notes">${esc(o.notes || '')}</textarea></label>`;
+}
+function drawOps() { const b = $('#opsbox'); if (b) { const y = window.scrollY; b.innerHTML = opsInner(); window.scrollTo(0, y); } }
+
+// ---------- ADMIN: design & production board ----------
+routes.jobs = async () => {
+  const f = C.jobsf || (C.jobsf = { q: '', show: 'open' });
+  const d = await api('jobs_board', f);
+  const needs = d.jobs.filter(j => ['won', 'quoted'].includes(j.status) && !j.designer_id).length;
+  view().innerHTML = `
+  <div class="head"><div><h1>Design & production</h1><p>Who is designing and producing each order, and how far they are.</p></div>
+   <form class="row" id="jobsf"><input name="q" placeholder="Search client or expo" value="${esc(f.q)}" style="min-width:220px"><select name="show"><option value="open" ${f.show === 'open' ? 'selected' : ''}>Open orders</option><option value="all" ${f.show === 'all' ? 'selected' : ''}>Include completed</option></select><button class="btn ghost sm">Apply</button></form></div>
+  ${needs ? `<div class="alert warn"><b>${needs} order${needs > 1 ? 's' : ''} without a designer</b><span class="m">Open the order → Design tab → Assign designer.</span></div>` : ''}
+  <div class="panel">${d.jobs.length ? `<div class="tw"><table><tr><th>Client · expo</th><th>Expo date</th><th>Area · sides</th><th>Status</th><th>Sales</th><th>Designer</th><th>Design submitted</th><th>Files</th><th>Production</th><th>Vendor</th></tr>
+   ${d.jobs.map(j => `<tr class="click" data-go="project-${j.id}-design"><td><b>${esc(j.company)}</b><div class="sub">${esc(j.expo)}</div></td><td class="num">${fd(j.start_date)}</td><td>${j.area_sqm ? num(j.area_sqm) + ' sqm' : '—'}<div class="sub">${j.sides_open ? sidesTxt(j.sides_open) : ''}</div></td><td>${pill(j.status)}</td><td>${esc(j.owner)}</td>
+    <td>${j.designer ? `<b>${esc(j.designer)}</b><div class="sub">by ${esc(j.design_assigned_by || '—')} · ${fd(j.assigned_on)}</div>` : '<span class="pill p-quoted">not assigned</span>'}</td>
+    <td>${j.design_submitted_on ? `<span class="pill p-ok">${fd(j.design_submitted_on)}</span>` : j.designer ? '<span class="pill p-pending">pending</span>' : '—'}${j.design_notes ? `<div class="sub" title="${esc(j.design_notes)}">💬 ${esc(j.design_notes.slice(0, 40))}${j.design_notes.length > 40 ? '…' : ''}</div>` : ''}</td>
+    <td class="sub">Design ${j.final_n}<br>WD ${j.wd_n}</td>
+    <td>${j.ops_person ? `<b>${esc(j.ops_person)}</b><div class="sub">${j.ops_filled ? 'details filled ' + fd(j.ops_updated_at) : 'details pending'}</div>` : '<span class="sub">not assigned</span>'}</td>
+    <td>${j.vendor ? `${esc(j.vendor.name)}<div class="sub">${inr(j.vendor.amount)}</div>` : '—'}</td></tr>`).join('')}</table></div>` : blank('No orders in this view.')}</div>`;
+  $('#jobsf').onsubmit = e => { e.preventDefault(); C.jobsf = Object.fromEntries(new FormData(e.target)); refresh(); };
+};
+
 // ---------- TEAM ----------
 routes.team = async () => {
   const d = await api('users'); const ed = C.editUser ? d.users.find(u => +u.id === +C.editUser) : null;
@@ -460,9 +666,9 @@ routes.team = async () => {
   view().innerHTML = `
   <div class="head"><div><h1>Team</h1><p>Only admin sets role and department. The department decides the daily report format.</p></div></div>
   <div class="panel"><div class="tw"><table><tr><th>Name</th><th>Login email</th><th>Designation</th><th>Department</th><th>Access</th><th>Joined</th><th>Status</th><th></th></tr>
-   ${d.users.map(u => `<tr><td><b>${esc(u.name)}</b><div class="sub">${esc(u.phone || '')}</div></td><td>${esc(u.email)}</td><td>${esc(u.designation || '')}</td><td>${esc(u.department)}</td><td>${u.role === 'admin' ? '<span class="pill p-enquiry">admin</span>' : B.record_depts.includes(u.department) ? 'Clients + orders + report' : 'Daily report only'}</td><td class="num">${fd(u.joined_on)}</td><td>${+u.active ? '<span class="pill p-ok">active</span>' : '<span class="pill p-off">disabled</span>'}</td><td class="r"><button class="btn ghost sm" data-edituser="${u.id}">Edit</button></td></tr>`).join('')}</table></div></div>
-  <div class="panel"><h2>Who can add clients & orders</h2><p class="sub" style="margin-top:0">Ticked departments get Clients, New client and full expo orders (design, quotes, vendor quotes, extras, payments). Others only see their daily report.</p>
-   <div class="row">${B.departments.map(x => `<label class="row" style="gap:5px;margin-right:10px"><input type="checkbox" data-recdept="${esc(x)}" ${B.record_depts.includes(x) ? 'checked' : ''}>${esc(x)}</label>`).join('')}</div></div>
+   ${d.users.map(u => `<tr><td><b>${esc(u.name)}</b><div class="sub">${esc(u.phone || '')}</div></td><td>${esc(u.email)}</td><td>${esc(u.designation || '')}</td><td>${esc(u.department)}</td><td>${u.role === 'admin' ? '<span class="pill p-enquiry">admin</span>' : MOD_LABEL[modOf(u.department)]}</td><td class="num">${fd(u.joined_on)}</td><td>${+u.active ? '<span class="pill p-ok">active</span>' : '<span class="pill p-off">disabled</span>'}</td><td class="r"><button class="btn ghost sm" data-edituser="${u.id}">Edit</button></td></tr>`).join('')}</table></div></div>
+  <div class="panel"><h2>What each department works on</h2><p class="sub" style="margin-top:0">Decides the screens an employee gets as soon as their login is created. Everyone also has the daily report.</p>
+   <div class="tw"><table><tr><th>Department</th><th>Works on</th><th class="r">People</th></tr>${B.departments.map(x => `<tr><td><b>${esc(x)}</b></td><td><select data-deptmod="${esc(x)}" aria-label="${esc(x)} works on">${Object.entries(MOD_LABEL).map(([k, l]) => `<option value="${k}" ${modOf(x) === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td><td class="r num">${d.users.filter(u => u.department === x && +u.active && u.role === 'employee').length}</td></tr>`).join('')}</table></div></div>
   <form class="panel" id="uform"><h2>${ed ? 'Edit ' + esc(ed.name) : 'Create employee login'}</h2>
    <div class="grid"><label class="f">Full name *<input name="name" required value="${esc(ed?.name)}"></label>
     <label class="f">Email (login ID) *<input name="email" type="email" ${ed ? 'disabled' : 'required'} value="${esc(ed?.email)}"></label>
@@ -528,7 +734,11 @@ routes.settings = async () => {
     <form class="row" id="rs-add" style="margin-top:8px"><input name="label" placeholder="New reason" required style="flex:1"><button class="btn ghost sm">Add</button></form></div>
    <div class="panel"><h2>Vendors</h2>${B.vendors.length ? `<div class="tw"><table><tr><th>Vendor</th><th>Phone</th><th>City</th><th>Email</th><th></th></tr>${B.vendors.map(v => `<tr><td><b>${esc(v.name)}</b></td><td class="num">${esc(v.phone || '')}</td><td>${esc(v.city || '')}</td><td>${esc(v.email || '')}</td><td class="r"><button class="btn link" data-delvendor="${v.id}">✕</button></td></tr>`).join('')}</table></div>` : '<div class="sub">No vendors yet.</div>'}
     <form class="grid g3 inset" id="vd-add" style="margin-top:10px"><label class="f">Vendor name *<input name="name" required></label><label class="f">Phone *<input name="phone" type="tel" required></label><label class="f">City *<input name="city" required></label><label class="f">Email<input name="email" type="email"></label><div style="align-self:end"><button class="btn ghost sm">+ Add vendor</button></div></form></div>
-  </div>`;
+  </div>
+  <div class="panel"><h2>Furniture & fixtures list</h2><p class="sub" style="margin-top:0">Shown as tick boxes on every production job.</p>
+   <div class="row">${(B.furniture_items || []).map((x, i) => `<span class="chip"><span>${esc(x)}</span><button class="btn link" data-delfurn="${i}" aria-label="Remove ${esc(x)}">✕</button></span>`).join('')}</div>
+   <form class="row" id="furn-add" style="margin-top:10px"><input name="item" placeholder="e.g. Podium" required style="max-width:260px"><button class="btn ghost sm">+ Add item</button></form></div>`;
+  $('#furn-add').onsubmit = async e => { e.preventDefault(); const v = new FormData(e.target).get('item').trim(); if (!v) return; await act(() => api('settings_save', { furniture_items: [...B.furniture_items, v] }), 'Added'); await reboot(); refresh(); };
   const sub = (id, a, msg) => { $(id).onsubmit = async e => { e.preventDefault(); await act(() => api(a, Object.fromEntries(new FormData(e.target))), msg); await reboot(); refresh(); }; };
   sub('#hol-add', 'holiday_add', 'Holiday added'); sub('#rs-add', 'reason_add', 'Reason added'); sub('#vd-add', 'vendor_add', 'Vendor added');
   $('#trackf-save').onclick = async () => { await act(() => api('settings_save', { track_from: $('#trackf').value }), 'Saved'); };
@@ -543,11 +753,15 @@ routes.account = async () => {
 
 // ---------- EVENTS ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
+  const t = e.target.closest('[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
   if (!t) return;
   const ds = t.dataset;
   try {
     if (ds.go) { if (e.target.closest('a,button,input,select,label')) return; location.hash = '#' + ds.go; return; }
+    if (ds.leditOpen) { C.leditId = +ds.leditOpen; await refresh(); const i = document.querySelector('form[data-ledit] [name=company]'); if (i) i.focus(); return; }
+    if (ds.lcancel) { C.leditId = null; return refresh(); }
+    if (ds.ldel) { if (!confirm('Delete this entry?')) return; await act(() => api('lead_del', { id: ds.ldel }), 'Deleted'); return refresh(); }
+    if (ds.delfurn !== undefined) { const l = B.furniture_items.filter((_, i) => i !== +ds.delfurn); await act(() => api('settings_save', { furniture_items: l }), 'Removed'); await reboot(); return refresh(); }
     if (ds.editchild) { C.editing = ds.editchild; await refresh(); const f = document.querySelector(`form[data-edit="${ds.editchild}"] input, form[data-edit="${ds.editchild}"] select`); if (f) f.focus(); return; }
     if (ds.canceledit) { C.editing = null; return refresh(); }
     if (ds.delchild) { const [kind, id] = ds.delchild.split(':'); if (!confirm('Delete this entry?')) return; await act(() => api('child_del', { kind, id }), 'Deleted'); return refresh(); }
@@ -588,6 +802,18 @@ document.addEventListener('click', async e => {
         $('#ri-confirm').innerHTML = `<div class="alert warn" style="margin-top:10px"><b>Submit ${draft.items.length} entr${draft.items.length > 1 ? 'ies' : 'y'}?</b><span class="m">After this you cannot edit today's report.</span><div class="row"><button class="btn" id="ri-final">Yes, submit</button><button class="btn ghost" id="ri-cancel">Go back</button></div></div>`; return;
       }
       case 'ri-cancel': $('#ri-confirm').innerHTML = ''; return;
+      case 'lx-edit-open': $('#lx-edit').hidden = false; return;
+      case 'lx-edit-cancel': $('#lx-edit').hidden = true; return;
+      case 'lx-paste-go': {
+        const lines = $('#lx-paste').value.split(/\r?\n/).map(l => l.split('\t').map(c => c.trim())).filter(r => r.some(Boolean));
+        if (lines.length && /company/i.test(lines[0][0] || '')) lines.shift();
+        if (!lines.length) return toast('Paste rows from Excel first', true);
+        t.disabled = true;
+        const r = await act(() => api('lead_bulk', { expo_id: C.lexpo.expo.id, rows: lines })).catch(() => null); t.disabled = false;
+        if (r) { toast(`${r.added} added${r.skipped.length ? ` · ${r.skipped.length} already in list, skipped` : ''}`); refresh(); }
+        return;
+      }
+      case 'ops-furn-add': { const v = ($('#ops-furn-new').value || '').trim(); if (!v) return; if (!C.ops.furniture.some(f => f.item.toLowerCase() === v.toLowerCase())) C.ops.furniture.push({ item: v, qty: 1 }); return drawOps(); }
       case 'ri-final': {
         t.disabled = true;
         const r = await act(() => api('report_submit', { items: draft.items })).catch(() => null);
@@ -605,6 +831,8 @@ document.addEventListener('input', e => {
   if (ds.ncc !== undefined) newClient.contacts[+ds.ncc][ds.k] = t.value;
   if (ds.nce && newClient) newClient.expo[ds.nce] = t.value;
   if (ds.ri !== undefined && ds.ri !== 'pv' && draft) draft.items[+ds.ri][ds.k] = t.value;
+  if (ds.op && C.ops && ds.op !== 'vinyl_total') setPath(C.ops, ds.op, t.value);
+  if (ds.furnq !== undefined && C.ops) { const f = C.ops.furniture.find(x => x.item === ds.furnq); if (f) f.qty = t.value; }
   if (['agreed', 'gst_rate', 'gst_on'].includes(ds.pf) && C.project && $('#calc-total')) {
     const over = {}; ['agreed', 'gst_rate', 'gst_on'].forEach(k => { const el = document.querySelector(`[data-pf="${k}"]`); if (el) over[k] = el.value; });
     const c = calcBill(C.project, over); $('#calc-gst').value = inr(c.gst); $('#calc-total').value = inr(c.total);
@@ -627,7 +855,11 @@ document.addEventListener('change', async e => {
     if (ds.rfile !== undefined) { draft.files[+ds.rfile].push(...t.files); return refresh(); }
     if (ds.woff !== undefined) { const i = +ds.woff; const w = t.checked ? [...B.weekly_off, i] : B.weekly_off.filter(x => x !== i); await act(() => api('settings_save', { weekly_off: w }), 'Weekly off saved'); await reboot(); return; }
     if (t.id === 'fm-dept') { C.fmDept = t.value; return refresh(); }
-    if (ds.recdept !== undefined) { const set = new Set(B.record_depts); t.checked ? set.add(ds.recdept) : set.delete(ds.recdept); await act(() => api('settings_save', { record_depts: [...set] }), 'Access updated'); await reboot(); return; }
+    if (ds.deptmod !== undefined) { await act(() => api('settings_save', { dept_modules: { [ds.deptmod]: t.value } }), `${ds.deptmod}: ${MOD_LABEL[t.value]}`); await reboot(); return refresh(); }
+    if (ds.assign && C.project) { await act(() => api(ds.assign === 'designer' ? 'assign_designer' : 'assign_ops', { project_id: C.project.id, user_id: t.value }), +t.value ? 'Assigned' : 'Unassigned'); return refresh(); }
+    if (t.id === 'lxu') { C.lxu = t.value; return refresh(); }
+    if (ds.furn !== undefined && C.ops) { const it = ds.furn; C.ops.furniture = t.checked ? [...C.ops.furniture.filter(f => f.item !== it), { item: it, qty: 1 }] : C.ops.furniture.filter(f => f.item !== it); return drawOps(); }
+    if (ds.op === 'vinyl_total' && C.ops) { const nn = Math.max(0, Math.min(50, parseInt(t.value) || 0)); C.ops.vinyl_total = nn; const v = C.ops.vinyl.slice(0, nn); while (v.length < nn) v.push({ w: '', wu: 'ft', h: '', hu: 'ft' }); C.ops.vinyl = v; return drawOps(); }
     if (t.tagName === 'SELECT' && t.name === 'vendor_id') {
       // "+ Add new vendor…" shows a name box right under the dropdown
       const form = t.closest('form'), box = form.querySelector('.nv');
@@ -647,6 +879,16 @@ document.addEventListener('change', async e => {
 
 document.addEventListener('submit', async e => {
   const f = e.target;
+  if (f.id === 'lead-add') {
+    e.preventDefault(); const btn = f.querySelector('button'); btn.disabled = true;
+    const r = await act(() => api('lead_add', { expo_id: C.lexpo.expo.id, ...Object.fromEntries(new FormData(f)) }), 'Added').catch(() => null);
+    btn.disabled = false; if (!r) return;
+    await refresh(); const i = $('#lead-add [name=company]'); if (i) { i.focus(); i.scrollIntoView({ block: 'center' }); } return;
+  }
+  if (f.dataset.ledit) { e.preventDefault(); const ok = await act(() => api('lead_update', { id: f.dataset.ledit, ...Object.fromEntries(new FormData(f)) }), 'Updated').catch(() => null); if (ok) { C.leditId = null; refresh(); } return; }
+  if (f.id === 'lx-edit') { e.preventDefault(); const ok = await act(() => api('lexpo_save', { id: C.lexpo.expo.id, ...Object.fromEntries(new FormData(f)) }), 'Saved').catch(() => null); if (ok) refresh(); return; }
+  if (f.dataset.dsave) { e.preventDefault(); const ok = await act(() => api('design_save', { id: f.dataset.dsave, ...Object.fromEntries(new FormData(f)) }), 'Saved').catch(() => null); if (ok) refresh(); return; }
+  if (f.id === 'opsform') { e.preventDefault(); const ok = await act(() => api('ops_save', { id: f.dataset.pid, ops: C.ops }), 'Production details saved').catch(() => null); if (ok) refresh(); return; }
   if (f.dataset.edit && C.project) {
     e.preventDefault(); const [kind, id] = f.dataset.edit.split(':');
     try { await act(() => api('child_update', { kind, id, data: Object.fromEntries(new FormData(f)) }), 'Updated'); C.editing = null; refresh(); } catch {}
