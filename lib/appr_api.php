@@ -5,9 +5,9 @@ if (!defined('ZEST_API')) exit;
 
 function appr_row($id) { $a = one('SELECT * FROM ' . T('approvals') . ' WHERE id = ?', [(int) $id]); if (!$a) fail('Approval request not found.', 404); return $a; }
 function appr_list($where, $p, $limit = 500) {
-  $rows = all('SELECT a.*, pr.expo, pr.location, pr.start_date, pr.owner_id, pr.client_id, c.company, u.name AS requested_by_name FROM ' . T('approvals') . ' a JOIN ' . T('projects') . ' pr ON pr.id = a.project_id JOIN ' . T('clients') . ' c ON c.id = pr.client_id LEFT JOIN ' . T('users') . " u ON u.id = a.requested_by WHERE $where ORDER BY a.requested_at DESC, a.id DESC LIMIT $limit", $p);
+  $rows = all('SELECT a.*, pr.expo, pr.location, pr.start_date, pr.owner_id, pr.client_id, c.company, u.name AS requested_by_name FROM ' . T('approvals') . ' a JOIN ' . T('projects') . ' pr ON pr.id = a.project_id JOIN ' . T('clients') . ' c ON c.id = pr.client_id LEFT JOIN ' . T('users') . " u ON u.id = a.requested_by WHERE a.status <> 'draft' AND ($where) ORDER BY a.requested_at DESC, a.id DESC LIMIT $limit", $p);
   $fl = files_of('appr', array_column($rows, 'id'));
-  foreach ($rows as &$r) { $r['files'] = $fl[$r['id']] ?? []; $r['stage'] = $r['sent_on'] ? 'sent' : $r['status']; } unset($r);
+  foreach ($rows as &$r) { $r['files'] = $fl[$r['id']] ?? []; $r['stage'] = $r['sent_on'] ? 'sent' : $r['status']; $r['has_doc'] = $r['doc'] ? 1 : 0; unset($r['doc']); } unset($r);
   return $rows;
 }
 function can_sales() { global $RECORDS; if (!$RECORDS) fail('Your department does not send designs or quotes.', 403); }
@@ -35,7 +35,7 @@ case 'appr_request':
 case 'appr_cancel':
   can_sales();
   $a = appr_row($in['id'] ?? 0); project_row($a['project_id']);
-  if ($a['status'] !== 'pending') fail('Only a request still waiting for approval can be withdrawn.');
+  if (!in_array($a['status'], ['pending', 'draft'], true)) fail('Only a request still waiting for approval can be withdrawn.');
   if (!$ADMIN && (int) $a['requested_by'] !== $MID) fail('Only the person who asked can withdraw it.', 403);
   $files = all('SELECT * FROM ' . T('files') . " WHERE entity = 'appr' AND entity_id = ?", [$a['id']]);
   q('DELETE FROM ' . T('files') . " WHERE entity = 'appr' AND entity_id = ?", [$a['id']]);
@@ -45,12 +45,14 @@ case 'appr_cancel':
 
 case 'appr_decide':
   need_admin();
-  $a = appr_row($in['id'] ?? 0);
+  appr_row($in['id'] ?? 0); lock_row('approvals', $in['id']); $a = appr_row($in['id']);
+  if ($a['status'] === 'draft') fail('This quote is still a draft.');
   if ($a['sent_on']) fail('This version was already sent to the customer.');
   $dec = in_array($in['decision'] ?? '', ['approved', 'rejected'], true) ? $in['decision'] : fail('Choose approve or reject.');
   $note = s($in['note'] ?? null, 4000);
   if ($dec === 'rejected' && !$note) fail('Write what needs to change, so sales can fix it.');
-  upd('approvals', $a['id'], ['status' => $dec, 'decided_by' => $me['name'], 'decided_at' => now(), 'admin_note' => $note]);
+  $qno = []; if ($dec === 'approved' && $a['doc'] && !$a['quote_no']) { require_once __DIR__ . '/quote.php'; $qno = ['quote_no' => quote_no_next(today())]; }
+  upd('approvals', $a['id'], ['status' => $dec, 'decided_by' => $me['name'], 'decided_at' => now(), 'admin_note' => $note] + $qno);
   if ($dec === 'approved' && $a['kind'] === 'design') upd('projects', $a['project_id'], ['design_approved_by' => $me['name']]);
   out(['ok' => true]);
 
@@ -65,13 +67,60 @@ case 'appr_sent':
   upd('approvals', $a['id'], ['sent_on' => $on, 'sent_by' => $me['name'], 'sent_at' => now()]);
   if ($a['kind'] === 'quote') {   // keeps "Quote versions sent to client", offered price and order status in step
     $qv = (int) val('SELECT COALESCE(MAX(version),0)+1 FROM ' . T('quotes') . ' WHERE project_id = ?', [$p['id']]);
-    $qid = ins('quotes', ['project_id' => $p['id'], 'version' => $qv, 'qdate' => $on, 'amount' => $a['amount'], 'approved_by' => $a['decided_by'], 'notes' => 'Approval request V' . $a['version'] . ($a['note'] ? ' — ' . $a['note'] : '')]);
+    $qid = ins('quotes', ['project_id' => $p['id'], 'version' => $qv, 'qdate' => $on, 'amount' => $a['amount'], 'approved_by' => $a['decided_by'], 'notes' => ($a['quote_no'] ? "Quote {$a['quote_no']} (generated) · " : '') . 'Approval request V' . $a['version'] . ($a['note'] ? ' — ' . $a['note'] : '')]);
     foreach (all('SELECT * FROM ' . T('files') . " WHERE entity = 'appr' AND entity_id = ?", [$a['id']]) as $f)   // same PDF shows on the sent quote
       ins('files', ['entity' => 'quote', 'entity_id' => $qid, 'orig_name' => $f['orig_name'], 'stored_name' => $f['stored_name'], 'mime' => $f['mime'], 'size' => $f['size'], 'uploaded_by' => $MID, 'created_at' => now()]);
     upd('projects', $p['id'], ['offered' => $a['amount']] + ($p['status'] === 'enquiry' ? ['status' => 'quoted'] : []));
   }
   db()->commit();
   out(['ok' => true]);
+
+
+// ----- customer approved the design (sales marks it) -----
+case 'design_client_ok':
+  can_sales();
+  $p = project_row($in['project_id'] ?? 0); $on = d($in['on'] ?? null) ?? today();
+  if (!empty($in['undo'])) { need_admin(); upd('projects', $p['id'], ['design_ok_on' => null, 'design_ok_by' => null, 'design_ok_ver' => null]); out(['ok' => true]); }
+  $ver = null;
+  if (!empty($in['approval_id'])) {
+    $a = appr_row($in['approval_id']); if ((int) $a['project_id'] !== (int) $p['id'] || $a['kind'] !== 'design') fail('Pick a design version of this order.');
+    if (!$a['sent_on']) fail('Mark this design as sent to the customer first.');
+    if ($on < $a['sent_on']) fail('Customer approval date cannot be before the date it was sent.');
+    $ver = (int) $a['version'];
+  } elseif (!$ADMIN) fail('Pick the design version the customer approved.');
+  upd('projects', $p['id'], ['design_ok_on' => $on, 'design_ok_by' => $me['name'], 'design_ok_ver' => $ver]);
+  out(['ok' => true]);
+
+// ----- quote generator -----
+case 'quote_prefill':
+  can_sales(); require_once __DIR__ . '/quote.php';
+  $p = project_row($in['project_id'] ?? 0); $c = one('SELECT * FROM ' . T('clients') . ' WHERE id = ?', [$p['client_id']]);
+  $from = !empty($in['from_id']) ? appr_row($in['from_id']) : null;
+  if ($from && ((int) $from['project_id'] !== (int) $p['id'] || !$from['doc'])) fail('That quote is not from this order.');
+  $doc = $from ? json_decode($from['doc'], true) : quote_prefill($p, $c, $me);
+  if ($from && $from['status'] !== 'draft') $doc['date'] = today();
+  $ver = $from && $from['status'] === 'draft' ? (int) $from['version'] : (int) val('SELECT COALESCE(MAX(version),0)+1 FROM ' . T('approvals') . " WHERE project_id = ? AND kind = 'quote'", [$p['id']]);
+  out(['doc' => $doc, 'version' => $ver, 'draft_id' => $from && $from['status'] === 'draft' ? (int) $from['id'] : null, 'design_ok' => (bool) $p['design_ok_on'],
+    'project' => ['id' => (int) $p['id'], 'expo' => $p['expo'], 'company' => $c['company']], 'company' => setting('company', [])]);
+
+case 'quote_save':   // save as draft, or send to admin for approval
+  can_sales(); require_once __DIR__ . '/quote.php';
+  $p = project_row($in['project_id'] ?? 0);
+  if (!$p['design_ok_on']) fail('Mark the design as approved by the customer first — then the quote can be generated.');
+  $doc = quote_clean((array) ($in['doc'] ?? []));
+  $submit = !empty($in['submit']); $note = s($in['note'] ?? null, 4000);
+  tx();
+  $row = ['amount' => $doc['grand'], 'doc' => json_encode($doc, JSON_UNESCAPED_UNICODE), 'note' => $note, 'status' => $submit ? 'pending' : 'draft', 'requested_at' => now()];
+  if (!empty($in['id'])) {
+    $a = appr_row($in['id']); lock_row('approvals', $a['id']); $a = appr_row($a['id']);
+    if ((int) $a['project_id'] !== (int) $p['id'] || $a['status'] !== 'draft') fail('This quote was already sent for approval. Make a new version instead.');
+    upd('approvals', $a['id'], $row); $id = (int) $a['id']; $ver = (int) $a['version'];
+  } else {
+    $ver = (int) val('SELECT COALESCE(MAX(version),0)+1 FROM ' . T('approvals') . " WHERE project_id = ? AND kind = 'quote'", [$p['id']]);
+    $id = ins('approvals', $row + ['project_id' => $p['id'], 'kind' => 'quote', 'version' => $ver, 'requested_by' => $MID]);
+  }
+  db()->commit();
+  out(['id' => $id, 'version' => $ver, 'status' => $row['status']]);
 
 // ----- admin: sales log -----
 case 'sales_log':

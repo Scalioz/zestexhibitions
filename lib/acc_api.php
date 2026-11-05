@@ -211,7 +211,7 @@ case 'acc_account_save':
 case 'acc_company_save':
   need_acc();
   $c = setting('company', []);
-  foreach (['name', 'address', 'phone', 'gstin', 'pan', 'state', 'bank_name', 'bank_acno', 'bank_ifsc', 'sac', 'terms'] as $k) if (array_key_exists($k, $in)) $c[$k] = s($in[$k], 1000) ?? '';
+  foreach (['name', 'address', 'phone', 'email', 'website', 'gstin', 'pan', 'state', 'bank_benef', 'bank_name', 'bank_branch', 'bank_acno', 'bank_ifsc', 'bank_swift', 'bank_micr', 'sac', 'terms'] as $k) if (array_key_exists($k, $in)) $c[$k] = s($in[$k], 1000) ?? '';
   if ($bf = d($in['books_from'] ?? null)) $c['books_from'] = $bf;
   set_setting('company', $c); out(['ok' => true]);
 
