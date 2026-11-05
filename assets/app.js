@@ -107,7 +107,7 @@ async function route() {
 const ADMIN_ONLY = { invappr: 1, clientlog: 1, saleslog: 1, leadlog: 1, jobs: 1, reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
 const RECORDS_ONLY = { refs: 1, clients: 1, client: 1, project: 1, newclient: 1, qgen: 1 };
 const ACC_ROUTES = { acc: 1, entry: 1, jv: 1, invoices: 1, invnew: 1, inv: 1, invappr: 1, claims: 1, topost: 1, books: 1, coa: 1, accset: 1 };
-const MODULE_ONLY = { myinv: ['records'], myexp: ['records', 'ops'],  leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
+const MODULE_ONLY = { contacts: ['records', 'ops', 'leads', 'calls'], myinv: ['records'], myexp: ['records', 'ops'],  leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
 async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); window.scrollTo(0, y); }
 
 function renderNav(cur) {
@@ -116,12 +116,12 @@ function renderNav(cur) {
   const L = (k, l, b) => `<a href="#${k}" class="${on === k ? 'on' : ''}">${l}${b ? `<span class="badge">${b}</span>` : ''}</a>`;
   $('#nav').innerHTML = isAdmin()
     ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('saleslog', 'Sales log', B.pending_approvals || '')}${L('invappr', 'Invoice approvals', B.inv_pending || '')}${L('leadlog', 'Expo data log')}${L('jobs', 'Design & production')}${L('reportlog', 'Daily reports', B.flags || '')}
-       <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('dnq', 'Do-not-quote list')}
+       <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('dnq', 'Do-not-quote list')}
        <div class="sec">Accounts</div>${L('acc', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}
        <div class="sec">Admin</div>${L('team', 'Team')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
     : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('report', 'Daily report', B.flags || '')}`
-    : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('report', 'Daily report', B.flags || '')}`
-    : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('report', 'Daily report', B.flags || '')}`;
+    : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('report', 'Daily report', B.flags || '')}`
+    : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') + L('contacts', 'Contacts') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('contacts', 'Contacts') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('report', 'Daily report', B.flags || '')}`;
 }
 
 // ---------- HOME ----------
@@ -906,6 +906,80 @@ routes.refs = async () => {
 };
 function refAlert() { const n = B.ref_new; if (!n) return; const w = $('.welcome') || $('.head'); if (w) w.insertAdjacentHTML('afterend', `<div class="alert warn"><b>${n} new referral lead${n > 1 ? 's' : ''} for you</b><span class="m">Handed to you by admin. <a href="#refs">Open referral leads →</a></span></div>`); }
 
+
+// ---------- contacts directory + business-card scanning ----------
+const SRC_PILL = { 'Business card': 'p-received', 'Added by hand': 'p-off', Client: 'p-ok', 'Client contact': 'p-ok', 'Referral lead': 'p-quoted' };
+const CARD_F = [['name', 'Name'], ['designation', 'Designation'], ['company', 'Company'], ['phone', 'Phone'], ['phone2', 'Other phones'], ['email', 'Email'], ['email2', 'Other emails'], ['website', 'Website'], ['city', 'City'], ['tag', 'Tag / where met'], ['address', 'Address'], ['note', 'Note']];
+function cardForm(c, id) {
+  return `<form class="inset" data-cform="${id || 0}" style="margin-top:6px"><div class="grid g3">${CARD_F.map(([k, l]) => `<label class="f ${k === 'address' || k === 'note' ? 'wide' : ''}">${l}${k === 'address' || k === 'note' ? `<textarea name="${k}" rows="2">${esc(c[k] || '')}</textarea>` : `<input name="${k}" value="${esc(c[k] || '')}" ${k === 'tag' ? 'list="ctags"' : ''} ${k === 'email' ? 'type="email"' : ''}>`}</label>`).join('')}
+   ${isAdmin() ? `<label class="f">Belongs to<select name="user_id">${B.users.filter(u => +u.active).map(u => `<option value="${u.id}" ${+u.id === +(c.user_id || B.me.id) ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>` : ''}</div>
+   <div class="row" style="margin-top:8px"><button class="btn sm">${id ? 'Save changes' : 'Add contact'}</button><button type="button" class="btn link" data-cclose="1">Cancel</button></div></form>`;
+}
+async function scaleForScan(file) {   // keep cards readable: only very large photos are scaled (to 3600 px)
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type) || !window.createImageBitmap) return file;
+  try {
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); const k = Math.min(1, 3600 / Math.max(bmp.width, bmp.height));
+    if (k >= 1 && file.size < 8 * 1048576) { bmp.close && bmp.close(); return file; }
+    const cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k); cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+    const b = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.9)); return b ? new File([b], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }) : file;
+  } catch { return file; }
+}
+routes.contacts = async () => {
+  const f = C.dirf || (C.dirf = { q: '', source: '', tag: '', user_id: '' });
+  const [d, sc] = await Promise.all([api('dir_list', f), api('card_scans')]); C.dir = d.rows; C.scanAi = sc.ai;
+  const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
+  const res = C.scanRes || [];
+  view().innerHTML = `<div class="head"><div><h1>Contacts</h1><p>${isAdmin() ? 'Every contact in the company in one place — business cards, clients, expo data from research & telecalling, and referral leads. The tag shows where each came from and who added it.' : 'Contacts you have brought in — business cards, your clients and referral leads.'}</p></div>
+   <div class="row"><button class="btn" id="scan-open">📷 Scan business cards</button><button class="btn ghost" id="cadd-open">+ Add contact</button><a class="btn ghost" href="contacts_export.php?${qs}">⬇ Export to Excel</a></div></div>
+  <datalist id="ctags">${[...new Set([...d.tags, ...d.expos])].map(t => `<option value="${esc(t)}">`).join('')}</datalist>
+  <form class="panel" id="scanf" ${C.scanOpen ? '' : 'hidden'}><h2>Scan business cards</h2>
+   <p class="sub" style="margin-top:0">Lay the cards flat in rows, not overlapping, in good light, and take one photo (up to ~30 cards). Several photos can be added at once. Each card is saved as your contact.</p>
+   ${sc.ai ? '' : `<div class="alert warn"><b>Automatic card reading is not switched on yet</b><span class="m">${isAdmin() ? 'Add the key under <a href="#settings">Holidays & lists → Business card reading</a>.' : 'Ask admin to switch it on.'} You can still upload the photo and type the cards in.</span></div>`}
+   <div class="grid g3"><label class="f">Tag — where were these cards collected? *<input name="tag" list="ctags" required value="${esc(C.scanTag || '')}" placeholder="e.g. IMTEX 2026, Bengaluru"></label>
+    <label class="f wide">Photos *<input type="file" name="photos" accept="image/*" multiple required></label></div>
+   <div class="row" style="margin-top:10px"><button class="btn">Read cards</button><span class="sub" id="scan-prog"></span></div></form>
+  ${res.length ? `<div class="panel" id="scanres"><div class="ph"><h2>Just scanned</h2><button class="btn link" id="scanres-clear">Done</button></div>${res.map(r => `<div class="inset" style="margin-top:8px">
+    <div class="row" style="justify-content:space-between"><b>${esc(r.name)}</b><span class="sub">${r.manual ? 'photo saved — type the cards in below' : r.error ? '' : `${r.cards.length} card${r.cards.length === 1 ? '' : 's'} read · ${r.added} new · ${r.cards.length - r.added} already in contacts`}</span></div>
+    ${r.error ? `<div class="alert bad" style="margin-top:6px"><b>Could not read this photo</b><span class="m">${esc(r.error)} The photo is saved; you can type the cards in.</span></div>` : ''}
+    ${r.file_id ? `<a href="file.php?id=${r.file_id}" target="_blank" rel="noopener"><img src="file.php?id=${r.file_id}" alt="Scanned cards" style="max-height:140px;border-radius:8px;margin-top:6px"></a>` : ''}
+    ${r.cards.length ? `<div class="tw" style="margin-top:6px"><table><tr><th>Name</th><th>Company</th><th>Phone</th><th>Email</th><th></th></tr>${r.cards.map(c => `<tr><td><b>${esc(c.name)}</b><div class="sub">${esc(c.designation || '')}</div></td><td>${esc(c.company)}</td><td class="num">${esc(c.phone)}${c.phone2 ? `<div class="sub">${esc(c.phone2)}</div>` : ''}</td><td>${esc(c.email)}</td>
+      <td>${c.dup ? '<span class="pill p-off">already in contacts — updated</span>' : c.known ? `<span class="pill p-quoted">${esc(c.known)}</span>` : '<span class="pill p-ok">new</span>'} <button class="btn link" data-cedit="${c.id}">Edit</button></td></tr>`).join('')}</table></div>` : ''}
+    ${r.manual || r.error || !r.cards.length ? `<button class="btn ghost sm" data-cnew="${esc(C.scanTag || '')}" style="margin-top:6px">+ Type a card in</button>` : ''}</div>`).join('')}</div>` : ''}
+  <div id="cadd">${C.cnew !== undefined && C.cnew !== null ? `<div class="panel"><h2>Add contact</h2>${cardForm({ tag: C.cnew }, 0)}</div>` : ''}</div>
+  <form class="panel row" id="dirf" style="align-items:flex-end"><label class="f" style="flex:1;min-width:200px">Search name, company, phone, email, tag<input name="q" value="${esc(f.q)}"></label>
+   <label class="f">Source<select name="source"><option value="">All</option>${[['card', 'Business cards & added by hand'], ['client', 'Clients'], ['expo', 'Expo data (research / telecalling)'], ['referral', 'Referral leads']].map(([k, l]) => `<option value="${k}" ${f.source === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+   <label class="f">Tag<select name="tag"><option value="">Any</option>${d.tags.map(t => `<option ${f.tag === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
+   ${isAdmin() ? `<label class="f">Added by<select name="user_id"><option value="">Everyone</option>${B.users.map(u => `<option value="${u.id}" ${+f.user_id === +u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>` : ''}<button class="btn ghost">Apply</button></form>
+  <div class="panel"><div class="ph"><h2>${d.total} contact${d.total === 1 ? '' : 's'}</h2><div class="row">${Object.entries(d.counts).map(([k, n]) => `<span class="pill ${SRC_PILL[k] || 'p-enquiry'}">${esc(k)} · ${n}</span>`).join('')}</div></div>
+   ${d.rows.length ? `<div class="tw"><table><tr><th>Name</th><th>Company</th><th>Phone</th><th>Email</th><th>City</th><th>Where from</th><th>Added by</th><th></th></tr>
+    ${d.rows.map(r => `<tr><td><b>${esc(r.name || '—')}</b>${r.designation ? `<div class="sub">${esc(r.designation)}</div>` : ''}</td><td>${esc(r.company || '')}</td>
+     <td class="num">${String(r.phone || '').split(',').filter(x => x.trim()).map(x => `<div><a href="tel:${esc(x.replace(/[^\d+]/g, ''))}">${esc(x.trim())}</a></div>`).join('')}</td><td>${String(r.email || '').split(',').filter(x => x.trim()).map(x => `<div><a href="mailto:${esc(x.trim())}">${esc(x.trim())}</a></div>`).join('')}</td><td>${esc(r.city || '')}</td>
+     <td><span class="pill ${SRC_PILL[r.source] || 'p-enquiry'}">${esc(r.source)}</span>${r.tag && !['Client'].includes(r.tag) ? `<div class="sub">${esc(r.tag)}</div>` : ''}</td><td>${esc(r.by)}<div class="sub">${fd(r.at)}</div></td>
+     <td class="r" style="white-space:nowrap">${r.kind === 'card' && (isAdmin() || +r.user_id === +B.me.id) ? `<button class="btn link" data-cedit="${r.id}">Edit</button><button class="btn link" data-cdel="${r.id}">Delete</button>` : r.link ? `<a class="btn link" href="${r.link}">Open</a>` : ''}</td></tr>
+     ${r.kind === 'card' && +C.cedit === +r.id ? `<tr><td colspan="8">${cardForm(r.raw || r, r.id)}</td></tr>` : ''}`).join('')}</table></div>${d.total > d.rows.length ? `<div class="sub" style="margin-top:8px">Showing the latest ${d.rows.length}. Search or export to see all ${d.total}.</div>` : ''}`
+    : blank('No contacts here yet. Scan the business cards from your next expo.')}</div>`;
+  $('#dirf').onsubmit = e => { e.preventDefault(); C.dirf = Object.fromEntries(new FormData(e.target)); refresh(); };
+  $('#scan-open').onclick = () => { C.scanOpen = true; $('#scanf').hidden = false; $('#scanf [name=tag]').focus(); };
+  $('#cadd-open').onclick = () => { C.cnew = f.tag || ''; refresh(); };
+  const clr = $('#scanres-clear'); if (clr) clr.onclick = () => { C.scanRes = []; refresh(); };
+  $('#scanf').onsubmit = async e => {
+    e.preventDefault(); const fm = e.target, tag = fm.tag.value.trim(), files = [...fm.photos.files]; if (!tag || !files.length) return;
+    C.scanTag = tag; const btn = fm.querySelector('button'); btn.disabled = true; const out = [];
+    for (let i = 0; i < files.length; i++) {
+      $('#scan-prog').textContent = `Reading photo ${i + 1} of ${files.length}… (about 20–60 seconds each)`;
+      try {
+        const file = await scaleForScan(files[i]); const fd2 = new FormData(); fd2.append('tag', tag); fd2.append('file', file);
+        const r = await fetch('api.php?a=card_scan', { method: 'POST', headers: { 'X-CSRF': CSRF }, body: fd2, credentials: 'same-origin' }); const j = await r.json().catch(() => ({ error: 'The server did not answer. Try again with a smaller photo.' }));
+        if (!r.ok && !j.scan_id) throw new Error(j.error || 'Upload failed');
+        out.push({ name: files[i].name, ...j });
+      } catch (err) { out.push({ name: files[i].name, cards: [], error: err.message }); }
+    }
+    btn.disabled = false; C.scanRes = [...out, ...(C.scanRes || [])]; C.scanOpen = false;
+    const n = out.reduce((s, r) => s + (r.added || 0), 0); toast(out.some(r => r.manual) ? 'Photos saved — type the cards in' : `${n} new contact${n === 1 ? '' : 's'} added`);
+    refresh();
+  };
+};
+
 routes.saleslog = async () => {
   const f = C.slog || (C.slog = { status: 'pending', kind: '', user_id: '', q: '', from: '', to: '' });
   const d = await api('sales_log', f);
@@ -1338,6 +1412,10 @@ routes.settings = async () => {
    <div class="panel"><h2>Vendors</h2>${B.vendors.length ? `<div class="tw"><table><tr><th>Vendor</th><th>Phone</th><th>City</th><th>Email</th><th></th></tr>${B.vendors.map(v => `<tr><td><b>${esc(v.name)}</b></td><td class="num">${esc(v.phone || '')}</td><td>${esc(v.city || '')}</td><td>${esc(v.email || '')}</td><td class="r"><button class="btn link" data-delvendor="${v.id}">✕</button></td></tr>`).join('')}</table></div>` : '<div class="sub">No vendors yet.</div>'}
     <form class="grid g3 inset" id="vd-add" style="margin-top:10px"><label class="f">Vendor name *<input name="name" required></label><label class="f">Phone *<input name="phone" type="tel" required></label><label class="f">City *<input name="city" required></label><label class="f">Email<input name="email" type="email"></label><div style="align-self:end"><button class="btn ghost sm">+ Add vendor</button></div></form></div>
   </div>
+  <form class="panel" id="aiset"><h2>Business card reading</h2><p class="sub" style="margin-top:0">Photos of business cards are read automatically by an AI vision service (Anthropic Claude). Paste the API key from console.anthropic.com → API keys. The service bills a small amount per photo to your Anthropic account.</p>
+   <div class="grid g3"><label class="f">API key ${d.cards_ai.has_key ? `<span class="pill p-ok">saved · ${esc(d.cards_ai.hint)}</span>` : '<span class="pill p-bad">not set</span>'}<input name="key" type="password" autocomplete="off" placeholder="${d.cards_ai.has_key ? 'Leave blank to keep the saved key' : 'sk-ant-…'}"></label>
+    <label class="f">Model<input name="model" value="${esc(d.cards_ai.model)}"></label></div>
+   <div class="row" style="margin-top:10px"><button class="btn sm">Save</button>${d.cards_ai.has_key ? '<button type="button" class="btn ghost sm" id="ai-test">Test connection</button><button type="button" class="btn link" id="ai-remove">Remove key</button>' : ''}</div></form>
   <form class="panel" id="qdefs"><h2>Quote template</h2><p class="sub" style="margin-top:0">Every generated quote starts with these. Sales can still change them on each quote. One point per line.</p>
    <div class="grid g3"><label class="f">Valid for (days)<input type="number" name="valid_days" min="1" value="${d.quote_defaults.valid_days}"></label><label class="f wide">Default scope of work<input name="scope" value="${esc(d.quote_defaults.scope)}"></label></div>
    <div class="grid" style="margin-top:10px">${[['payment_terms', 'Payment terms'], ['notes', 'Important notes & terms ({valid} = validity days)'], ['client_resp', 'Client responsibilities & ownership'], ['excludes', 'Quotation does not include']].map(([k, l]) => `<label class="f">${l}<textarea name="${k}" rows="${d.quote_defaults[k].length + 1}">${esc(d.quote_defaults[k].join('\n'))}</textarea></label>`).join('')}</div>
@@ -1355,6 +1433,9 @@ routes.settings = async () => {
   const sub = (id, a, msg) => { $(id).onsubmit = async e => { e.preventDefault(); await act(() => api(a, Object.fromEntries(new FormData(e.target))), msg); await reboot(); refresh(); }; };
   sub('#hol-add', 'holiday_add', 'Holiday added'); sub('#rs-add', 'reason_add', 'Reason added'); sub('#vd-add', 'vendor_add', 'Vendor added');
   $('#trackf-save').onclick = async () => { await act(() => api('settings_save', { track_from: $('#trackf').value }), 'Saved'); };
+  $('#aiset').onsubmit = async e => { e.preventDefault(); await act(() => api('cards_ai_save', Object.fromEntries(new FormData(e.target))), 'Saved'); refresh(); };
+  if ($('#ai-test')) $('#ai-test').onclick = async () => { toast('Testing…'); await act(() => api('cards_ai_test'), 'Connected — card reading is working').catch(() => null); };
+  if ($('#ai-remove')) $('#ai-remove').onclick = async () => { if (!confirm('Remove the key? Card photos will then need typing in.')) return; await act(() => api('cards_ai_save', { remove: 1 }), 'Key removed'); refresh(); };
   $('#qdefs').onsubmit = async e => { e.preventDefault(); await act(() => api('settings_save', { quote_defaults: Object.fromEntries(new FormData(e.target)) }), 'Quote template saved'); };
   $('#fq-save').onclick = async () => { await act(() => api('settings_save', { file_quality: $('#fq').value }), 'Saved — applies to new uploads'); await reboot(); };
   const run = $('#shr-run'); if (run) run.onclick = async () => {
@@ -1374,13 +1455,17 @@ routes.account = async () => {
 
 // ---------- EVENTS ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-reft],[data-refadd],[data-refclose],[data-refreopen],[data-dokundo],[data-caedit],[data-cadel],[data-repedit],[data-repdel],[data-repadd],[data-reprm],[data-clt],[data-invt],[data-invreqtax],[data-invconv],[data-ildel],[data-post],[data-postskip],[data-coaedit],[data-cledit],[data-cldel],[data-adec],[data-acancel],[data-asent],[data-slt],[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
+  const t = e.target.closest('[data-cedit],[data-cdel],[data-cnew],[data-cclose],[data-reft],[data-refadd],[data-refclose],[data-refreopen],[data-dokundo],[data-caedit],[data-cadel],[data-repedit],[data-repdel],[data-repadd],[data-reprm],[data-clt],[data-invt],[data-invreqtax],[data-invconv],[data-ildel],[data-post],[data-postskip],[data-coaedit],[data-cledit],[data-cldel],[data-adec],[data-acancel],[data-asent],[data-slt],[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
   if (!t) return;
   const ds = t.dataset;
   try {
     if (ds.go && ds.acc && !e.target.closest('a,button,input,select,label')) { C.bf = Object.assign(C.bf || {}, { account_id: ds.acc }); C.br = 'ledger'; }
     if (ds.go) { if (e.target.closest('a,button,input,select,label')) return; location.hash = '#' + ds.go; return; }
     if (ds.coaedit) { e.stopPropagation(); C.coaEdit = +ds.coaedit; await refresh(); window.scrollTo(0, 0); return; }
+    if (ds.cedit) { C.cedit = +ds.cedit; C.cnew = null; await refresh(); const fm = document.querySelector(`[data-cform="${ds.cedit}"]`); if (fm) fm.scrollIntoView({ block: 'center' }); return; }
+    if (ds.cdel) { if (!confirm('Delete this contact?')) return; await act(() => api('card_del', { id: ds.cdel }), 'Contact deleted'); return refresh(); }
+    if (ds.cnew !== undefined) { C.cnew = ds.cnew; C.cedit = null; await refresh(); $('#cadd').scrollIntoView({ block: 'start' }); return; }
+    if (ds.cclose) { C.cedit = null; C.cnew = null; return refresh(); }
     if (ds.reft !== undefined) { e.preventDefault(); C.reff = { status: ds.reft }; return refresh(); }
     if (ds.refadd) { const r = C.refs.find(x => +x.id === +ds.refadd);
       newClient = { company: r.company, email: '', phone: r.phone, person: r.name, designation: '', city: '', location: '', gst_no: '', notes: `Referral lead from ${r.by_name}${r.area ? ' · Area: ' + r.area : ''}${r.note ? ' — ' + r.note : ''}`, owner_id: '', contacts: [], cards: [], briefs: [], gstcert: [],
@@ -1581,6 +1666,8 @@ document.addEventListener('submit', async e => {
   if (f.dataset.invreply) { e.preventDefault(); const ok = await act(() => api('inv_reply', { id: f.dataset.invreply, text: f.querySelector('[name=text]').value }), 'Sent').catch(() => null); if (ok) refresh(); return; }
   if (f.dataset.invcorr) { e.preventDefault(); const ok = await act(() => api('inv_correct', { id: f.dataset.invcorr, reason: f.querySelector('[name=reason]').value }), 'Reopened for correction').catch(() => null); if (ok) { await reboot(); refresh(); } return; }
   if (f.dataset.invcan) { e.preventDefault(); const ok = await act(() => api('inv_cancel', { id: f.dataset.invcan, reason: f.querySelector('[name=reason]').value }), 'Cancelled').catch(() => null); if (ok) { await reboot(); refresh(); } return; }
+  if (f.dataset.cform !== undefined) { e.preventDefault(); const id = +f.dataset.cform; const ok = await act(() => api('card_save', { id, ...Object.fromEntries(new FormData(f)) }), id ? 'Contact updated' : 'Contact added').catch(() => null);
+    if (ok) { if (!id && ok.dup) toast('Already in contacts — the existing contact was updated'); C.cedit = null; C.cnew = null; refresh(); } return; }
   if (f.dataset.refclosef) { e.preventDefault(); const ok = await act(() => api('ref_close', { id: f.dataset.refclosef, reason: f.querySelector('[name=reason]').value }), 'Lead closed').catch(() => null); if (ok) { await reboot(); refresh(); } return; }
   if (f.dataset.refmove) { e.preventDefault(); const ok = await act(() => api('ref_save', { id: f.dataset.refmove, assigned_to: f.querySelector('[name=assigned_to]').value }), 'Lead handed over').catch(() => null); if (ok) { await reboot(); refresh(); } return; }
   if (f.id === 'dokf') { e.preventDefault(); const o = Object.fromEntries(new FormData(f)); const ok = await act(() => api('design_client_ok', { project_id: C.project.id, approval_id: e.submitter?.name === 'nover' ? 0 : o.approval_id, on: o.on }), 'Marked: customer approved the design — Generate quote is now open').catch(() => null); if (ok) refresh(); return; }
