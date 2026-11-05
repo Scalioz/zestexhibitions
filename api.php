@@ -95,6 +95,7 @@ function clean($type, $v) { return match ($type) { 'd' => d($v), 'n' => n($v), '
 define('ZEST_API', 1);
 if (in_array($A, ['lexpos', 'lexpo', 'lexpo_save', 'lead_add', 'lead_bulk', 'lead_update', 'lead_del', 'design_jobs', 'design_save', 'assign_designer', 'assign_ops',
   'ops_jobs', 'ops_job', 'ops_save', 'jobs_board'], true)) require __DIR__ . '/lib/work_api.php';
+if (in_array($A, ['appr_request', 'appr_cancel', 'appr_decide', 'appr_sent', 'sales_log'], true)) require __DIR__ . '/lib/appr_api.php';
 
 // ---------- actions ----------
 switch ($A) {
@@ -113,6 +114,7 @@ case 'boot':
     'module' => $MODULE,
     'dept_modules' => setting('dept_modules', default_dept_modules()),
     'furniture_items' => setting('furniture_items', default_furniture()),
+    'pending_approvals' => $ADMIN ? (int) val('SELECT COUNT(*) FROM ' . T('approvals') . " WHERE status = 'pending'") : 0,
   ]);
 
 // ----- HOME / DASHBOARD -----
@@ -144,6 +146,8 @@ case 'home':
       'won' => count($won), 'won_total' => array_sum(array_map(fn($p) => $b[$p['id']]['total'], $won)),
       'open' => count(array_filter($ps, fn($p) => in_array($p['status'], ['enquiry', 'quoted']))),
       'due' => array_sum(array_map(fn($p) => $b[$p['id']]['balance'], $won)),
+      'appr' => all('SELECT a.id, a.kind, a.version, a.status, a.admin_note, a.decided_at, a.project_id, p.expo, c.company FROM ' . T('approvals') . ' a JOIN ' . T('projects') . ' p ON p.id = a.project_id JOIN ' . T('clients') . " c ON c.id = p.client_id
+        WHERE a.requested_by = ? AND a.sent_on IS NULL AND (a.status = 'pending' OR a.status = 'approved' OR (a.status = 'rejected' AND a.version = (SELECT MAX(b.version) FROM " . T('approvals') . ' b WHERE b.project_id = a.project_id AND b.kind = a.kind))) ORDER BY a.requested_at DESC', [$MID]),
       'projects' => array_values(array_filter($ps, fn($p) => $p['status'] !== 'completed' || $b[$p['id']]['balance'] > 0)),
     ]);
   }
@@ -259,6 +263,12 @@ case 'client_full':
     foreach ($o['extras'] as $r) $ev[] = ['date' => $r['added_on'], 'type' => 'Extra', 'text' => "$X: {$r['item']} " . (float) $r['qty'] . ' × ₹' . inr_txt($r['rate'])];
   }
   unset($o);
+  foreach ($orders as $o) foreach (all('SELECT a.*, u.name AS rb FROM ' . T('approvals') . ' a LEFT JOIN ' . T('users') . ' u ON u.id = a.requested_by WHERE a.project_id = ?', [$o['id']]) as $a) {
+    $t = "{$o['expo']}: " . ($a['kind'] === 'quote' ? 'quote' : 'design') . " V{$a['version']}" . ($a['amount'] ? ' ₹' . inr_txt($a['amount']) : '');
+    $ev[] = ['date' => substr($a['requested_at'], 0, 10), 'type' => 'Approval', 'text' => "$t sent for approval by {$a['rb']}"];
+    if ($a['decided_at']) $ev[] = ['date' => substr($a['decided_at'], 0, 10), 'type' => $a['status'] === 'approved' ? 'Approved' : 'Rejected', 'text' => "$t {$a['status']} by {$a['decided_by']}" . ($a['admin_note'] ? " — {$a['admin_note']}" : '')];
+    if ($a['sent_on']) $ev[] = ['date' => $a['sent_on'], 'type' => 'Sent to customer', 'text' => "$t sent to customer by {$a['sent_by']}"];
+  }
   $c['followups'] = followups_for($c['company']);
   foreach ($c['followups'] as $fu) $ev[] = ['date' => $fu['date'], 'type' => 'Follow-up', 'text' => "{$fu['by']} ({$fu['dept']})" . ($fu['what'] ? ': ' . $fu['what'] : '')];
   usort($ev, fn($a, $b) => strcmp($b['date'] ?? '', $a['date'] ?? ''));
@@ -362,19 +372,19 @@ case 'client_del':  // admin only: removes a client with all its orders, payment
   db()->beginTransaction();
   if ($pids) {
     $in_p = implode(',', $pids);
-    foreach (['revision' => 'revisions', 'quote' => 'quotes', 'vquote' => 'vendor_quotes'] as $ent => $tbl) {
+    foreach (['revision' => 'revisions', 'quote' => 'quotes', 'vquote' => 'vendor_quotes', 'appr' => 'approvals'] as $ent => $tbl) {
       $ids = array_map('intval', array_column(all('SELECT id FROM ' . T($tbl) . " WHERE project_id IN ($in_p)"), 'id'));
       if ($ids) $files = array_merge($files, all('SELECT * FROM ' . T('files') . ' WHERE entity = ? AND entity_id IN (' . implode(',', $ids) . ')', [$ent]));
     }
     $files = array_merge($files, all('SELECT * FROM ' . T('files') . " WHERE entity IN ('floor','final','wd','pbrief') AND entity_id IN ($in_p)"));
-    foreach (['revisions', 'quotes', 'vendor_quotes', 'extras', 'client_payments', 'vendor_payments', 'expenses', 'losses'] as $tbl) q('DELETE FROM ' . T($tbl) . " WHERE project_id IN ($in_p)");
+    foreach (['approvals', 'revisions', 'quotes', 'vendor_quotes', 'extras', 'client_payments', 'vendor_payments', 'expenses', 'losses'] as $tbl) q('DELETE FROM ' . T($tbl) . " WHERE project_id IN ($in_p)");
     q('DELETE FROM ' . T('projects') . " WHERE id IN ($in_p)");
   }
   q('DELETE FROM ' . T('contacts') . ' WHERE client_id = ?', [$c['id']]);
   foreach ($files as $f) q('DELETE FROM ' . T('files') . ' WHERE id = ?', [$f['id']]);
   q('DELETE FROM ' . T('clients') . ' WHERE id = ?', [$c['id']]);
   db()->commit();
-  foreach ($files as $f) @unlink(__DIR__ . '/uploads/' . $f['stored_name']);
+  foreach ($files as $f) if (!val('SELECT COUNT(*) FROM ' . T('files') . ' WHERE stored_name = ?', [$f['stored_name']])) @unlink(__DIR__ . '/uploads/' . $f['stored_name']);
   out(['ok' => true]);
 
 case 'dnq':  // strategic call: admin only (sales see the flag but cannot set or remove it)
@@ -428,6 +438,8 @@ case 'project':
   $p['designer'] = $um[$p['designer_id']] ?? null; $p['ops_person'] = $um[$p['ops_id']] ?? null;
   $p['ops'] = json_decode($p['ops_json'] ?? '', true) ?: null; unset($p['ops_json']);
   $p['chosen_vendor'] = one('SELECT v.name, q.amount FROM ' . T('vendor_quotes') . ' q JOIN ' . T('vendors') . ' v ON v.id = q.vendor_id WHERE q.project_id = ? AND q.selected = 1', [$id]);
+  $p['approvals'] = all('SELECT a.*, u.name AS requested_by_name FROM ' . T('approvals') . ' a LEFT JOIN ' . T('users') . ' u ON u.id = a.requested_by WHERE a.project_id = ? ORDER BY a.kind, a.version', [$id]);
+  $af = files_of('appr', array_column($p['approvals'], 'id')); foreach ($p['approvals'] as &$ap) $ap['files'] = $af[$ap['id']] ?? []; unset($ap);
   $p['history'] = array_map(fn($h) => $h + ['by' => $um[$h['user_id']] ?? '—'], all('SELECT * FROM ' . T('audit') . ' WHERE project_id = ? ORDER BY id DESC LIMIT 50', [$id]));
   $c = one('SELECT id, company, dnq FROM ' . T('clients') . ' WHERE id = ?', [$p['client_id']]);
   $p['client'] = $c; $p['owner'] = users_map()[$p['owner_id']] ?? '—';
@@ -503,6 +515,9 @@ case 'upload':
   switch ($ent) {
     case 'card': case 'brief': case 'gstcert': client_row($eid); break;
     case 'floor': case 'pbrief': project_row($eid); break;
+    case 'appr':
+      $ap = one('SELECT project_id, status FROM ' . T('approvals') . ' WHERE id = ?', [$eid]); if (!$ap) fail('Not found', 404); project_row($ap['project_id']);
+      if ($ap['status'] !== 'pending' && !$ADMIN) fail('This version is already decided. Send a new version instead.', 403); break;
     case 'final': case 'wd':   // sales owner, admin, or the designer assigned to this order
       $pp = one('SELECT owner_id, designer_id FROM ' . T('projects') . ' WHERE id = ?', [$eid]);
       if (!$pp || !($ADMIN || ($RECORDS && (int) $pp['owner_id'] === $MID) || (int) $pp['designer_id'] === $MID)) fail('Order not found or not yours.', 404);
@@ -535,8 +550,9 @@ case 'file_del':
   $f = one('SELECT * FROM ' . T('files') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]); if (!$f) fail('Not found', 404);
   if ($f['entity'] === 'ritem') fail('Report files cannot be removed.', 403);
   if (!$ADMIN && !((int) $f['uploaded_by'] === $MID && substr($f['created_at'], 0, 10) === today())) fail('Only admin can remove older files.', 403);
+  if ($f['entity'] === 'appr' && !$ADMIN && val('SELECT status FROM ' . T('approvals') . ' WHERE id = ?', [$f['entity_id']]) !== 'pending') fail('This version is already decided. Its files are kept for the record.', 403);
   q('DELETE FROM ' . T('files') . ' WHERE id = ?', [$f['id']]);
-  @unlink(__DIR__ . '/uploads/' . $f['stored_name']);
+  if (!val('SELECT COUNT(*) FROM ' . T('files') . ' WHERE stored_name = ?', [$f['stored_name']])) @unlink(__DIR__ . '/uploads/' . $f['stored_name']);
   out(['ok' => true]);
 
 // ----- DAILY REPORTS -----

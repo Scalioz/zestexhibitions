@@ -6,7 +6,7 @@ if (($argv[1] ?? '') !== '--yes') exit("This deletes ALL clients, orders, paymen
 $root = dirname(__DIR__);
 require "$root/lib/db.php"; require "$root/lib/schema.php";
 migrate();
-$tables = ['leads', 'expos', 'activity', 'report_items', 'reports', 'files', 'audit', 'losses', 'expenses', 'vendor_payments', 'client_payments', 'extras',
+$tables = ['approvals', 'leads', 'expos', 'activity', 'report_items', 'reports', 'files', 'audit', 'losses', 'expenses', 'vendor_payments', 'client_payments', 'extras',
   'vendor_quotes', 'quotes', 'revisions', 'projects', 'contacts', 'clients', 'vendors', 'holidays'];
 db()->beginTransaction();
 foreach ($tables as $t) q('DELETE FROM ' . T($t));
