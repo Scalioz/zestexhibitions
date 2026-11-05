@@ -119,6 +119,18 @@ function migrate() {
     set_setting('schema_v', 13);
   }
   if ($v < 14) { create_referrals_table(); set_setting('schema_v', 14); }
+  if ($v < 15) { create_cards_tables(); set_setting('schema_v', 15); }
+}
+function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
+  $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
+  $PK = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT UNSIGNED AUTO_INCREMENT PRIMARY KEY';
+  $E = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+  foreach (['CREATE TABLE IF NOT EXISTS ' . T('cards') . " (id $PK, name VARCHAR(120), designation VARCHAR(120), company VARCHAR(200), phone VARCHAR(40), phone2 VARCHAR(120), phone_key VARCHAR(12),
+      email VARCHAR(160), email2 VARCHAR(255), website VARCHAR(160), city VARCHAR(80), address TEXT, tag VARCHAR(160), note TEXT, source VARCHAR(10) NOT NULL DEFAULT 'card', scan_id INT,
+      user_id INT NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME)$E",
+    'CREATE INDEX zc_cards_user ON ' . T('cards') . ' (user_id)', 'CREATE INDEX zc_cards_phone ON ' . T('cards') . ' (phone_key)', 'CREATE INDEX zc_cards_email ON ' . T('cards') . ' (email)',
+    'CREATE TABLE IF NOT EXISTS ' . T('card_scans') . " (id $PK, user_id INT NOT NULL, tag VARCHAR(160), status VARCHAR(10) NOT NULL, found INT NOT NULL DEFAULT 0, added INT NOT NULL DEFAULT 0, error TEXT, created_at DATETIME NOT NULL)$E",
+  ] as $q) { try { db()->exec($q); } catch (PDOException $e) { if (stripos($q, 'CREATE INDEX') !== 0) throw $e; } }
 }
 function create_referrals_table() {   // leads admin gets from his contacts and hands to a sales person / another admin
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';

@@ -733,6 +733,90 @@ case 'password':
   out(['ok' => true]);
 
 // ----- SETTINGS -----
+// ----- business cards & contacts directory -----
+case 'card_scan':   // photo of one or many business cards → contacts
+  require_once __DIR__ . '/lib/cards.php'; require_once __DIR__ . '/lib/shrink.php';
+  $f = $_FILES['file'] ?? null;
+  if (!$f || $f['error'] !== UPLOAD_ERR_OK) fail($f && in_array($f['error'], [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE]) ? 'Photo is too large.' : 'Upload failed. Try again.');
+  $ext = strtolower(pathinfo($f['name'], PATHINFO_EXTENSION)); if ($ext === 'jpeg') $ext = 'jpg';
+  if (!in_array($ext, ['jpg', 'png', 'webp'], true)) fail('Please upload a photo (JPG or PNG).');
+  $tag = s($in['tag'] ?? null, 160);
+  $sid = ins('card_scans', ['user_id' => $MID, 'tag' => $tag, 'status' => 'reading', 'created_at' => now()]);
+  $dir = __DIR__ . '/uploads/' . date('Y/m'); if (!is_dir($dir)) mkdir($dir, 0755, true);
+  $stored = date('Y/m/') . bin2hex(random_bytes(12)) . '.' . $ext; $abs = __DIR__ . '/uploads/' . $stored;
+  if (!move_uploaded_file($f['tmp_name'], $abs)) fail('Could not save the photo.');
+  session_write_close();
+  $r = card_read($abs);   // read from the full-quality photo, then keep a compressed copy
+  $before = filesize($abs); $sr = shrink_file($abs, $ext, 'appr');
+  if ($sr['ext'] !== $ext) { $ns = preg_replace('~\.\w+$~', '.' . $sr['ext'], $stored); rename($abs, __DIR__ . '/uploads/' . $ns); $stored = $ns; }
+  $fid = ins('files', ['entity' => 'cardscan', 'entity_id' => $sid, 'orig_name' => mb_substr(basename($f['name']), 0, 250), 'stored_name' => $stored, 'mime' => 'image/jpeg', 'size' => (int) $sr['size'], 'orig_size' => $before, 'shrunk' => 1, 'uploaded_by' => $MID, 'created_at' => now()]);
+  $out = [];
+  if (!$r['error']) {
+    tx();
+    foreach ($r['cards'] as $c) { $sv = card_save($c, $MID, $me['name'], $tag, $sid); $out[] = $c + ['id' => $sv['id'], 'dup' => $sv['dup'], 'known' => $sv['dup'] ? null : card_known($c)]; }
+    db()->commit();
+  }
+  $added = count(array_filter($out, fn($x) => !$x['dup']));
+  upd('card_scans', $sid, ['status' => $r['error'] ? ($r['error'] === 'nokey' ? 'manual' : 'failed') : 'done', 'found' => count($out), 'added' => $added, 'error' => $r['error'] === 'nokey' ? null : $r['error']]);
+  touch_activity();
+  out(['scan_id' => $sid, 'file_id' => $fid, 'cards' => $out, 'added' => $added, 'error' => $r['error'] === 'nokey' ? null : $r['error'], 'manual' => $r['error'] === 'nokey']);
+
+case 'card_scans':   // my recent photos (admin: everyone's)
+  require_once __DIR__ . '/lib/cards.php';
+  $rows = all('SELECT * FROM ' . T('card_scans') . ($ADMIN ? '' : ' WHERE user_id = ' . $MID) . ' ORDER BY id DESC LIMIT 60');
+  $fl = files_of('cardscan', array_column($rows, 'id')); $um = users_map();
+  foreach ($rows as &$r) { $r['files'] = $fl[$r['id']] ?? []; $r['by'] = $um[$r['user_id']] ?? '—'; } unset($r);
+  out(['scans' => $rows, 'ai' => cards_ai()['key'] !== '']);
+
+case 'dir_list':   // one directory: cards, clients, client contacts, expo data, referrals
+  require_once __DIR__ . '/lib/cards.php';
+  $rows = directory_rows($in, $ADMIN, $MID); $total = count($rows);
+  $tags = array_column(all('SELECT DISTINCT tag FROM ' . T('cards') . ' WHERE tag IS NOT NULL AND tag <> \'\'' . ($ADMIN ? '' : ' AND user_id = ' . $MID) . ' ORDER BY tag'), 'tag');
+  $expos = array_values(array_unique(array_merge(array_column(all('SELECT name FROM ' . T('expos') . ' ORDER BY id DESC LIMIT 200'), 'name'), array_column(all('SELECT DISTINCT expo FROM ' . T('projects') . ' ORDER BY id DESC LIMIT 200'), 'expo'))));
+  $by = []; foreach ($rows as $r) $by[$r['source']] = ($by[$r['source']] ?? 0) + 1;
+  out(['rows' => array_slice($rows, 0, 1500), 'total' => $total, 'counts' => $by, 'tags' => $tags, 'expos' => $expos]);
+
+case 'card_save':   // add a contact by hand, or correct one
+  require_once __DIR__ . '/lib/cards.php';
+  $row = []; foreach (['name' => 120, 'designation' => 120, 'company' => 200, 'phone' => 40, 'phone2' => 120, 'email' => 160, 'email2' => 255, 'website' => 160, 'city' => 80, 'address' => 2000, 'tag' => 160, 'note' => 4000] as $k => $n) $row[$k] = s($in[$k] ?? null, $n) ?? '';
+  if ($row['email'] !== '' && !filter_var($row['email'], FILTER_VALIDATE_EMAIL)) fail('The email address looks wrong.');
+  if ($row['name'] === '' && $row['company'] === '') fail('Enter at least the name or the company.');
+  if ($row['phone'] === '' && $row['email'] === '') fail('Enter a phone number or an email.');
+  $row['email'] = strtolower($row['email']);
+  if (!empty($in['id'])) {
+    $c = lock_row('cards', $in['id']) ?? fail('Contact not found.', 404);
+    if (!$ADMIN && (int) $c['user_id'] !== $MID) fail('You can only change contacts you added.', 403);
+    $ph = card_digits($row['phone']);
+    upd('cards', $c['id'], $row + ['phone_key' => $ph && strlen($ph) === 10 ? $ph : null, 'updated_at' => now()] + ($ADMIN && !empty($in['user_id']) ? ['user_id' => (int) $in['user_id']] : []));
+    out(['id' => (int) $c['id']]);
+  }
+  tx(); $sv = card_save($row, $ADMIN && !empty($in['user_id']) ? (int) $in['user_id'] : $MID, $me['name'], $row['tag'], null, 'manual'); db()->commit();
+  out($sv);
+
+case 'card_del':
+  $c = one('SELECT * FROM ' . T('cards') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]) ?? fail('Contact not found.', 404);
+  if (!$ADMIN && (int) $c['user_id'] !== $MID) fail('You can only delete contacts you added.', 403);
+  q('DELETE FROM ' . T('cards') . ' WHERE id = ?', [$c['id']]); out(['ok' => true]);
+
+case 'cards_ai_save':   // admin: the key for the card-reading service
+  need_admin(); require_once __DIR__ . '/lib/cards.php';
+  $c = (array) setting('cards_ai', []);
+  if (array_key_exists('key', $in) && trim((string) $in['key']) !== '' && !str_contains((string) $in['key'], '•')) $c['key'] = trim((string) $in['key']);
+  if (!empty($in['remove'])) $c['key'] = '';
+  if (isset($in['model'])) $c['model'] = s($in['model'], 80) ?? '';
+  set_setting('cards_ai', $c); out(['ok' => true]);
+
+case 'cards_ai_test':
+  need_admin(); require_once __DIR__ . '/lib/cards.php';
+  $ai = cards_ai(); if ($ai['key'] === '') fail('Enter the key first.');
+  $ch = curl_init($ai['url']);
+  curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 40, CURLOPT_POSTFIELDS => json_encode(['model' => $ai['model'], 'max_tokens' => 5, 'messages' => [['role' => 'user', 'content' => 'Reply OK']]]),
+    CURLOPT_HTTPHEADER => ['content-type: application/json', 'x-api-key: ' . $ai['key'], 'anthropic-version: 2023-06-01']]);
+  $res = curl_exec($ch); $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE); $err = curl_error($ch); curl_close($ch);
+  if ($res === false) fail('Could not reach the service: ' . $err);
+  $j = json_decode($res, true); if ($code !== 200) fail('The service said: ' . ($j['error']['message'] ?? 'error ' . $code));
+  out(['ok' => true]);
+
 // ----- referral leads -----
 case 'ref_list':   // admin: everything; others: what was handed to me
   $um = users_map(); $w = $ADMIN && ($in['scope'] ?? '') !== 'mine' ? '1=1' : 'r.assigned_to = ' . $MID;
@@ -782,7 +866,7 @@ case 'ref_reopen':
 case 'settings':
   need_admin();
   require_once __DIR__ . '/lib/quote.php';
-  out(['holidays' => all('SELECT * FROM ' . T('holidays') . ' ORDER BY hdate DESC'), 'track_from' => setting('track_from'), 'quote_defaults' => quote_defaults()]);
+  out(['holidays' => all('SELECT * FROM ' . T('holidays') . ' ORDER BY hdate DESC'), 'track_from' => setting('track_from'), 'quote_defaults' => quote_defaults(), 'cards_ai' => (function () { require_once __DIR__ . '/lib/cards.php'; $a = cards_ai(); return ['has_key' => $a['key'] !== '', 'hint' => $a['key'] ? substr($a['key'], 0, 7) . '••••' . substr($a['key'], -4) : '', 'model' => $a['model']]; })()]);
 
 case 'storage':   // admin: how much space files use, and compress older files
   need_admin(); require_once __DIR__ . '/lib/shrink.php';
