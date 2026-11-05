@@ -39,14 +39,44 @@ async function api(a, data = {}) {
   if (!r.ok || j.error) throw new Error(j.error || 'Request failed');
   return j;
 }
+// Photos are made smaller in the browser before sending (quick uploads on mobile data). PDFs and Office files are compressed on the server.
+const mb = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+async function shrinkPhoto(file, entity) {
+  const base = B.file_cfg || { max: 2000, q: 80 }, design = ['final', 'wd', 'appr'].includes(entity);
+  const cfg = design ? { max: Math.round(base.max * 1.5), q: Math.min(90, base.q + 5) } : base;
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size < 400 * 1024 || !window.createImageBitmap) return file;
+  try {
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const k = Math.min(1, cfg.max / Math.max(bmp.width, bmp.height)), w = Math.round(bmp.width * k), h = Math.round(bmp.height * k);
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const g = cv.getContext('2d');
+    let alpha = false;
+    if (file.type !== 'image/jpeg') {   // keep transparency (logos): check a small copy for see-through pixels
+      const t = document.createElement('canvas'); t.width = Math.max(1, Math.round(w / 16)); t.height = Math.max(1, Math.round(h / 16)); const tg = t.getContext('2d'); tg.drawImage(bmp, 0, 0, t.width, t.height);
+      const px = tg.getImageData(0, 0, t.width, t.height).data; for (let i = 3; i < px.length; i += 4) if (px[i] < 247) { alpha = true; break; }
+    }
+    if (!alpha) { g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); }
+    g.drawImage(bmp, 0, 0, w, h); bmp.close && bmp.close();
+    const type = alpha ? 'image/png' : 'image/jpeg';
+    const blob = await new Promise(r => cv.toBlob(r, type, cfg.q / 100));
+    if (!blob || blob.size >= file.size * 0.9) return file;
+    const name = alpha ? file.name : file.name.replace(/\.(png|webp|jpe?g)$/i, '') + '.jpg';
+    return new File([blob], name, { type, lastModified: file.lastModified });
+  } catch { return file; }
+}
 async function upload(entity, id, file) {
-  const fdta = new FormData(); fdta.append('entity', entity); fdta.append('entity_id', id); fdta.append('file', file);
+  const lim = (B.file_cfg?.limit_mb || 60) * 1048576, orig = file.size;
+  file = await shrinkPhoto(file, entity);
+  if (file.size > lim) throw new Error(`${file.name}: too large (${mb(file.size)}). Maximum is ${mb(lim)}.`);
+  const fdta = new FormData(); fdta.append('entity', entity); fdta.append('entity_id', id); fdta.append('orig_size', orig); fdta.append('file', file);
   const r = await fetch('api.php?a=upload', { method: 'POST', headers: { 'X-CSRF': CSRF }, body: fdta, credentials: 'same-origin' });
   const j = await r.json().catch(() => ({ error: 'Upload failed' }));
   if (!r.ok || j.error) throw new Error(`${file.name}: ${j.error || 'upload failed'}`);
   return j;
 }
-async function uploadAll(entity, id, files) { for (const f of files) await upload(entity, id, f); }
+async function uploadAll(entity, id, files) {   // returns a short note on how much was saved
+  let o = 0, n = 0; for (const f of files) { const j = await upload(entity, id, f); o += +j.orig_size || f.size; n += +j.size || f.size; }
+  return o && n < o * 0.8 ? ` · ${mb(o)} → ${mb(n)}, compressed automatically` : '';
+}
 async function act(fn, okMsg) { try { const r = await fn(); if (okMsg) toast(okMsg); return r; } catch (e) { toast(e.message, true); throw e; } }
 
 const fileChips = (list, canDel) => list && list.length
@@ -1138,7 +1168,7 @@ routes.formats = async () => {
 
 // ---------- SETTINGS ----------
 routes.settings = async () => {
-  const d = await api('settings');
+  const [d, st] = await Promise.all([api('settings'), api('storage')]);
   view().innerHTML = `
   <div class="head"><div><h1>Holidays & lists</h1><p>Reports are not expected on week-offs and declared holidays.</p></div></div>
   <div class="grid">
@@ -1153,6 +1183,12 @@ routes.settings = async () => {
    <div class="panel"><h2>Vendors</h2>${B.vendors.length ? `<div class="tw"><table><tr><th>Vendor</th><th>Phone</th><th>City</th><th>Email</th><th></th></tr>${B.vendors.map(v => `<tr><td><b>${esc(v.name)}</b></td><td class="num">${esc(v.phone || '')}</td><td>${esc(v.city || '')}</td><td>${esc(v.email || '')}</td><td class="r"><button class="btn link" data-delvendor="${v.id}">✕</button></td></tr>`).join('')}</table></div>` : '<div class="sub">No vendors yet.</div>'}
     <form class="grid g3 inset" id="vd-add" style="margin-top:10px"><label class="f">Vendor name *<input name="name" required></label><label class="f">Phone *<input name="phone" type="tel" required></label><label class="f">City *<input name="city" required></label><label class="f">Email<input name="email" type="email"></label><div style="align-self:end"><button class="btn ghost sm">+ Add vendor</button></div></form></div>
   </div>
+  <div class="panel" id="storage"><h2>Files & storage</h2><p class="sub" style="margin-top:0">Every upload is compressed automatically: photos, screenshots and the pictures inside PDF, Word, Excel and PowerPoint files. Text and drawings are not touched.</p>
+   ${!st.tools.gd || !st.tools.zip ? `<div class="alert bad"><b>Compression tools missing on this server</b><span class="m">Ask hosting to enable the PHP "${!st.tools.gd ? 'gd' : ''}${!st.tools.gd && !st.tools.zip ? '" and "' : ''}${!st.tools.zip ? 'zip' : ''}" extension. Uploads still work, but are not compressed.</span></div>` : ''}
+   <div class="kpis"><div class="kpi"><span>Files stored</span><b>${st.files}</b></div><div class="kpi"><span>Space used</span><b>${mb(st.size)}</b></div><div class="kpi hl"><span>Space saved by compression</span><b>${mb(st.saved)}</b></div><div class="kpi"><span>Largest upload allowed</span><b>${st.limit_mb} MB</b>${st.limit_mb < 50 ? '<small>hosting limit — can be raised in hPanel → PHP settings</small>' : ''}</div></div>
+   <div class="row" style="align-items:flex-end;margin-top:12px"><label class="f">Picture quality<select id="fq">${Object.entries(st.levels).map(([k, v]) => `<option value="${k}" ${st.level === k ? 'selected' : ''}>${esc(v.label)} (up to ${v.max} px)</option>`).join('')}</select></label><button class="btn ghost sm" id="fq-save">Save</button>
+    ${st.pending ? `<button class="btn sm" id="shr-run">Compress ${st.pending} older file${st.pending > 1 ? 's' : ''} now</button>` : '<span class="sub">All files are compressed.</span>'}</div>
+   <div class="sub" id="shr-prog" style="margin-top:8px"></div></div>
   <div class="panel"><h2>Furniture & fixtures list</h2><p class="sub" style="margin-top:0">Shown as tick boxes on every production job.</p>
    <div class="row">${(B.furniture_items || []).map((x, i) => `<span class="chip"><span>${esc(x)}</span><button class="btn link" data-delfurn="${i}" aria-label="Remove ${esc(x)}">✕</button></span>`).join('')}</div>
    <form class="row" id="furn-add" style="margin-top:10px"><input name="item" placeholder="e.g. Podium" required style="max-width:260px"><button class="btn ghost sm">+ Add item</button></form></div>`;
@@ -1160,6 +1196,13 @@ routes.settings = async () => {
   const sub = (id, a, msg) => { $(id).onsubmit = async e => { e.preventDefault(); await act(() => api(a, Object.fromEntries(new FormData(e.target))), msg); await reboot(); refresh(); }; };
   sub('#hol-add', 'holiday_add', 'Holiday added'); sub('#rs-add', 'reason_add', 'Reason added'); sub('#vd-add', 'vendor_add', 'Vendor added');
   $('#trackf-save').onclick = async () => { await act(() => api('settings_save', { track_from: $('#trackf').value }), 'Saved'); };
+  $('#fq-save').onclick = async () => { await act(() => api('settings_save', { file_quality: $('#fq').value }), 'Saved — applies to new uploads'); await reboot(); };
+  const run = $('#shr-run'); if (run) run.onclick = async () => {
+    run.disabled = true; let saved = 0, left = st.pending;
+    try { while (left > 0) { const r = await api('storage_shrink'); saved += r.saved; left = r.pending; $('#shr-prog').textContent = `Working… ${st.pending - left} of ${st.pending} done · ${mb(saved)} saved so far`; if (!r.done) break; } toast(`Done — ${mb(saved)} saved`); }
+    catch (e) { toast(e.message, true); }
+    await refresh(); $('#storage').scrollIntoView();
+  };
 };
 
 // ---------- ACCOUNT ----------
@@ -1302,7 +1345,7 @@ document.addEventListener('change', async e => {
       return refresh();
     }
     if (ds.vqsel) { await act(() => api('vq_select', { id: ds.vqsel }), 'Vendor chosen'); return refresh(); }
-    if (ds.upload && t.files.length) { const files = [...t.files]; toast('Uploading…'); await act(() => uploadAll(ds.upload, ds.eid, files), `${files.length} file(s) uploaded`); return refresh(); }
+    if (ds.upload && t.files.length) { const files = [...t.files]; toast('Uploading…'); const note = await act(() => uploadAll(ds.upload, ds.eid, files)); toast(`${files.length} file(s) uploaded${note || ''}`); return refresh(); }
     if (t.id === 'nc-cards') { newClient.cards.push(...t.files); return refresh(); }
     if (t.id === 'nc-brief') { newClient.briefs.push(...t.files); return refresh(); }
     if (t.id === 'nc-gst') { newClient.gstcert = [...t.files]; return refresh(); }

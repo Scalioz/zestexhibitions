@@ -45,7 +45,7 @@ function create_schema($driver) {
 "CREATE TABLE IF NOT EXISTS {$t('reports')} (id $PK, user_id $FK NOT NULL, rdate DATE NOT NULL, dept VARCHAR(60) NOT NULL, fields_json TEXT NOT NULL, submitted_at DATETIME NOT NULL, UNIQUE (user_id, rdate))$E",
 "CREATE TABLE IF NOT EXISTS {$t('report_items')} (id $PK, report_id $FK NOT NULL, sl INT NOT NULL, data_json TEXT NOT NULL)$E",
 "CREATE INDEX zc_ritems_report ON {$t('report_items')} (report_id)",
-"CREATE TABLE IF NOT EXISTS {$t('files')} (id $PK, entity VARCHAR(30) NOT NULL, entity_id $FK NOT NULL, orig_name VARCHAR(255) NOT NULL, stored_name VARCHAR(80) NOT NULL, mime VARCHAR(100), size INT, uploaded_by $FK, created_at DATETIME NOT NULL)$E",
+"CREATE TABLE IF NOT EXISTS {$t('files')} (id $PK, entity VARCHAR(30) NOT NULL, entity_id $FK NOT NULL, orig_name VARCHAR(255) NOT NULL, stored_name VARCHAR(80) NOT NULL, mime VARCHAR(100), size INT, orig_size INT, shrunk INT NOT NULL DEFAULT 0, uploaded_by $FK, created_at DATETIME NOT NULL)$E",
 "CREATE INDEX zc_files_entity ON {$t('files')} (entity, entity_id)",
   ];
   foreach ($sql as $s) {
@@ -103,6 +103,10 @@ function migrate() {
   if ($v < 11) {   // numbers can never repeat, even when people save at the same moment
     foreach (['CREATE UNIQUE INDEX zc_j_vno ON ' . T('journal') . ' (vno)', 'CREATE UNIQUE INDEX zc_inv_no ON ' . T('invoices') . ' (inv_no)'] as $q) { try { db()->exec($q); } catch (PDOException $e) { /* already there */ } }
     set_setting('schema_v', 11);
+  }
+  if ($v < 12) {   // automatic file compression
+    foreach (['orig_size INT', 'shrunk INT NOT NULL DEFAULT 0'] as $col) { try { db()->exec('ALTER TABLE ' . T('files') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ } }
+    set_setting('schema_v', 12);
   }
 }
 

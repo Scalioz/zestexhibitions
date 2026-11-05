@@ -21,6 +21,7 @@ session_write_close();   // release the session so one person's parallel request
 migrate();
 
 $isUpload = str_starts_with($_SERVER['CONTENT_TYPE'] ?? '', 'multipart/form-data');
+if ($isUpload && empty($_POST) && empty($_FILES) && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) fail('File is too large for the server (max ' . upload_limit_mb() . ' MB).');
 $in = $isUpload ? $_POST : (json_decode(file_get_contents('php://input'), true) ?: []);
 $A = $_GET['a'] ?? '';
 $ADMIN = $me['role'] === 'admin';
@@ -34,6 +35,10 @@ $RECORD_ACTIONS = ['clients', 'client', 'client_save', 'dup', 'dnq', 'contact_ad
   'child_add', 'child_update', 'child_del', 'vq_select', 'vendor_add'];
 if (in_array($A, $RECORD_ACTIONS, true) && !$RECORDS) fail('Your department does not have access to client records.', 403);
 if ($A === 'upload' && !$RECORDS && !in_array($in['entity'] ?? '', ['ritem', 'final', 'wd', 'claim', 'voucher'], true)) fail('Your department does not have access to client records.', 403);
+
+const UPLOAD_MAX_MB = 60;
+function ini_mb($k) { $v = trim((string) ini_get($k)); if ($v === '' || $v === '0' || $v === '-1') return PHP_INT_MAX; $n = (float) $v; $u = strtolower(substr($v, -1)); return (int) floor($u === 'g' ? $n * 1024 : ($u === 'm' ? $n : ($u === 'k' ? $n / 1024 : $n / 1048576))); }
+function upload_limit_mb() { return max(1, min(UPLOAD_MAX_MB, ini_mb('upload_max_filesize'), ini_mb('post_max_size') - 1)); }   // what this server really accepts
 
 // ---------- helpers ----------
 function touch_activity() {   // marks today as a working day with work logged
@@ -104,7 +109,9 @@ if (in_array($A, ['appr_request', 'appr_cancel', 'appr_decide', 'appr_sent', 'sa
 switch ($A) {
 
 case 'boot':
+  require_once __DIR__ . '/lib/shrink.php';
   out([
+    'file_cfg' => shrink_cfg() + ['limit_mb' => upload_limit_mb()],
     'me' => $me,
     'departments' => setting('departments', []),
     'weekly_off' => setting('weekly_off', [0]),
@@ -548,7 +555,7 @@ case 'upload':
   }
   $f = $_FILES['file'] ?? null;
   if (!$f || $f['error'] !== UPLOAD_ERR_OK) fail($f && in_array($f['error'], [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE]) ? 'File is too large.' : 'Upload failed. Try again.');
-  if ($f['size'] > 25 * 1024 * 1024) fail('File is too large (max 25 MB).');
+  if ($f['size'] > upload_limit_mb() * 1024 * 1024) fail('File is too large (max ' . upload_limit_mb() . ' MB).');
   $ext = strtolower(pathinfo($f['name'], PATHINFO_EXTENSION));
   $ok = ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'gif', 'xlsx', 'xls', 'csv', 'doc', 'docx', 'ppt', 'pptx', 'dwg', 'dxf', 'skp', 'zip', 'txt'];
   if (!in_array($ext, $ok, true)) fail('This file type is not allowed.');
@@ -556,10 +563,18 @@ case 'upload':
   if (!is_dir($dir)) mkdir($dir, 0755, true);
   $stored = date('Y/m/') . bin2hex(random_bytes(12)) . '.' . $ext;
   if (!move_uploaded_file($f['tmp_name'], __DIR__ . '/uploads/' . $stored)) fail('Could not save the file.');
+  // automatic compression (photos, pictures inside PDF / Word / Excel / PowerPoint) — the original is kept if anything is unusual
+  require_once __DIR__ . '/lib/shrink.php';
+  $origSize = (int) ($_POST['orig_size'] ?? 0) ?: (int) $f['size']; $origName = mb_substr(basename($f['name']), 0, 250);
+  $sr = shrink_file(__DIR__ . '/uploads/' . $stored, $ext, $ent);
+  if ($sr['ext'] !== $ext) {   // e.g. a PNG screenshot saved as JPEG
+    $ns = preg_replace('~\.\w+$~', '.' . $sr['ext'], $stored); rename(__DIR__ . '/uploads/' . $stored, __DIR__ . '/uploads/' . $ns); $stored = $ns;
+    $origName = preg_replace('~\.\w+$~', '', $origName) . '.' . $sr['ext'];
+  }
   $mime = (new finfo(FILEINFO_MIME_TYPE))->file(__DIR__ . '/uploads/' . $stored) ?: 'application/octet-stream';
-  $id = ins('files', ['entity' => $ent, 'entity_id' => $eid, 'orig_name' => mb_substr(basename($f['name']), 0, 250), 'stored_name' => $stored,
-    'mime' => $mime, 'size' => (int) $f['size'], 'uploaded_by' => $MID, 'created_at' => now()]);
-  out(['id' => $id, 'name' => $f['name']]);
+  $id = ins('files', ['entity' => $ent, 'entity_id' => $eid, 'orig_name' => $origName, 'stored_name' => $stored,
+    'mime' => $mime, 'size' => (int) $sr['size'], 'orig_size' => max($origSize, (int) $sr['size']), 'shrunk' => 1, 'uploaded_by' => $MID, 'created_at' => now()]);
+  out(['id' => $id, 'name' => $origName, 'size' => (int) $sr['size'], 'orig_size' => max($origSize, (int) $sr['size'])]);
 
 case 'file_del':
   $f = one('SELECT * FROM ' . T('files') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]); if (!$f) fail('Not found', 404);
@@ -709,8 +724,33 @@ case 'settings':
   need_admin();
   out(['holidays' => all('SELECT * FROM ' . T('holidays') . ' ORDER BY hdate DESC'), 'track_from' => setting('track_from')]);
 
+case 'storage':   // admin: how much space files use, and compress older files
+  need_admin(); require_once __DIR__ . '/lib/shrink.php';
+  $t = one('SELECT COUNT(*) AS n, COALESCE(SUM(size),0) AS size, COALESCE(SUM(CASE WHEN orig_size > size THEN orig_size - size ELSE 0 END),0) AS saved, COALESCE(SUM(CASE WHEN shrunk = 0 THEN 1 ELSE 0 END),0) AS pending FROM ' . T('files'));
+  out(['files' => (int) $t['n'], 'size' => (int) $t['size'], 'saved' => (int) $t['saved'], 'pending' => (int) $t['pending'], 'level' => setting('file_quality', 'balanced'), 'levels' => SHRINK_LEVELS, 'tools' => ['gd' => gd_ok(), 'zip' => class_exists('ZipArchive')], 'limit_mb' => upload_limit_mb()]);
+
+case 'storage_shrink':   // admin: compress older files, a few at a time (the page calls this repeatedly)
+  need_admin(); require_once __DIR__ . '/lib/shrink.php';
+  $t0 = microtime(true); $done = 0; $saved = 0;
+  foreach (all('SELECT * FROM ' . T('files') . ' WHERE shrunk = 0 ORDER BY size DESC LIMIT 25') as $f) {
+    if (microtime(true) - $t0 > 20) break;
+    $abs = __DIR__ . '/uploads/' . $f['stored_name']; $ext = strtolower(pathinfo($f['stored_name'], PATHINFO_EXTENSION));
+    $upd = ['shrunk' => 1];
+    if (is_file($abs) && !val('SELECT COUNT(*) FROM ' . T('files') . ' WHERE stored_name = ? AND id <> ?', [$f['stored_name'], $f['id']])) {   // shared copies are left alone
+      $r = shrink_file($abs, $ext, $f['entity']);
+      if ($r['changed']) {
+        if ($r['ext'] !== $ext) { $ns = preg_replace('~\.\w+$~', '.' . $r['ext'], $f['stored_name']); rename($abs, __DIR__ . '/uploads/' . $ns); $upd += ['stored_name' => $ns, 'orig_name' => preg_replace('~\.\w+$~', '', $f['orig_name']) . '.' . $r['ext'], 'mime' => 'image/jpeg']; }
+        $upd += ['size' => $r['size'], 'orig_size' => max((int) ($f['orig_size'] ?: $f['size']), $r['before'])]; $saved += $r['before'] - $r['size'];
+      }
+    }
+    if (!isset($upd['orig_size'])) $upd['orig_size'] = $f['orig_size'] ?: $f['size'];
+    upd('files', $f['id'], $upd); $done++;
+  }
+  out(['done' => $done, 'saved' => $saved, 'pending' => (int) val('SELECT COUNT(*) FROM ' . T('files') . ' WHERE shrunk = 0')]);
+
 case 'settings_save':
   need_admin();
+  if (isset($in['file_quality'])) { require_once __DIR__ . '/lib/shrink.php'; if (!isset(SHRINK_LEVELS[$in['file_quality']])) fail('Pick a quality level.'); set_setting('file_quality', $in['file_quality']); }
   if (isset($in['weekly_off'])) set_setting('weekly_off', array_values(array_unique(array_map('intval', array_filter((array) $in['weekly_off'], fn($x) => $x >= 0 && $x <= 6)))));
   if (isset($in['departments'])) { $dp = array_values(array_unique(array_filter(array_map(fn($x) => s($x, 60), (array) $in['departments'])))); if (!$dp) fail('Keep at least one department.'); set_setting('departments', $dp); }
   if (isset($in['templates'])) {
