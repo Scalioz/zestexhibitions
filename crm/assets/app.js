@@ -100,7 +100,7 @@ async function route() {
   renderNav(r.name);
   const fn = routes[r.name] || routes.home;
   if ((r.name in ADMIN_ONLY) && !isAdmin()) { location.hash = '#home'; return; }
-  if ((r.name in RECORDS_ONLY) && !B.records) { location.hash = '#home'; return; }
+  if ((r.name in RECORDS_ONLY) && !B.records && !(r.name === 'newclient' && handsOver())) { location.hash = '#home'; return; }
   try { await fn(r); } catch (e) { if (e.message !== 'signed out') view().innerHTML = `<div class="alert bad"><b>Could not load this page</b><span class="m">${esc(e.message)}</span></div>`; }
   window.scrollTo(0, 0);
 }
@@ -108,6 +108,7 @@ const ADMIN_ONLY = { invappr: 1, clientlog: 1, saleslog: 1, leadlog: 1, jobs: 1,
 const RECORDS_ONLY = { refs: 1, clients: 1, client: 1, project: 1, newclient: 1, qgen: 1 };
 const ACC_ROUTES = { acc: 1, entry: 1, jv: 1, invoices: 1, invnew: 1, inv: 1, invappr: 1, claims: 1, topost: 1, books: 1, coa: 1, accset: 1 };
 const MODULE_ONLY = { contacts: ['records', 'ops', 'leads', 'calls'], myinv: ['records'], myexp: ['records', 'ops'],  leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
+const handsOver = () => !isAdmin() && ['leads', 'calls'].includes(B.module);   // research / telecalling add clients for sales
 async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); window.scrollTo(0, y); }
 
 function renderNav(cur) {
@@ -121,7 +122,7 @@ function renderNav(cur) {
        <div class="sec">Admin</div>${L('team', 'Team')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
     : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('report', 'Daily report', B.flags || '')}`
     : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('report', 'Daily report', B.flags || '')}`
-    : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') + L('contacts', 'Contacts') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('contacts', 'Contacts') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('report', 'Daily report', B.flags || '')}`;
+    : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') + L('newclient', '+ New client') + L('contacts', 'Contacts') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('contacts', 'Contacts') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('report', 'Daily report', B.flags || '')}`;
 }
 
 // ---------- HOME ----------
@@ -230,12 +231,13 @@ routes.newclient = async () => {
   const F = (k, l, t = 'text') => `<label class="f">${l}<input data-nc="${k}" type="${t}" value="${esc(n[k])}"></label>`;
   view().innerHTML = `
   ${n.ref_id ? '<div class="alert"><b>From a referral lead</b><span class="m">Saving this client marks the referral as “added as client”. Add the expo details if you have them.</span></div>' : ''}
-  <div class="head"><div><h1>New client</h1><p>As you type the company, email or phone, the CRM checks every past record, including other employees' clients.</p></div></div>
+  <div class="head"><div><h1>New client</h1><p>${handsOver() ? 'Add a client you found and hand it to a sales person. They see it on their dashboard straight away.' : ''} As you type the company, email or phone, the CRM checks every past record, including other employees' clients.</p></div></div>
   <div class="panel"><h2>Client details</h2>
    <div class="grid">${F('company', 'Company name *')}${F('email', 'Email', 'email')}${F('phone', 'Phone', 'tel')}${F('person', 'Contact person')}${F('designation', 'Designation')}${F('city', 'City')}${F('gst_no', 'GSTIN')}
+   ${handsOver() ? `<label class="f">Hand to sales person *<select data-nc="owner_id"><option value="">Pick who takes this client</option>${(B.handover || []).map(u => `<option value="${u.id}" ${+n.owner_id === +u.id ? 'selected' : ''}>${esc(u.name)}${u.role === 'admin' ? ' (admin)' : u.designation ? ' · ' + esc(u.designation) : ''}</option>`).join('')}</select></label>` : ''}
    ${isAdmin() ? `<label class="f">Handled by<select data-nc="owner_id"><option value="">Me</option>${B.users.filter(u => +u.active).map(u => `<option value="${u.id}" ${+n.owner_id === +u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>` : ''}</div>
    <div class="grid" style="margin-top:12px"><label class="f">Company location / address<textarea data-nc="location">${esc(n.location)}</textarea></label><label class="f">Notes<textarea data-nc="notes">${esc(n.notes)}</textarea></label></div>
-   <div class="row" style="margin-top:12px"><span class="sub"><b>GST certificate</b></span><label class="up">⬆ Upload GST certificate (PDF / image)<input type="file" id="nc-gst" accept=".pdf,.jpg,.jpeg,.png,.webp"></label>${n.gstcert.map(f => `<span class="chip">📎 <span>${esc(f.name)}</span></span>`).join('')}</div>
+   ${handsOver() ? '' : `<div class="row" style="margin-top:12px"><span class="sub"><b>GST certificate</b></span><label class="up">⬆ Upload GST certificate (PDF / image)<input type="file" id="nc-gst" accept=".pdf,.jpg,.jpeg,.png,.webp"></label>${n.gstcert.map(f => `<span class="chip">📎 <span>${esc(f.name)}</span></span>`).join('')}</div>`}
    <div id="dup" style="margin-top:12px"></div>
   </div>
   <div class="panel"><h2>Expo enquiry</h2><p class="sub" style="margin-top:0">The expo this client is talking to us about. This creates their first expo order.</p>
@@ -245,10 +247,12 @@ routes.newclient = async () => {
   <div class="panel"><div class="ph"><h2>Others involved in the deal</h2><button class="btn ghost sm" id="nc-addc">+ Add person</button></div>
    ${n.contacts.length ? n.contacts.map((o, i) => `<div class="grid g3" style="margin-bottom:8px">${['name', 'designation', 'phone', 'email'].map(k => `<label class="f">${cap(k)}<input data-ncc="${i}" data-k="${k}" value="${esc(o[k])}"></label>`).join('')}</div>`).join('') : '<div class="sub">Purchase head, director, consultant — anyone else in the decision.</div>'}
   </div>
-  <div class="panel"><h2>Client brief / requirements</h2><p class="sub" style="margin-top:0">Upload the brief the customer gave — PDF, image, Word, Excel or PowerPoint.</p><div class="row"><label class="up">⬆ Upload brief<input type="file" multiple id="nc-brief" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx,.ppt,.pptx"></label>${n.briefs.map(f => `<span class="chip">📎 <span>${esc(f.name)}</span></span>`).join('')}</div></div>
-  <div class="panel"><h2>Business cards</h2><div class="row"><label class="up">⬆ Add business card (photo / PDF)<input type="file" multiple id="nc-cards" accept=".jpg,.jpeg,.png,.webp,.heic,.pdf"></label>${n.cards.map(f => `<span class="chip">📎 <span>${esc(f.name)}</span></span>`).join('')}</div></div>
-  <div class="row"><button class="btn" id="nc-save">Save client</button><a class="btn ghost" href="#clients">Cancel</a></div>`;
+  ${handsOver() ? '' : `<div class="panel"><h2>Client brief / requirements</h2><p class="sub" style="margin-top:0">Upload the brief the customer gave — PDF, image, Word, Excel or PowerPoint.</p><div class="row"><label class="up">⬆ Upload brief<input type="file" multiple id="nc-brief" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx,.ppt,.pptx"></label>${n.briefs.map(f => `<span class="chip">📎 <span>${esc(f.name)}</span></span>`).join('')}</div></div>
+  <div class="panel"><h2>Business cards</h2><div class="row"><label class="up">⬆ Add business card (photo / PDF)<input type="file" multiple id="nc-cards" accept=".jpg,.jpeg,.png,.webp,.heic,.pdf"></label>${n.cards.map(f => `<span class="chip">📎 <span>${esc(f.name)}</span></span>`).join('')}</div></div>`}
+  <div class="row"><button class="btn" id="nc-save">${handsOver() ? 'Save & hand over' : 'Save client'}</button><a class="btn ghost" href="${handsOver() ? '#home' : '#clients'}">Cancel</a></div>
+  ${handsOver() ? '<div class="panel" id="myhand" style="margin-top:16px"><h2>Clients you added</h2><div class="sub">Loading…</div></div>' : ''}`;
   dupCheck();
+  if (handsOver()) api('my_handovers').then(d => { const el = $('#myhand'); if (el) el.innerHTML = `<h2>Clients you added</h2>${d.rows.length ? `<div class="tw"><table><tr><th>Added</th><th>Company</th><th>Contact</th><th>City</th><th>Handed to</th></tr>${d.rows.map(r => `<tr><td class="num">${fd(r.created_at)}</td><td><b>${esc(r.company)}</b></td><td>${esc(r.person || '')}<div class="sub">${esc(r.phone || '')}</div></td><td>${esc(r.city || '')}</td><td>${esc(r.owner)}</td></tr>`).join('')}</table></div>` : '<div class="sub">None yet.</div>'}`; }).catch(() => {});
 };
 let dupT;
 function dupCheck() {
@@ -871,6 +875,7 @@ const refPill = r => `<span class="pill ${REF_ST[r.status][0]}">${REF_ST[r.statu
 const refLead = r => `<b>${esc(r.company)}</b><div>${esc(r.name)} · <a href="tel:${esc(String(r.phone).replace(/[^\d+]/g, ''))}" class="num">${esc(r.phone)}</a></div>${r.area ? `<div class="sub">Area: ${esc(r.area)}</div>` : ''}${r.note ? `<div class="sub">${esc(r.note)}</div>` : ''}`;
 const refHist = r => r.history.length ? `<details style="margin-top:4px"><summary class="sub" style="cursor:pointer">History</summary>${r.history.map(h => `<div class="sub">${fd(h.at)} ${String(h.at).slice(11, 16)} · ${esc(h.text)}</div>`).join('')}</details>` : '';
 function refTake(r) {   // the person it was handed to: add as client / cannot take it up
+  if (r.client_id && +r.assigned_to === +B.me.id) return `<div style="margin-top:8px"><a class="btn sm" href="#client-${r.client_id}">Open client →</a></div>`;
   if (!['new', 'seen'].includes(r.status) || +r.assigned_to !== +B.me.id) return '';
   return `<div class="row" style="margin-top:8px"><button class="btn sm" data-refadd="${r.id}">+ Add as client</button><button class="btn ghost sm" data-refclose="${r.id}">Can't take it up</button></div>
    <form class="inset" data-refclosef="${r.id}" hidden style="margin-top:8px"><label class="f">Why? *<input name="reason" required placeholder="e.g. Not reachable after 3 calls · budget too low"></label><div style="margin-top:6px"><button class="btn danger sm">Close lead</button></div></form>`;
@@ -885,7 +890,7 @@ routes.refs = async () => {
   const tabs = [['', 'All'], ['new', 'Not opened'], ['seen', 'Opened'], ['converted', 'Added as client'], ['closed', 'Closed']];
   const T = d.targets, sales = T.filter(u => u.role !== 'admin'), admins = T.filter(u => u.role === 'admin');
   const toOpts = sel => `<option value="">Pick sales person or admin</option><optgroup label="Sales team">${sales.map(u => `<option value="${u.id}" ${+sel === +u.id ? 'selected' : ''}>${esc(u.name)}${u.designation ? ' · ' + esc(u.designation) : ''}</option>`).join('')}</optgroup><optgroup label="Admins">${admins.map(u => `<option value="${u.id}" ${+sel === +u.id ? 'selected' : ''}>${esc(u.name)}${+u.id === +B.me.id ? ' (me)' : ''}</option>`).join('')}</optgroup>`;
-  view().innerHTML = `<div class="head"><div><h1>Referral leads</h1><p>${isAdmin() ? 'Leads from your contacts in the market. Hand each one to the sales person or admin best placed to take it up.' : 'Leads admin has handed to you. Call them, then add them as a client — or close with a reason.'}</p></div>${open ? `<span class="pill p-pending">${open} open</span>` : ''}</div>
+  view().innerHTML = `<div class="head"><div><h1>Referral leads</h1><p>${isAdmin() ? 'Leads from your contacts in the market. Hand each one to the sales person or admin best placed to take it up.' : 'Leads handed to you by admin or the research / telecalling team. Call them, then add them as a client — or close with a reason.'}</p></div>${open ? `<span class="pill p-pending">${open} open</span>` : ''}</div>
   ${isAdmin() ? `<form class="panel" id="reff"><h2>Refer a lead</h2><div class="grid g3">
     <label class="f">Name of the person *<input name="name" required autocomplete="off"></label><label class="f">Contact number *<input name="phone" type="tel" required></label><label class="f">Company name *<input name="company" required autocomplete="off"></label>
     <label class="f">Area<input name="area" placeholder="e.g. 36 sqm"></label><label class="f">Hand to *<select name="assigned_to" required>${toOpts('')}</select></label><label class="f">Note<input name="note" placeholder="Optional: expo, city, how you know them"></label></div>
@@ -908,11 +913,96 @@ routes.refs = async () => {
     rf.onsubmit = async e => { e.preventDefault(); const ok = await act(() => api('ref_save', Object.fromEntries(new FormData(rf))), 'Lead referred — they will see it on their dashboard').catch(() => null); if (ok) { await reboot(); refresh(); } };
   }
 };
-function refAlert() { const n = B.ref_new; if (!n) return; const w = $('.welcome') || $('.head'); if (w) w.insertAdjacentHTML('afterend', `<div class="alert warn"><b>${n} new referral lead${n > 1 ? 's' : ''} for you</b><span class="m">Handed to you by admin. <a href="#refs">Open referral leads →</a></span></div>`); }
+function refAlert() { const n = B.ref_new; if (!n) return; const w = $('.welcome') || $('.head'); if (w) w.insertAdjacentHTML('afterend', `<div class="alert warn"><b>${n} new referral lead${n > 1 ? 's' : ''} for you</b><span class="m">Handed to you by admin or the research / telecalling team. <a href="#refs">Open referral leads →</a></span></div>`); }
 
+
+// ---------- contacts: import from Excel / CSV ----------
+const IMP_F = [['name', 'Name', 'name|fullname|contactname|contactperson|person|contact|personname|firstname'], ['designation', 'Designation', 'designation|title|jobtitle|position|role|post'],
+  ['company', 'Company', 'company|companyname|organisation|organization|org|firm|business|exhibitor|brand'], ['phone', 'Phone', 'phone|mobile|mobileno|mobilenumber|phoneno|phonenumber|contactno|contactnumber|cell|whatsapp|tel|telephone|number|mob'],
+  ['phone2', 'Other phone', 'otherphone|alternate|alternatephone|altphone|phone2|mobile2|landline|office|officephone'], ['email', 'Email', 'email|emailid|emailaddress|mail|mailid'],
+  ['email2', 'Other email', 'otheremail|email2|alternateemail|altemail'], ['website', 'Website', 'website|web|url|site|websiteurl'], ['city', 'City', 'city|location|town|place|district'],
+  ['address', 'Address', 'address|addr|fulladdress|officeaddress'], ['note', 'Note', 'note|notes|remarks|remark|comment|comments|requirement']];
+const impNorm = v => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+function impGuess(headers) {
+  const map = {}, used = new Set(), H = headers.map(impNorm);
+  for (const pass of [0, 1]) for (const [k, , syn] of IMP_F) {
+    if (map[k] !== undefined) continue; const S = syn.split('|');
+    const i = H.findIndex((h, j) => !used.has(j) && h && (pass ? S.some(x => x.length > 3 && h.includes(x)) : S.includes(h)));
+    if (i >= 0) { map[k] = i; used.add(i); }
+  }
+  return map;
+}
+async function impRead(file) {
+  if (file.size > 15 * 1048576) throw new Error('This file is too large (over 15 MB). Split it into smaller files.');
+  const fd = new FormData(); fd.append('file', file);
+  const r = await fetch('api.php?a=sheet_read', { method: 'POST', headers: { 'X-CSRF': CSRF }, body: fd, credentials: 'same-origin' });
+  const d = await r.json().catch(() => ({ error: 'Could not read this file' }));
+  if (!r.ok || d.error) throw new Error(d.error || 'Could not read this file');
+  const all = d.rows; const hi = Math.max(0, all.findIndex(x => x.c.filter(v => v).length >= 2)); const head = all[hi];
+  const width = Math.max(...all.map(x => x.c.length));
+  return { name: d.name, sheet: d.sheet, headers: Array.from({ length: width }, (_, j) => head.c[j] || ''), rows: all.slice(hi + 1) };
+}
+const impCol = j => { let s = '', n = j + 1; while (n) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
+function impRow(I, r) { const o = { _row: r.n }; IMP_F.forEach(([k]) => { const j = I.map[k]; if (j !== undefined && j !== '') o[k] = r.c[j] || ''; }); return o; }
+function impPanel(I) {
+  const owner = isAdmin() ? `<label class="f">Belongs to<select data-imp="user_id">${B.users.filter(u => +u.active).map(u => `<option value="${u.id}" ${+u.id === +(I.user_id || B.me.id) ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>` : '';
+  const tag = `<label class="f">Tag — where is this list from? *<input data-imp="tag" list="ctags" value="${esc(I.tag || '')}" placeholder="e.g. IMTEX 2026 exhibitor list"></label>`;
+  let body;
+  if (I.step === 'done') {
+    const R = I.res;
+    body = `<div class="alert ${R.added ? '' : 'warn'}"><b>${R.added} new contact${R.added === 1 ? '' : 's'} added</b><span class="m">${R.merged ? `${R.merged} were already in contacts — their missing details were filled in. ` : ''}${R.skipped.length ? `${R.skipped.length} row${R.skipped.length === 1 ? '' : 's'} skipped.` : 'Nothing skipped.'}</span></div>
+      ${R.skipped.length ? `<div class="tw" style="margin-top:8px;max-height:220px;overflow:auto"><table><tr><th>Sheet row</th><th>Why skipped</th></tr>${R.skipped.slice(0, 200).map(x => `<tr><td class="num">${x.row}</td><td>${esc(x.why)}</td></tr>`).join('')}</table></div>` : ''}
+      <div class="row" style="margin-top:10px"><button class="btn sm" data-impx="close">Done</button><button class="btn ghost sm" data-impx="again">Import another file</button></div>`;
+  } else if (I.step === 'map') {
+    const prev = I.rows.slice(0, 5).map(r => impRow(I, r)), F = IMP_F.filter(([k]) => I.map[k] !== undefined && I.map[k] !== '');
+    const opt = k => `<option value="">— not in sheet —</option>${I.headers.map((h, j) => `<option value="${j}" ${+I.map[k] === j && I.map[k] !== '' && I.map[k] !== undefined ? 'selected' : ''}>${impCol(j)}: ${esc(h || '(no heading)')}</option>`).join('')}`;
+    body = `<div class="sub" style="margin-bottom:8px"><b>${esc(I.name)}</b> · ${I.rows.length} row${I.rows.length === 1 ? '' : 's'} found. Check which column goes where — the CRM has guessed from the headings.</div>
+      <div class="grid g3">${tag}${owner}</div>
+      <div class="grid g3" style="margin-top:10px">${IMP_F.map(([k, l]) => `<label class="f">${l}<select data-impmap="${k}">${opt(k)}</select></label>`).join('')}</div>
+      <h3 style="margin-top:14px">Preview — first ${prev.length} rows</h3>
+      ${F.length ? `<div class="tw"><table><tr>${F.map(([, l]) => `<th>${l}</th>`).join('')}</tr>${prev.map(o => `<tr>${F.map(([k]) => `<td>${esc(o[k] || '')}</td>`).join('')}</tr>`).join('')}</table></div>` : '<div class="alert warn"><b>No columns matched</b><span class="m">Pick at least the name or company, and the phone or email column above.</span></div>'}
+      <div class="sub" style="margin-top:8px">Each row needs a name or company, and a phone or email. People already in contacts (same phone or email) are not added twice.</div>
+      <div class="row" style="margin-top:10px"><button class="btn" data-impx="go" ${I.busy ? 'disabled' : ''}>Import ${I.rows.length} row${I.rows.length === 1 ? '' : 's'}</button><button class="btn ghost sm" data-impx="again">Choose another file</button><button class="btn link" data-impx="close">Cancel</button><span class="sub" id="imp-prog">${esc(I.prog || '')}</span></div>`;
+  } else {
+    body = `<p class="sub" style="margin-top:0">Upload an Excel (.xlsx) or CSV file. The first row should have the column names — e.g. Name, Company, Phone, Email, City. Only the first sheet is read.</p>
+      <div class="grid g3">${tag}${owner}<label class="f">Excel / CSV file *<input type="file" id="imp-file" accept=".xlsx,.xlsm,.xls,.csv"></label></div><span class="sub" id="imp-prog">${esc(I.prog || '')}</span>
+      <div class="row" style="margin-top:10px"><button class="btn link" data-impx="close">Cancel</button></div>`;
+  }
+  return `<div class="panel" id="imppanel"><h2>Import contacts from Excel</h2>${body}</div>`;
+}
+function impWire() {
+  const P = $('#imppanel'); if (!P) return; const I = C.imp;
+  P.querySelectorAll('[data-imp]').forEach(el => el.addEventListener('input', () => { I[el.dataset.imp] = el.value; }));
+  P.querySelectorAll('[data-impmap]').forEach(el => el.addEventListener('change', () => { I.map[el.dataset.impmap] = el.value === '' ? '' : +el.value; refresh(); }));
+  const fi = $('#imp-file'); if (fi) fi.onchange = async () => {
+    const file = fi.files[0]; if (!file) return; $('#imp-prog').textContent = 'Reading the file…';
+    try { const d = await impRead(file); if (!d.rows.length) throw new Error('No rows found under the headings.'); Object.assign(I, d, { step: 'map', map: impGuess(d.headers), prog: '' }); refresh(); }
+    catch (e) { $('#imp-prog').textContent = ''; toast(e.message || 'Could not read this file', true); }
+  };
+  P.querySelectorAll('[data-impx]').forEach(b => b.onclick = async () => {
+    const x = b.dataset.impx;
+    if (x === 'close') { C.imp = null; return refresh(); }
+    if (x === 'again') { C.imp = { step: 'file', tag: I.tag, user_id: I.user_id }; return refresh(); }
+    if (x === 'go') {
+      if (!(I.tag || '').trim()) return toast('Enter a tag — where this list came from', true);
+      const has = k => I.map[k] !== undefined && I.map[k] !== '';
+      if (!has('name') && !has('company')) return toast('Pick the Name or Company column', true);
+      if (!has('phone') && !has('email')) return toast('Pick the Phone or Email column', true);
+      I.busy = true; b.disabled = true; const all = I.rows.map(r => impRow(I, r)), R = { added: 0, merged: 0, skipped: [] };
+      try {
+        for (let i = 0; i < all.length; i += 300) {
+          $('#imp-prog').textContent = `Saving ${Math.min(i + 300, all.length)} of ${all.length}…`;
+          const d = await api('cards_import', { tag: I.tag.trim(), user_id: I.user_id || '', rows: all.slice(i, i + 300) });
+          R.added += d.added; R.merged += d.merged; R.skipped.push(...d.skipped);
+        }
+        Object.assign(I, { step: 'done', res: R, busy: false, prog: '' }); C.dirf = { q: '', source: '', tag: I.tag.trim(), user_id: '' }; toast(`${R.added} contacts imported`); refresh();
+      } catch (e) { I.busy = false; b.disabled = false; I.prog = ''; $('#imp-prog').textContent = `Stopped: ${e.message}. ${R.added} were saved before this.`; }
+    }
+  });
+}
 
 // ---------- contacts directory + business-card scanning ----------
-const SRC_PILL = { 'Business card': 'p-received', 'Added by hand': 'p-off', Client: 'p-ok', 'Client contact': 'p-ok', 'Referral lead': 'p-quoted' };
+const SRC_PILL = { 'Business card': 'p-received', 'Added by hand': 'p-off', 'Excel import': 'p-enquiry', Client: 'p-ok', 'Client contact': 'p-ok', 'Referral lead': 'p-quoted' };
 const CARD_F = [['name', 'Name'], ['designation', 'Designation'], ['company', 'Company'], ['phone', 'Phone'], ['phone2', 'Other phones'], ['email', 'Email'], ['email2', 'Other emails'], ['website', 'Website'], ['city', 'City'], ['tag', 'Tag / where met'], ['address', 'Address'], ['note', 'Note']];
 function cardForm(c, id) {
   return `<form class="inset" data-cform="${id || 0}" style="margin-top:6px"><div class="grid g3">${CARD_F.map(([k, l]) => `<label class="f ${k === 'address' || k === 'note' ? 'wide' : ''}">${l}${k === 'address' || k === 'note' ? `<textarea name="${k}" rows="2">${esc(c[k] || '')}</textarea>` : `<input name="${k}" value="${esc(c[k] || '')}" ${k === 'tag' ? 'list="ctags"' : ''} ${k === 'email' ? 'type="email"' : ''}>`}</label>`).join('')}
@@ -934,7 +1024,7 @@ routes.contacts = async () => {
   const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
   const res = C.scanRes || [];
   view().innerHTML = `<div class="head"><div><h1>Contacts</h1><p>${isAdmin() ? 'Every contact in the company in one place — business cards, clients, expo data from research & telecalling, and referral leads. The tag shows where each came from and who added it.' : 'Contacts you have brought in — business cards, your clients and referral leads.'}</p></div>
-   <div class="row"><button class="btn" id="scan-open">📷 Scan business cards</button><button class="btn ghost" id="cadd-open">+ Add contact</button><a class="btn ghost" href="contacts_export.php?${qs}">⬇ Export to Excel</a></div></div>
+   <div class="row"><button class="btn" id="scan-open">📷 Scan business cards</button><button class="btn ghost" id="cadd-open">+ Add contact</button><button class="btn ghost" id="cimp-open">⬆ Import from Excel</button><a class="btn ghost" href="contacts_export.php?${qs}">⬇ Export to Excel</a></div></div>
   <datalist id="ctags">${[...new Set([...d.tags, ...d.expos])].map(t => `<option value="${esc(t)}">`).join('')}</datalist>
   <form class="panel" id="scanf" ${C.scanOpen ? '' : 'hidden'}><h2>Scan business cards</h2>
    <p class="sub" style="margin-top:0">Lay the cards flat in rows, not overlapping, in good light, and take one photo (up to ~30 cards). Several photos can be added at once. Each card is saved as your contact.</p>
@@ -949,9 +1039,10 @@ routes.contacts = async () => {
     ${r.cards.length ? `<div class="tw" style="margin-top:6px"><table><tr><th>Name</th><th>Company</th><th>Phone</th><th>Email</th><th></th></tr>${r.cards.map(c => `<tr><td><b>${esc(c.name)}</b><div class="sub">${esc(c.designation || '')}</div></td><td>${esc(c.company)}</td><td class="num">${esc(c.phone)}${c.phone2 ? `<div class="sub">${esc(c.phone2)}</div>` : ''}</td><td>${esc(c.email)}</td>
       <td>${c.dup ? '<span class="pill p-off">already in contacts — updated</span>' : c.known ? `<span class="pill p-quoted">${esc(c.known)}</span>` : '<span class="pill p-ok">new</span>'} <button class="btn link" data-cedit="${c.id}">Edit</button></td></tr>`).join('')}</table></div>` : ''}
     ${r.manual || r.error || !r.cards.length ? `<button class="btn ghost sm" data-cnew="${esc(C.scanTag || '')}" style="margin-top:6px">+ Type a card in</button>` : ''}</div>`).join('')}</div>` : ''}
+  ${C.imp ? impPanel(C.imp) : ''}
   <div id="cadd">${C.cnew !== undefined && C.cnew !== null ? `<div class="panel"><h2>Add contact</h2>${cardForm({ tag: C.cnew }, 0)}</div>` : ''}</div>
   <form class="panel row" id="dirf" style="align-items:flex-end"><label class="f" style="flex:1;min-width:200px">Search name, company, phone, email, tag<input name="q" value="${esc(f.q)}"></label>
-   <label class="f">Source<select name="source"><option value="">All</option>${[['card', 'Business cards & added by hand'], ['client', 'Clients'], ['expo', 'Expo data (research / telecalling)'], ['referral', 'Referral leads']].map(([k, l]) => `<option value="${k}" ${f.source === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+   <label class="f">Source<select name="source"><option value="">All</option>${[['card', 'Business cards, Excel & added by hand'], ['client', 'Clients'], ['expo', 'Expo data (research / telecalling)'], ['referral', 'Referral leads']].map(([k, l]) => `<option value="${k}" ${f.source === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
    <label class="f">Tag<select name="tag"><option value="">Any</option>${d.tags.map(t => `<option ${f.tag === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
    ${isAdmin() ? `<label class="f">Added by<select name="user_id"><option value="">Everyone</option>${B.users.map(u => `<option value="${u.id}" ${+f.user_id === +u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>` : ''}<button class="btn ghost">Apply</button></form>
   <div class="panel"><div class="ph"><h2>${d.total} contact${d.total === 1 ? '' : 's'}</h2><div class="row">${Object.entries(d.counts).map(([k, n]) => `<span class="pill ${SRC_PILL[k] || 'p-enquiry'}">${esc(k)} · ${n}</span>`).join('')}</div></div>
@@ -965,6 +1056,8 @@ routes.contacts = async () => {
   $('#dirf').onsubmit = e => { e.preventDefault(); C.dirf = Object.fromEntries(new FormData(e.target)); refresh(); };
   $('#scan-open').onclick = () => { C.scanOpen = true; $('#scanf').hidden = false; $('#scanf [name=tag]').focus(); };
   $('#cadd-open').onclick = () => { C.cnew = f.tag || ''; refresh(); };
+  $('#cimp-open').onclick = () => { C.imp = C.imp || { step: 'file' }; refresh(); };
+  impWire();
   const clr = $('#scanres-clear'); if (clr) clr.onclick = () => { C.scanRes = []; refresh(); };
   $('#scanf').onsubmit = async e => {
     e.preventDefault(); const fm = e.target, tag = fm.tag.value.trim(), files = [...fm.photos.files]; if (!tag || !files.length) return;
@@ -1520,6 +1613,7 @@ document.addEventListener('click', async e => {
       case 'nc-addc': newClient.contacts.push({ name: '', designation: '', phone: '', email: '' }); return refresh();
       case 'nc-save': {
         const n = newClient; if (!n.company.trim()) return toast('Enter the company name', true);
+        if (handsOver() && !n.owner_id) return toast('Pick the sales person to hand this client to', true);
         if (Object.values(n.expo).some(v => String(v).trim()) && !n.expo.expo.trim()) return toast('Enter the expo name', true);
         t.disabled = true;
         const r = await act(() => api('client_save', { ...n, cards: undefined, briefs: undefined, gstcert: undefined })).catch(() => null);
@@ -1527,6 +1621,7 @@ document.addEventListener('click', async e => {
         if (n.cards.length) await act(() => uploadAll('card', r.id, n.cards)).catch(() => {});
         if (n.briefs.length) await act(() => uploadAll('brief', r.id, n.briefs)).catch(() => {});
         if (n.gstcert.length) await act(() => uploadAll('gstcert', r.id, n.gstcert)).catch(() => {});
+        if (handsOver()) { const to = (B.handover || []).find(u => +u.id === +n.owner_id); newClient = null; toast(`Client added and handed to ${to ? to.name : 'sales'}`); window.scrollTo(0, 0); return refresh(); }
         newClient = null; toast(n.expo.expo.trim() ? 'Client and expo order saved' : 'Client saved'); if (n.ref_id) await reboot(); location.hash = '#client-' + r.id; return;
       }
       case 'dnq-open': $('#dnq-form').innerHTML = `<form class="panel" id="dnqf"><h3>Mark as “Do not quote”</h3><div class="grid"><label class="f">Reason<select name="reason" required>${B.reasons.map(r => `<option>${esc(r.label)}</option>`).join('')}</select></label><label class="f">What happened?<input name="note"></label></div><div class="row" style="margin-top:8px"><button class="btn danger">Confirm flag</button></div></form>`;

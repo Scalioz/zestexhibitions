@@ -33,7 +33,8 @@ $RECORDS = $ADMIN || $MODULE === 'records';
 $ACC = $ADMIN || $MODULE === 'accounts';
 $RECORD_ACTIONS = ['clients', 'client', 'client_save', 'dup', 'dnq', 'contact_add', 'contact_del', 'project_create', 'project', 'project_save',
   'child_add', 'child_update', 'child_del', 'vq_select', 'vendor_add'];
-if (in_array($A, $RECORD_ACTIONS, true) && !$RECORDS) fail('Your department does not have access to client records.', 403);
+$HANDOVER = in_array($MODULE, ['leads', 'calls'], true);   // research / telecalling can add a new client and hand it to a sales person
+if (in_array($A, $RECORD_ACTIONS, true) && !$RECORDS && !($HANDOVER && ($A === 'dup' || ($A === 'client_save' && empty($in['id']))))) fail('Your department does not have access to client records.', 403);
 if ($A === 'upload' && !$RECORDS && !in_array($in['entity'] ?? '', ['ritem', 'final', 'wd', 'claim', 'voucher'], true)) fail('Your department does not have access to client records.', 403);
 
 const UPLOAD_MAX_MB = 60;
@@ -130,6 +131,7 @@ case 'boot':
     'dept_modules' => setting('dept_modules', default_dept_modules()),
     'furniture_items' => setting('furniture_items', default_furniture()),
     'acc' => $ACC,
+    'handover' => $HANDOVER ? ref_targets() : [],
     'ref_new' => (int) val('SELECT COUNT(*) FROM ' . T('referrals') . " WHERE assigned_to = ? AND status = 'new'", [$MID]),
     'ref_open' => (int) val('SELECT COUNT(*) FROM ' . T('referrals') . " WHERE assigned_to = ? AND status IN ('new','seen')", [$MID]),
     'claims_attention' => (int) val('SELECT COUNT(*) FROM ' . T('claims') . " WHERE user_id = ? AND status IN ('on_hold','rejected')", [$MID]),
@@ -341,6 +343,12 @@ case 'client_save':
   if (empty($in['id'])) {
     if (empty($data['company'])) fail('Enter the company name.');
     $data['owner_id'] = ($ADMIN && !empty($in['owner_id'])) ? (int) $in['owner_id'] : $MID;
+    $hand = null;
+    if (!$RECORDS) {   // research / telecalling: the client goes to the sales person they pick
+      foreach (ref_targets() as $u) if ((int) $u['id'] === (int) ($in['owner_id'] ?? 0)) $hand = $u;
+      if (!$hand) fail('Pick the sales person who should take this client.');
+      $data['owner_id'] = (int) $hand['id']; unset($in['ref_id']);
+    }
     $data['created_by'] = $MID; $data['created_at'] = now();
     $ex = (array) ($in['expo'] ?? []);
     $hasExpo = array_filter(array_map(fn($x) => trim((string) $x), $ex));
@@ -354,6 +362,12 @@ case 'client_save':
         upd('referrals', $rf['id'], ['status' => 'converted', 'client_id' => $id, 'converted_at' => now(), 'seen_at' => $rf['seen_at'] ?: now(), 'history' => ref_hist($rf, 'Added as client by ' . $me['name'])]);
     }
     foreach ((array) ($in['contacts'] ?? []) as $ct) if (s($ct['name'] ?? null)) ins('contacts', ['client_id' => $id, 'name' => s($ct['name']), 'designation' => s($ct['designation'] ?? null), 'phone' => s($ct['phone'] ?? null), 'email' => s($ct['email'] ?? null)]);
+    if ($hand) {   // tell the sales person: it shows as a new referral lead on their dashboard, already added as a client
+      $who = $me['name'] . ($me['department'] ? ' (' . $me['department'] . ')' : '');
+      ins('referrals', ['name' => s($data['person'] ?? null, 120) ?? $data['company'], 'phone' => s($data['phone'] ?? null, 40) ?? '—', 'company' => mb_substr($data['company'], 0, 200), 'area' => s($ex['area_sqm'] ?? null, 20) ? s($ex['area_sqm'], 20) . ' sqm' : null,
+        'note' => trim(($hasExpo ? 'Expo: ' . s($ex['expo'] ?? null, 200) . '. ' : '') . (s($data['notes'] ?? null, 1500) ?? '')) ?: null, 'referred_by' => $MID, 'assigned_to' => $data['owner_id'], 'assigned_at' => now(),
+        'status' => 'new', 'client_id' => $id, 'created_at' => now(), 'history' => json_encode([['at' => now(), 'text' => 'Added as a client by ' . $who . ' and handed to ' . $hand['name']]], JSON_UNESCAPED_UNICODE)]);
+    }
     db()->commit();
     out(['id' => $id]);
   }
@@ -776,6 +790,41 @@ case 'dir_list':   // one directory: cards, clients, client contacts, expo data,
   $by = []; foreach ($rows as $r) $by[$r['source']] = ($by[$r['source']] ?? 0) + 1;
   out(['rows' => array_slice($rows, 0, 1500), 'total' => $total, 'counts' => $by, 'tags' => $tags, 'expos' => $expos]);
 
+case 'my_handovers':   // research / telecalling: clients I added and handed to sales
+  $um = users_map();
+  $rows = all('SELECT id, company, person, phone, city, owner_id, created_at FROM ' . T('clients') . ' WHERE created_by = ? AND owner_id <> ? ORDER BY id DESC LIMIT 100', [$MID, $MID]);
+  foreach ($rows as &$r) $r['owner'] = $um[$r['owner_id']] ?? '—'; unset($r);
+  out(['rows' => $rows]);
+
+case 'sheet_read':   // read an uploaded Excel / CSV so the person can match its columns (the file itself is not kept)
+  require_once __DIR__ . '/lib/sheet.php';
+  $f = $_FILES['file'] ?? null;
+  if (!$f || $f['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($f['tmp_name'])) fail('The file did not upload. Please try again.');
+  if ($f['size'] > 15 * 1048576) fail('This file is too large (over 15 MB). Split it into smaller files.');
+  try { $d = sheet_read($f['tmp_name'], $f['name']); } catch (Exception $e) { fail($e->getMessage()); }
+  if (!$d['rows']) fail('This sheet is empty.');
+  out($d + ['name' => mb_substr($f['name'], 0, 120)]);
+
+case 'cards_import':   // contacts from an Excel / CSV sheet, sent in batches by the browser
+  require_once __DIR__ . '/lib/cards.php';
+  $tag = s($in['tag'] ?? null, 160) ?? fail('Enter a tag — where this list came from.');
+  $uid = $ADMIN && !empty($in['user_id']) ? (int) $in['user_id'] : $MID;
+  $rows = array_slice((array) ($in['rows'] ?? []), 0, 500);
+  $added = 0; $merged = 0; $skipped = [];
+  tx();
+  foreach ($rows as $x) {
+    $x = (array) $x; $n = (int) ($x['_row'] ?? 0); $row = [];
+    foreach (['name' => 120, 'designation' => 120, 'company' => 200, 'phone' => 40, 'phone2' => 120, 'email' => 160, 'email2' => 255, 'website' => 160, 'city' => 80, 'address' => 2000, 'note' => 4000] as $k => $len) $row[$k] = s(isset($x[$k]) ? (string) $x[$k] : null, $len) ?? '';
+    if ($row['email'] !== '' && !filter_var($row['email'], FILTER_VALIDATE_EMAIL)) { $row['note'] = trim($row['note'] . ' Email in sheet: ' . $row['email']); $row['email'] = ''; }
+    $row['email'] = strtolower($row['email']);
+    if ($row['name'] === '' && $row['company'] === '') { $skipped[] = ['row' => $n, 'why' => 'no name or company']; continue; }
+    if ($row['phone'] === '' && $row['email'] === '') { $skipped[] = ['row' => $n, 'why' => 'no phone or email']; continue; }
+    $sv = card_save($row, $uid, $me['name'], $tag, null, 'import');
+    $sv['dup'] ? $merged++ : $added++;
+  }
+  db()->commit();
+  out(['added' => $added, 'merged' => $merged, 'skipped' => $skipped]);
+
 case 'card_save':   // add a contact by hand, or correct one
   require_once __DIR__ . '/lib/cards.php';
   $row = []; foreach (['name' => 120, 'designation' => 120, 'company' => 200, 'phone' => 40, 'phone2' => 120, 'email' => 160, 'email2' => 255, 'website' => 160, 'city' => 80, 'address' => 2000, 'tag' => 160, 'note' => 4000] as $k => $n) $row[$k] = s($in[$k] ?? null, $n) ?? '';
@@ -845,7 +894,7 @@ case 'ref_save':   // admin: refer a new lead, or hand an open one to someone el
 
 case 'ref_seen':
   $r = one('SELECT * FROM ' . T('referrals') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]);
-  if ($r && (int) $r['assigned_to'] === $MID && $r['status'] === 'new') upd('referrals', $r['id'], ['status' => 'seen', 'seen_at' => now()]);
+  if ($r && (int) $r['assigned_to'] === $MID && $r['status'] === 'new') upd('referrals', $r['id'], $r['client_id'] ? ['status' => 'converted', 'seen_at' => now(), 'converted_at' => now()] : ['status' => 'seen', 'seen_at' => now()]);
   out(['ok' => true]);
 
 case 'ref_close':   // the person handling it: not workable (with reason) · admin: can close any

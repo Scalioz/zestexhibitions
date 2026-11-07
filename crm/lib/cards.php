@@ -112,7 +112,7 @@ function directory_rows($in, $admin, $uid) {
     [$w, $p] = $like(['name', 'company', 'phone', 'email', 'city', 'tag']);
     if ($who) { $w .= ' AND user_id = ?'; $p[] = $who; } if ($tagf !== '') { $w .= ' AND tag = ?'; $p[] = $tagf; }
     foreach (all('SELECT * FROM ' . T('cards') . " WHERE $w ORDER BY id DESC LIMIT 3000", $p) as $r)
-      $rows[] = ['source' => $r['source'] === 'manual' ? 'Added by hand' : 'Business card', 'kind' => 'card', 'id' => (int) $r['id'], 'tag' => $r['tag'], 'by' => $um[$r['user_id']] ?? '—', 'user_id' => (int) $r['user_id'],
+      $rows[] = ['source' => ['manual' => 'Added by hand', 'import' => 'Excel import'][$r['source']] ?? 'Business card', 'kind' => 'card', 'id' => (int) $r['id'], 'tag' => $r['tag'], 'by' => $um[$r['user_id']] ?? '—', 'user_id' => (int) $r['user_id'],
         'name' => $r['name'], 'designation' => $r['designation'], 'company' => $r['company'], 'phone' => trim($r['phone'] . ($r['phone2'] ? ', ' . $r['phone2'] : ''), ', '), 'email' => trim($r['email'] . ($r['email2'] ? ', ' . $r['email2'] : ''), ', '),
         'city' => $r['city'], 'website' => $r['website'], 'address' => $r['address'], 'note' => $r['note'], 'scan_id' => $r['scan_id'] ? (int) $r['scan_id'] : null, 'at' => $r['created_at'], 'raw' => $r];
   }
