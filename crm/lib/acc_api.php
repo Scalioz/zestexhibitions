@@ -28,7 +28,9 @@ function claims_out($where, $p) {
   foreach ($rows as &$r) { $r['files'] = $fl[$r['id']] ?? []; $r['notes'] = $notes[$r['id']] ?? []; } unset($r);
   return $rows;
 }
-function inv_totals($lines, $rate) {
+// lines → [lines, value before GST (after discount), GST, grand total, GST-able amount, discount, round off]
+// The discount comes off the GST-able amount (before GST). Round off brings the grand total to whole rupees unless turned off.
+function inv_totals($lines, $rate, $disc = 0, $mode = 'auto') {
   $tax = 0; $non = 0; $out = [];
   foreach (array_slice((array) $lines, 0, 50) as $l) { $l = (array) $l;
     $d = s($l['desc'] ?? null, 500); if (!$d) continue;
@@ -36,8 +38,12 @@ function inv_totals($lines, $rate) {
     $out[] = ['desc' => $d, 'sac' => s($l['sac'] ?? null, 20), 'qty' => $q, 'rate' => $r, 'amount' => $amt, 'tax' => $tx ? 1 : 0];
     if ($tx) $tax += $amt; else $non += $amt;
   }
-  $gst = round($tax * $rate / 100, 2);
-  return [$out, round($tax + $non, 2), $gst, round($tax + $non + $gst, 2), $tax];
+  $disc = round((float) $disc, 2); if ($disc < 0) fail('Discount cannot be negative.');
+  $base = $tax > 0 ? $tax : $non; if ($disc > 0 && $disc >= $base) fail('Discount is more than the ' . ($tax > 0 ? 'amount with GST' : 'total') . '.');
+  if ($tax > 0) $tax = round($tax - $disc, 2); else $non = round($non - $disc, 2);
+  $gst = round($tax * $rate / 100, 2); $pre = round($tax + $non + $gst, 2);
+  $ro = $mode === 'none' ? 0.0 : round(round($pre) - $pre, 2);
+  return [$out, round($tax + $non, 2), $gst, round($pre + $ro, 2), $tax, $disc, $ro];
 }
 
 // ---------- invoice workflow: sales request → accounts prepare → admin approve ----------
@@ -54,7 +60,7 @@ function inv_log($id, $action, $note = null, $ver = null, $snap = null) {
 }
 function inv_snap($i) {
   return ['inv_date' => $i['inv_date'], 'place_state' => $i['place_state'], 'gst_rate' => (float) $i['gst_rate'], 'notes' => (string) ($i['notes'] ?? ''),
-    'lines' => json_decode($i['lines_json'], true) ?: [], 'taxable' => (float) $i['taxable'], 'gst' => (float) $i['gst'], 'total' => (float) $i['total']];
+    'lines' => json_decode($i['lines_json'], true) ?: [], 'discount' => (float) ($i['discount'] ?? 0), 'round_off' => (float) ($i['round_off'] ?? 0), 'taxable' => (float) $i['taxable'], 'gst' => (float) $i['gst'], 'total' => (float) $i['total']];
 }
 function inv_diff($a, $b) {   // what changed between two versions, in plain words
   $ch = []; $r = fn($n) => '₹' . inr2($n);
@@ -72,6 +78,8 @@ function inv_diff($a, $b) {   // what changed between two versions, in plain wor
     if ((int) $x['tax'] !== (int) $y['tax']) $ch[] = "$no GST: " . ($x['tax'] ? 'yes' : 'no') . ' → ' . ($y['tax'] ? 'yes' : 'no');
   }
   if (trim($a['notes']) !== trim($b['notes'])) $ch[] = 'Notes: “' . (mb_strimwidth(trim($a['notes']), 0, 120, '…') ?: 'empty') . '” → “' . (mb_strimwidth(trim($b['notes']), 0, 120, '…') ?: 'empty') . '”';
+  if (($a['discount'] ?? 0) != ($b['discount'] ?? 0)) $ch[] = 'Discount: ' . $r($a['discount'] ?? 0) . ' → ' . $r($b['discount'] ?? 0);
+  if (($a['round_off'] ?? 0) != ($b['round_off'] ?? 0)) $ch[] = 'Round off: ' . $r($a['round_off'] ?? 0) . ' → ' . $r($b['round_off'] ?? 0);
   if ($a['total'] != $b['total']) $ch[] = 'Grand total: ' . $r($a['total']) . ' → ' . $r($b['total']);
   return $ch;
 }
@@ -104,6 +112,7 @@ function inv_issue_do($i) {   // gives the number (kept if a proforma is being r
   if ($i['kind'] === 'tax' && !$jid) {
     $lines = [[party_account('client', $i['client_id'], $i['company']), $i['total'], 0, "Invoice $no"], [acc_sub('sales'), 0, $i['taxable'], "Invoice $no"]];
     $lines = array_merge($lines, gst_lines((float) $i['gst'], $i['gst_mode'], 'out'));
+    $ro = (float) ($i['round_off'] ?? 0); if ($ro != 0) $lines[] = [acc_sub('roundoff'), $ro < 0 ? -$ro : 0, $ro > 0 ? $ro : 0, "Round off — invoice $no"];
     $jid = post_journal($i['inv_date'], 'Sales', "Tax invoice $no — {$i['company']}", $lines, 'invoice', $i['id'], $i['project_id'], $MID);
     if ($i['project_id']) upd('projects', $i['project_id'], ['invoice_no' => $no, 'invoice_date' => $i['inv_date']]);
   }
@@ -425,12 +434,12 @@ case 'inv_request':   // sales asks accounts for a proforma / tax invoice
     if ($f['kind'] !== 'proforma' || $f['status'] !== 'issued') fail('Only an approved proforma can be turned into a tax invoice.');
     if ($ex = val('SELECT id FROM ' . T('invoices') . " WHERE from_id = ? AND status <> 'cancelled'", [$f['id']])) fail('A tax invoice for this proforma is already requested.');
     $data = ['kind' => 'tax', 'inv_date' => today(), 'client_id' => $f['client_id'], 'project_id' => $f['project_id'], 'place_state' => $f['place_state'], 'gst_mode' => $f['gst_mode'], 'gst_rate' => $f['gst_rate'],
-      'lines_json' => $f['lines_json'], 'taxable' => $f['taxable'], 'gst' => $f['gst'], 'total' => $f['total'], 'notes' => $f['notes'], 'from_id' => $f['id']];
+      'lines_json' => $f['lines_json'], 'discount' => $f['discount'] ?? 0, 'round_off' => $f['round_off'] ?? 0, 'round_mode' => $f['round_mode'] ?? 'auto', 'taxable' => $f['taxable'], 'gst' => $f['gst'], 'total' => $f['total'], 'notes' => $f['notes'], 'from_id' => $f['id']];
   } elseif (!empty($in['project_id'])) {
     $pf = inv_prefill_lines($in['project_id']); if (!$ADMIN && $pf['owner_id'] !== $MID) fail('This order is not yours.', 403);
-    [$lines, $taxable, $gst, $total] = inv_totals($pf['lines'], $pf['gst_rate']);
+    [$lines, $taxable, $gst, $total, , , $ro] = inv_totals($pf['lines'], $pf['gst_rate']);
     $data = ['kind' => $kind, 'inv_date' => today(), 'client_id' => $pf['client_id'], 'project_id' => $pf['project_id'], 'place_state' => $state, 'gst_mode' => 'cgst_sgst', 'gst_rate' => $pf['gst_rate'],
-      'lines_json' => json_encode($lines, JSON_UNESCAPED_UNICODE), 'taxable' => $taxable, 'gst' => $gst, 'total' => $total];
+      'lines_json' => json_encode($lines, JSON_UNESCAPED_UNICODE), 'round_off' => $ro, 'taxable' => $taxable, 'gst' => $gst, 'total' => $total];
   } else {
     $cid = (int) ($in['client_id'] ?? 0); if (!val('SELECT COUNT(*) FROM ' . T('clients') . ' WHERE id = ?' . ($ADMIN ? '' : ' AND owner_id = ' . $MID), [$cid])) fail('Pick the order or the client.');
     $data = ['kind' => $kind, 'inv_date' => today(), 'client_id' => $cid, 'project_id' => null, 'place_state' => $state, 'gst_mode' => 'cgst_sgst', 'gst_rate' => 18, 'lines_json' => '[]', 'taxable' => 0, 'gst' => 0, 'total' => 0];
@@ -456,11 +465,13 @@ case 'inv_save':   // accounts prepares / corrects; optional send to admin in th
   $kind = ($in['kind'] ?? '') === 'tax' ? 'tax' : 'proforma';
   $cid = (int) ($in['client_id'] ?? 0); if (!val('SELECT COUNT(*) FROM ' . T('clients') . ' WHERE id = ?', [$cid])) fail('Pick the client.');
   $rate = (float) ($in['gst_rate'] ?? 18); if ($rate < 0 || $rate > 28) fail('GST rate looks wrong.');
-  [$lines, $taxable, $gst, $total] = inv_totals($in['lines'] ?? [], $rate); if (!$lines) fail('Add at least one line.');
+  $rmode = ($in['round_mode'] ?? 'auto') === 'none' ? 'none' : 'auto';
+  $dIn = str_replace([',', ' ', '₹'], '', (string) ($in['discount'] ?? '')); if ($dIn !== '' && !is_numeric($dIn)) fail('Enter the discount as a number.');
+  [$lines, $taxable, $gst, $total, , $disc, $ro] = inv_totals($in['lines'] ?? [], $rate, (float) $dIn, $rmode); if (!$lines) fail('Add at least one line.');
   $state = s($in['place_state'] ?? null, 60) ?? (setting('company', [])['state'] ?? '');
   $mode = mb_strtolower(trim($state)) === mb_strtolower(trim(setting('company', [])['state'] ?? '')) ? 'cgst_sgst' : 'igst';
   $data = ['inv_date' => d($in['inv_date'] ?? null) ?? today(), 'client_id' => $cid, 'project_id' => (int) ($in['project_id'] ?? 0) ?: null, 'place_state' => $state, 'gst_mode' => $mode, 'gst_rate' => $rate,
-    'lines_json' => json_encode($lines, JSON_UNESCAPED_UNICODE), 'taxable' => $taxable, 'gst' => $gst, 'total' => $total, 'notes' => s($in['notes'] ?? null, 2000)];
+    'lines_json' => json_encode($lines, JSON_UNESCAPED_UNICODE), 'discount' => $disc, 'round_off' => $ro, 'round_mode' => $rmode, 'taxable' => $taxable, 'gst' => $gst, 'total' => $total, 'notes' => s($in['notes'] ?? null, 2000)];
   tx();
   if (!empty($in['id'])) {
     lock_row('invoices', $in['id']); $i = inv_row($in['id']); if (!in_array($i['status'], INV_EDITABLE, true)) fail($i['status'] === 'pending' ? 'It is waiting for admin. It can be changed if admin puts it on hold or rejects it.' : 'This invoice can no longer be changed.');
@@ -515,7 +526,7 @@ case 'inv_convert':   // accounts: draft tax invoice from an approved proforma
   lock_row('invoices', $in['id'] ?? 0); $i = inv_row($in['id'] ?? 0);
   if ($i['kind'] !== 'proforma' || $i['status'] !== 'issued') fail('Only an approved proforma can be turned into a tax invoice.');
   if ($ex = val('SELECT id FROM ' . T('invoices') . " WHERE from_id = ? AND status <> 'cancelled'", [$i['id']])) out(['id' => (int) $ex]);
-  $copy = array_intersect_key($i, array_flip(['client_id', 'project_id', 'place_state', 'gst_mode', 'gst_rate', 'lines_json', 'taxable', 'gst', 'total', 'notes', 'requested_by', 'request_note']));
+  $copy = array_intersect_key($i, array_flip(['client_id', 'project_id', 'place_state', 'gst_mode', 'gst_rate', 'lines_json', 'discount', 'round_off', 'round_mode', 'taxable', 'gst', 'total', 'notes', 'requested_by', 'request_note']));
   $id = ins('invoices', $copy + ['kind' => 'tax', 'status' => 'draft', 'version' => 0, 'inv_date' => today(), 'from_id' => $i['id'], 'created_by' => $MID, 'created_at' => now()]);
   inv_log($id, 'created', 'Made from proforma ' . $i['inv_no']);
   out(['id' => $id]);

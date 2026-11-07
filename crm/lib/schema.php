@@ -120,6 +120,11 @@ function migrate() {
   }
   if ($v < 14) { create_referrals_table(); set_setting('schema_v', 14); }
   if ($v < 15) { create_cards_tables(); set_setting('schema_v', 15); }
+  if ($v < 16) {   // discount and round off on invoices
+    foreach (['discount DECIMAL(14,2) NOT NULL DEFAULT 0', 'round_off DECIMAL(10,2) NOT NULL DEFAULT 0', "round_mode VARCHAR(8) NOT NULL DEFAULT 'auto'"] as $col) { try { db()->exec('ALTER TABLE ' . T('invoices') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ } }
+    if (val('SELECT COUNT(*) FROM ' . T('accounts')) && !val('SELECT COUNT(*) FROM ' . T('accounts') . " WHERE sub = 'roundoff'")) ins('accounts', ['code' => '4910', 'name' => 'Round off', 'type' => 'income', 'sub' => 'roundoff', 'opening' => 0, 'active' => 1, 'created_at' => now()]);
+    set_setting('schema_v', 16);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
@@ -181,7 +186,7 @@ function seed_accounts() {
     ['2100', 'Sundry creditors (other)', 'liability', null], ['2200', 'Output CGST', 'liability', 'gst_out_c'], ['2201', 'Output SGST', 'liability', 'gst_out_s'], ['2202', 'Output IGST', 'liability', 'gst_out_i'],
     ['2300', 'TDS payable', 'liability', 'tds_out'], ['2400', 'Salary deductions payable (PF/ESI)', 'liability', 'sal_ded'], ['2500', 'Expense claims payable (staff)', 'liability', 'claims_pay'],
     ['3100', 'Capital account', 'equity', null],
-    ['4100', 'Stall fabrication income', 'income', 'sales'], ['4200', 'Other income', 'income', null],
+    ['4100', 'Stall fabrication income', 'income', 'sales'], ['4910', 'Round off', 'income', 'roundoff'], ['4200', 'Other income', 'income', null],
     ['5100', 'Fabrication cost (vendors)', 'expense', 'fab'], ['5200', 'Salaries & wages', 'expense', 'salary'], ['5300', 'Office rent', 'expense', null], ['5310', 'Electricity', 'expense', null],
     ['5320', 'Internet & phone', 'expense', null], ['5400', 'Travel - flight / train', 'expense', 'exp_travel'], ['5410', 'Hotel & stay', 'expense', 'exp_hotel'], ['5420', 'Local conveyance', 'expense', 'exp_local'],
     ['5430', 'Food & meals', 'expense', 'exp_food'], ['5440', 'Courier & transport', 'expense', 'exp_courier'], ['5450', 'Printing & stationery', 'expense', 'exp_print'], ['5460', 'Site materials & labour', 'expense', 'exp_site'],

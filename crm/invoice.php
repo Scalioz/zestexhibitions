@@ -51,9 +51,12 @@ tr.t td{font-weight:bold;background:#eef1f7}tr.g td{font-weight:bold;background:
 </div>
 <table><tr><th style="width:5%">Sl</th><th>Description</th><th style="width:10%">SAC</th><th style="width:7%">Qty</th><th style="width:14%">Rate (₹)</th><th style="width:15%">Amount (₹)</th></tr>
 <?php foreach ($L as $k => $l): ?><tr><td class="c"><?= $k + 1 ?></td><td><?= $h($l['desc']) ?><?= empty($l['tax']) ? ' <span class="small">(no GST)</span>' : '' ?></td><td class="c"><?= $h($l['sac']) ?></td><td class="c"><?= rtrim(rtrim(number_format($l['qty'], 2, '.', ''), '0'), '.') ?></td><td class="n"><?= $m($l['rate']) ?></td><td class="n"><?= $m($l['amount']) ?></td></tr><?php endforeach; ?>
+<?php $disc = (float) ($i['discount'] ?? 0); $ro = (float) ($i['round_off'] ?? 0); $sgn = fn($v) => ($v < 0 ? '− ' : '+ ') . $m(abs($v)); ?>
+<?php if ($disc > 0): ?><tr class="t"><td></td><td colspan="4">Total</td><td class="n"><?= $m($i['taxable'] + $disc) ?></td></tr><tr><td></td><td colspan="4">Less: discount</td><td class="n">− <?= $m($disc) ?></td></tr><?php endif; ?>
 <tr class="t"><td></td><td colspan="4">Total before tax</td><td class="n"><?= $m($i['taxable']) ?></td></tr>
 <?php if ($i['gst_mode'] === 'igst'): ?><tr><td></td><td colspan="4">IGST @ <?= rtrim(rtrim($i['gst_rate'], '0'), '.') ?>%</td><td class="n"><?= $m($i['gst']) ?></td></tr>
 <?php else: ?><tr><td></td><td colspan="4">CGST @ <?= rtrim(rtrim($i['gst_rate'] / 2, '0'), '.') ?>%</td><td class="n"><?= $m($half) ?></td></tr><tr><td></td><td colspan="4">SGST @ <?= rtrim(rtrim($i['gst_rate'] / 2, '0'), '.') ?>%</td><td class="n"><?= $m($i['gst'] - $half) ?></td></tr><?php endif; ?>
+<?php if ($ro != 0): ?><tr><td></td><td colspan="4">Round off</td><td class="n"><?= $sgn($ro) ?></td></tr><?php endif; ?>
 <tr class="g"><td></td><td colspan="4">Grand total</td><td class="n">₹<?= $m($i['total']) ?></td></tr></table>
 <div class="words">Amount in words: Rupees <?= amount_words($i['total']) ?> Only</div>
 <?php if (!empty($co['bank_name']) || !empty($co['bank_acno'])): ?><div class="small"><b>Bank details:</b> <?= $h($co['bank_name']) ?> · A/c <?= $h($co['bank_acno']) ?> · IFSC <?= $h($co['bank_ifsc']) ?></div><?php endif; ?>

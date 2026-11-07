@@ -1199,7 +1199,7 @@ function invTimeline(log) {
 }
 function invLinesTable(i) {
   return i.lines.length ? `<div class="tw"><table><tr><th>Description</th><th>SAC</th><th class="r">Qty</th><th class="r">Rate</th><th class="r">Amount</th></tr>${i.lines.map(l => `<tr><td>${esc(l.desc)}${+l.tax ? '' : ' <span class="sub">(no GST)</span>'}</td><td>${esc(l.sac || '')}</td><td class="r num">${num(l.qty)}</td><td class="r num">${inr2(l.rate)}</td><td class="r num">${inr2(l.amount)}</td></tr>`).join('')}
-   <tr><td colspan="4">Taxable value</td><td class="r num">${inr2(i.taxable)}</td></tr><tr><td colspan="4">${i.gst_mode === 'igst' ? 'IGST' : 'CGST + SGST'} @ ${num(i.gst_rate)}%</td><td class="r num">${inr2(i.gst)}</td></tr><tr><td colspan="4"><b>Grand total</b></td><td class="r num"><b>${inr2(i.total)}</b></td></tr></table></div>` : blank('Accounts will add the lines.');
+   ${+i.discount ? `<tr><td colspan="4">Less: discount</td><td class="r num">− ${inr2(i.discount)}</td></tr>` : ''}<tr><td colspan="4">Taxable value</td><td class="r num">${inr2(i.taxable)}</td></tr><tr><td colspan="4">${i.gst_mode === 'igst' ? 'IGST' : 'CGST + SGST'} @ ${num(i.gst_rate)}%</td><td class="r num">${inr2(i.gst)}</td></tr>${+i.round_off ? `<tr><td colspan="4">Round off</td><td class="r num">${+i.round_off < 0 ? '− ' : '+ '}${inr2(Math.abs(i.round_off))}</td></tr>` : ''}<tr><td colspan="4"><b>Grand total</b></td><td class="r num"><b>${inr2(i.total)}</b></td></tr></table></div>` : blank('Accounts will add the lines.');
 }
 
 // accounts: invoice log
@@ -1239,7 +1239,11 @@ function drawInv() {
    <div class="tw" style="margin-top:14px"><table id="invlines"><tr><th>Description</th><th style="width:100px">SAC</th><th style="width:80px">Qty</th><th style="width:130px">Rate (₹)</th><th style="width:60px">GST</th><th class="r" style="width:130px">Amount</th><th></th></tr>
     ${i.lines.map((l, k) => `<tr><td><input data-il="desc" value="${esc(l.desc)}"></td><td><input data-il="sac" value="${esc(l.sac || '')}"></td><td><input type="number" step="any" data-il="qty" value="${esc(l.qty)}" data-invcalc></td><td><input type="number" step="any" data-il="rate" value="${esc(l.rate)}" data-invcalc></td><td style="text-align:center"><input type="checkbox" data-il="tax" ${+l.tax || l.tax === undefined ? 'checked' : ''} data-invcalc></td><td class="r num" data-ilamt></td><td>${i.lines.length > 1 ? `<button type="button" class="btn link" data-ildel="${k}">✕</button>` : ''}</td></tr>`).join('')}</table></div>
    <div class="row" style="margin-top:6px"><button type="button" class="btn ghost sm" id="inv-addline">+ Add line</button></div>
-   <div class="grid" style="margin-top:14px"><label class="f">Notes / terms on this invoice<textarea name="notes">${esc(i.notes || '')}</textarea></label><div class="inset" id="inv-tot"></div></div>
+   <div class="grid" style="margin-top:14px"><label class="f">Notes / terms on this invoice<textarea name="notes">${esc(i.notes || '')}</textarea></label><div>
+    <div class="grid g3" style="margin-bottom:10px"><label class="f">Discount (₹, before GST)<input type="number" step="any" min="0" name="discount" value="${+i.discount ? esc(i.discount) : ''}" placeholder="0" data-invcalc></label>
+     <label class="f">Round off<select name="round_mode" data-invcalc><option value="auto" ${i.round_mode !== 'none' ? 'selected' : ''}>To nearest rupee</option><option value="none" ${i.round_mode === 'none' ? 'selected' : ''}>No rounding</option></select></label>
+     <label class="f">Want an exact grand total?<span style="display:flex;gap:6px"><input type="number" step="any" min="0" id="inv-target" placeholder="e.g. 2000000"><button type="button" class="btn ghost sm" id="inv-target-go">Set</button></span></label></div>
+    <div class="inset" id="inv-tot"></div></div></div>
    <label class="f" style="margin-top:12px">Message for admin (optional)<input name="message" placeholder="${['on_hold', 'rejected'].includes(i.status) ? 'e.g. Corrected the rate as asked' : 'e.g. 50% advance as agreed with client'}"></label>
    <div class="row" style="margin-top:12px"><button class="btn ghost" data-invsave="draft">Save draft</button><button class="btn" data-invsave="submit">Send to admin for approval</button></div></form>`;
   invCalc();
@@ -1305,17 +1309,21 @@ routes.myinv = async () => {
 };
 function invAlert() { const n = B.inv_attention; if (!n) return; const w = $('.welcome'); if (w) w.insertAdjacentHTML('afterend', `<div class="alert warn"><b>${n} invoice${n > 1 ? 's need' : ' needs'} your attention</b><span class="m">Admin put it on hold or rejected it. <a href="#myinv">Open my invoices →</a></span></div>`); }
 
-function invCapture() { const f = $('#invform'); if (!f) return; const g = k => f.querySelector(`[name=${k}]`).value; Object.assign(C.inv, { inv_date: g('inv_date'), project_id: g('project_id'), client_id: g('client_id'), place_state: g('place_state'), gst_rate: g('gst_rate'), notes: g('notes'), lines: invLines() }); }
+function invCapture() { const f = $('#invform'); if (!f) return; const g = k => f.querySelector(`[name=${k}]`).value; Object.assign(C.inv, { inv_date: g('inv_date'), project_id: g('project_id'), client_id: g('client_id'), place_state: g('place_state'), gst_rate: g('gst_rate'), discount: g('discount'), round_mode: g('round_mode'), notes: g('notes'), lines: invLines() }); }
 function invLines() { return [...document.querySelectorAll('#invlines tr')].slice(1).map(tr => { const g = k => tr.querySelector(`[data-il="${k}"]`); return { desc: g('desc').value, sac: g('sac').value, qty: g('qty').value, rate: g('rate').value, tax: g('tax').checked ? 1 : 0 }; }); }
 function invCalc() {
   const box = $('#inv-tot'); if (!box) return;
   const rate = +document.querySelector('#invform [name=gst_rate]').value || 0, st = (document.querySelector('#invform [name=place_state]').value || '').trim().toLowerCase();
   const igst = st && st !== String((C.am?.company?.state) || '').trim().toLowerCase();
   let tx = 0, non = 0; [...document.querySelectorAll('#invlines tr')].slice(1).forEach((tr, k) => { const l = invLines()[k]; const a = (+l.qty || 0) * (+l.rate || 0); tr.querySelector('[data-ilamt]').textContent = inr2(a); l.tax ? tx += a : non += a; });
-  const g = Math.round(tx * rate) / 100;
-  box.innerHTML = `<div class="sum"><div class="l"><span>Taxable value</span><span class="num">${inr2(tx)}</span></div>${non ? `<div class="l"><span>Without GST</span><span class="num">${inr2(non)}</span></div>` : ''}
+  const r2 = v => Math.round(v * 100) / 100, sub = r2(tx + non), disc = Math.max(0, +document.querySelector('#invform [name=discount]').value || 0), noRound = document.querySelector('#invform [name=round_mode]').value === 'none';
+  C.invT = { tx0: tx, non0: non, rate };
+  if (tx > 0) tx = r2(tx - disc); else non = r2(non - disc);
+  const g = r2(tx * rate / 100), pre = r2(tx + non + g), ro = noRound ? 0 : r2(Math.round(pre) - pre), total = r2(pre + ro);
+  box.innerHTML = `<div class="sum">${disc ? `<div class="l"><span>Total</span><span class="num">${inr2(sub)}</span></div><div class="l"><span>Less: discount</span><span class="num">− ${inr2(disc)}</span></div>` : ''}${disc && (tx < 0 || non < 0) ? '<div class="alert bad"><b>Discount is more than the amount</b></div>' : ''}<div class="l"><span>Taxable value</span><span class="num">${inr2(tx)}</span></div>${non ? `<div class="l"><span>Without GST</span><span class="num">${inr2(non)}</span></div>` : ''}
    ${igst ? `<div class="l"><span>IGST ${rate}%</span><span class="num">${inr2(g)}</span></div>` : `<div class="l"><span>CGST ${rate / 2}%</span><span class="num">${inr2(Math.round(g * 50) / 100)}</span></div><div class="l"><span>SGST ${rate / 2}%</span><span class="num">${inr2(g - Math.round(g * 50) / 100)}</span></div>`}
-   <div class="l tot big"><span>Grand total</span><span class="num">${inr2(tx + non + g)}</span></div><div class="sub">${igst ? 'Other state → IGST' : 'Same state as Zest → CGST + SGST'}</div></div>`;
+   ${ro ? `<div class="l"><span>Round off</span><span class="num">${ro < 0 ? '− ' : '+ '}${inr2(Math.abs(ro))}</span></div>` : ''}
+   <div class="l tot big"><span>Grand total</span><span class="num">${inr2(total)}</span></div><div class="sub">${igst ? 'Other state → IGST' : 'Same state as Zest → CGST + SGST'}</div></div>`;
 }
 
 // ---------- expense approvals (accounts) ----------
@@ -1640,6 +1648,13 @@ document.addEventListener('click', async e => {
       }
       case 'ri-cancel': $('#ri-confirm').innerHTML = ''; return;
       case 'jl-add': { const tb = $('#jl'); const tr = tb.rows[1].cloneNode(true); tr.querySelectorAll('input').forEach(i => i.value = ''); tr.querySelector('select').selectedIndex = 0; tb.tBodies[0].appendChild(tr); return; }
+      case 'inv-target-go': {   // work out the discount that gives the grand total asked for
+        const T = +($('#inv-target').value || 0), I = C.invT || {}; if (!T) return toast('Enter the grand total you want', true);
+        const d = Math.round((I.tx0 > 0 ? I.tx0 - (T - I.non0) / (1 + I.rate / 100) : I.non0 - T) * 100) / 100;
+        if (d < 0) return toast('That is more than the current total — raise a rate instead', true);
+        if (d >= (I.tx0 > 0 ? I.tx0 : I.non0)) return toast('That total is too low', true);
+        $('#invform [name=discount]').value = d || ''; $('#invform [name=round_mode]').value = 'auto'; invCalc(); return toast(`Discount set to ${inr2(d)}`);
+      }
       case 'inv-addline': invCapture(); C.inv.lines.push({ desc: '', sac: C.am.company.sac || '998596', qty: 1, rate: '', tax: 1 }); return drawInv();
       case 'inv-fill': { invCapture(); const pid = C.inv.project_id; if (!pid) return toast('Pick the order first', true);
         const r = await act(() => api('inv_prefill', { project_id: pid })); Object.assign(C.inv, { client_id: r.client_id, gst_rate: r.gst_rate, lines: r.lines }); return drawInv(); }
