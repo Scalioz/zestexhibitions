@@ -463,11 +463,15 @@ routes.reportlog = async () => {
   <div class="head"><div><h1>Daily reports</h1><p>${fd(d.from)} to ${fd(d.to)} · click a name to open the report</p></div>
    <form class="row" id="logf"><label class="f">Employee<select name="user_id"><option value="">All employees</option>${emps.map(e => `<option value="${e.id}" ${+f.user_id === +e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label><label class="f">From<input type="date" name="from" value="${d.from}"></label><label class="f">To<input type="date" name="to" value="${d.to}"></label><button class="btn ghost sm" style="align-self:flex-end">Show</button></form></div>
   ${C.repEdit ? repEditor(C.repEdit) : ''}
-  <div class="log">${d.days.map(day => `<h3 class="num">${fd(day.date)} ${day.off ? `<span class="pill p-off">${esc(day.off)}</span>` : ''}</h3>
+  <div class="log">${d.days.map(day => { const n = s => day.rows.filter(r => s.includes(r.status)).length, rc = n(['received', 'work']), pd = n(['pending']), ms = n(['missing']);
+   return `<details class="day" data-day="${day.date}" ${C.openDays?.[day.date] ? 'open' : ''}><summary><b class="num">${fd(day.date)}</b>${day.off ? `<span class="pill p-off">${esc(day.off)}</span>` : ''}
+    <span class="dsum">${rc ? `<span class="pill p-received">${rc} received</span>` : ''}${pd ? `<span class="pill p-pending">${pd} pending</span>` : ''}${ms ? `<span class="pill p-missing">${ms} not received</span>` : ''}${!day.rows.length ? `<span class="sub">${day.off ? 'No report expected' : 'No one to track'}</span>` : ''}</span></summary><div class="in">
    ${day.rows.length ? day.rows.map(r => r.status === 'received'
      ? `<details><summary><b>${esc(r.user.name)}</b><span class="sub">${esc(r.user.department)}</span><span class="pill p-received">received ${r.at}</span><span class="sub" style="margin-left:auto">${r.items.length} entr${r.items.length === 1 ? 'y' : 'ies'}</span></summary><div class="in">${reportTable(r.items, r.fields)}<div class="row" style="margin-top:8px"><button class="btn ghost sm" data-repedit="${r.id}">Edit report</button><button class="btn link" data-repdel="${r.id}">Delete report</button></div></div></details>`
      : `<details><summary><b>${esc(r.user.name)}</b><span class="sub">${esc(r.user.department)}</span><span class="pill p-${r.status === 'work' ? 'received' : r.status}">${r.status === 'work' ? 'work logged' : r.status === 'pending' ? 'pending today' : 'report not received'}</span>${r.status === 'work' && r.leads ? `<span class="sub" style="margin-left:auto">${r.leads} expo entr${r.leads === 1 ? 'y' : 'ies'}</span>` : ''}</summary></details>`).join('')
-     : `<div class="sub">${day.off ? 'No report expected.' : 'No employees to track on this day.'}</div>`}`).join('')}</div>`;
+     : `<div class="sub">${day.off ? 'No report expected.' : 'No employees to track on this day.'}</div>`}</div></details>`; }).join('')}</div>`;
+  C.openDays = C.openDays || {};
+  document.querySelectorAll('.log details.day').forEach(el => el.addEventListener('toggle', () => { C.openDays[el.dataset.day] = el.open; }));
   $('#logf').onsubmit = e => { e.preventDefault(); const fm = new FormData(e.target); C.log = { from: fm.get('from'), to: fm.get('to'), user_id: fm.get('user_id') }; refresh(); };
 };
 
