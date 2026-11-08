@@ -948,19 +948,77 @@ function gstCheck(raw) {
   return { ok: true, g, state: GST_STATES[g.slice(0, 2)], pan: g.slice(2, 12), kind };
 }
 const gstF = input => `<label class="f">GSTIN${input}<span style="display:block;margin-top:4px"><button type="button" class="btn link" data-gstv>✓ Validate GSTIN</button></span><span class="gst-res sub" style="display:block;line-height:1.5"></span></label>`;
-document.addEventListener('click', e => {
-  const b = e.target.closest('[data-gstv],[data-gstportal]'); if (!b) return; e.preventDefault(); e.stopPropagation();
+// Read the text copied from the GST portal "Search Taxpayer" result (Ctrl+A, Ctrl+C on that page)
+const GST_LABELS = ['Search Result based on GSTIN/UIN', 'Legal Name of Business', 'Trade Name', 'Effective Date of registration', 'Effective Date of Cancellation', 'Constitution of Business', 'GSTIN / UIN Status', 'Taxpayer Type',
+  'Administrative Office', 'Other Office', 'Principal Place of Business', 'Whether Aadhaar Authenticated?', 'Whether e-KYC Verified?', 'Additional Trade Name', 'Nature Of Core Business Activity', 'Nature of Business Activities', 'Dealing In Goods and Services'];
+function gstParseText(txt) {
+  const lines = String(txt || '').replace(/\r/g, '').split('\n').map(x => x.replace(/ /g, ' ').trim()).filter(Boolean);
+  const isLab = l => GST_LABELS.some(L => l.toLowerCase().startsWith(L.toLowerCase()));
+  const out = {};
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (l.includes('\t') && l.split('\t').some(isLab)) {   // copied as a table row: labels on one line, values on the next
+      const H = l.split('\t').map(x => x.trim()), V = (lines[i + 1] || '').split('\t').map(x => x.trim());
+      H.forEach((h, k) => { const L = GST_LABELS.find(x => h.toLowerCase().startsWith(x.toLowerCase())); if (L && V[k] && !out[L]) out[L] = V[k]; }); continue;
+    }
+    const L = GST_LABELS.find(x => l.toLowerCase().startsWith(x.toLowerCase())); if (!L || out[L]) continue;
+    const rest = l.slice(L.length).replace(/^[\s:–-]+/, '').trim();
+    if (rest) { out[L] = rest; continue; }
+    const v = []; for (let j = i + 1; j < lines.length && !isLab(lines[j]); j++) v.push(lines[j]); out[L] = v.join(' ');
+  }
+  const addr = (out['Principal Place of Business'] || '').replace(/\s+/g, ' ').trim();
+  const gst = ((out['Search Result based on GSTIN/UIN'] || '').match(/\b\d{2}[A-Z]{5}\d{4}[A-Z][0-9A-Z]Z[0-9A-Z]\b/) || [''])[0];
+  return gstShape({ gstin: gst, legal_name: out['Legal Name of Business'] || '', trade_name: out['Trade Name'] || '', status: out['GSTIN / UIN Status'] || '', constitution: out['Constitution of Business'] || '', address: addr });
+}
+function gstShape(d) {
+  const addr = String(d.address || '').replace(/\s+/g, ' ').trim();
+  const pin = d.pincode || (addr.match(/\b(\d{6})\b(?!.*\b\d{6}\b)/) || ['', ''])[1];
+  let city = d.city || '';
+  if (!city && addr) { const parts = addr.split(',').map(x => x.trim()).filter(x => x && !/^\d{6}$/.test(x)); const si = parts.findIndex(x => Object.values(GST_STATES).some(st => st.toLowerCase() === x.toLowerCase())); city = si > 0 ? parts[si - 1] : parts[parts.length - 2] || ''; }
+  return { gstin: String(d.gstin || '').toUpperCase(), legal_name: String(d.legal_name || '').trim(), trade_name: String(d.trade_name || '').trim(), status: String(d.status || '').trim(), constitution: d.constitution || '', address: addr, city, pincode: pin };
+}
+function gstFill(box, d) {
+  const res = box.querySelector('.gst-res'), inp = box.querySelector('input'), want = inp.value.trim().toUpperCase();
+  if (!d.legal_name) { res.querySelector('.gst-msg').innerHTML = '<span style="color:var(--bad)">✕ No GST details found in what you pasted. On the GST portal, press Ctrl + A then Ctrl + C on the result page and paste again.</span>'; return; }
+  if (d.gstin && want && d.gstin !== want) { res.querySelector('.gst-msg').innerHTML = `<span style="color:var(--bad)">✕ The pasted result is for ${esc(d.gstin)}, not ${esc(want)}. Please search the right GSTIN on the portal.</span>`; return; }
+  const form = box.closest('form') || box.closest('.panel') || document;
+  const set = (k, v) => { const el = form.querySelector(`[data-nc="${k}"],[name="${k}"]`); if (el && v) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); } };
+  const name = d.legal_name.replace(/\s+/g, ' ');
+  set('company', name); set('location', d.address + (d.pincode && !d.address.includes(d.pincode) ? ' - ' + d.pincode : '')); set('city', d.city.replace(/\b\w/g, c => c.toUpperCase()).replace(/\B\w/g, c => c.toLowerCase()));
+  if (d.trade_name && d.trade_name.toUpperCase() !== name.toUpperCase()) { const n = form.querySelector('[data-nc="notes"],[name="notes"]'); if (n && !n.value.includes(d.trade_name)) { n.value = (n.value ? n.value + '\n' : '') + 'Trade name: ' + d.trade_name; n.dispatchEvent(new Event('input', { bubbles: true })); } }
+  const bad = d.status && !/active/i.test(d.status);
+  res.querySelector('.gst-msg').innerHTML = `<span style="color:${bad ? 'var(--bad)' : 'var(--ok)'}">${bad ? '⚠ GST status: ' + esc(d.status) + ' — check with the client before billing.' : '✓ Filled from GST records' + (d.status ? ' · ' + esc(d.status) : '')}</span><br><span class="sub">${esc(name)} · ${esc(d.address)}</span>`;
+  res.querySelector('.gst-paste').hidden = true; toast('Company name, address and city filled from GST records');
+}
+document.addEventListener('paste', async e => {
+  const ta = e.target.closest && e.target.closest('.gst-paste textarea'); if (!ta) return;
+  const box = ta.closest('label'), img = [...(e.clipboardData?.items || [])].find(x => x.type.startsWith('image/'));
+  if (img) {   // a screenshot was pasted: read it with the AI key
+    e.preventDefault(); const msg = box.querySelector('.gst-msg'); msg.innerHTML = '<span class="sub">Reading the screenshot…</span>';
+    const fd = new FormData(); fd.append('file', img.getAsFile(), 'gst.png');
+    try { const r = await fetch('api.php?a=gst_read_image', { method: 'POST', headers: { 'X-CSRF': CSRF }, body: fd, credentials: 'same-origin' }); const j = await r.json(); if (!r.ok || j.error) throw new Error(j.error || 'Could not read'); gstFill(box, gstShape(j)); }
+    catch (x) { msg.innerHTML = `<span style="color:var(--bad)">✕ ${esc(x.message)}</span>`; }
+    return;
+  }
+  setTimeout(() => gstFill(box, gstParseText(ta.value)), 0);
+});
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-gstv],[data-gstportal],[data-gstuse]'); if (!b) return; e.preventDefault(); e.stopPropagation();
   const box = b.closest('label'), inp = box.querySelector('input'), res = box.querySelector('.gst-res');
   if (b.dataset.gstportal !== undefined) {
     const g = inp.value.trim().toUpperCase(); try { navigator.clipboard.writeText(g); } catch (x) {}
     window.open('https://services.gst.gov.in/services/searchtp', '_blank', 'noopener'); toast('GSTIN copied — paste it on the GST portal and type the captcha'); return;
   }
+  if (b.dataset.gstuse !== undefined) { const k = JSON.parse(b.dataset.gstuse); gstFill(box, gstShape({ gstin: inp.value.trim().toUpperCase(), legal_name: k.company, address: k.location || '', city: k.city || '' })); return; }
   const r = gstCheck(inp.value);
   if (!r.ok) { res.innerHTML = `<span style="color:var(--bad)">✕ ${esc(r.msg)}</span>`; return; }
   inp.value = r.g; inp.dispatchEvent(new Event('input', { bubbles: true }));
   const form = box.closest('form') || document, loc = form.querySelector('[data-nc="location"],[name="location"]');
-  if (loc && !loc.value.toLowerCase().includes(r.state.toLowerCase())) { loc.value = loc.value.trim() ? loc.value.trim().replace(/[,\s]+$/, '') + ', ' + r.state : r.state; loc.dispatchEvent(new Event('input', { bubbles: true })); }
-  res.innerHTML = `<span style="color:var(--ok)">✓ Valid GSTIN</span> · State: <b>${esc(r.state)}</b> · PAN: <b>${esc(r.pan)}</b>${r.kind ? ' · ' + esc(r.kind) : ''}<br>For the registered name &amp; address: <button type="button" class="btn link" data-gstportal>View on GST portal ↗</button>`;
+  if (loc && !loc.value.trim()) { loc.value = r.state; loc.dispatchEvent(new Event('input', { bubbles: true })); }
+  res.innerHTML = `<span style="color:var(--ok)">✓ Valid GSTIN</span> · State: <b>${esc(r.state)}</b> · PAN: <b>${esc(r.pan)}</b>${r.kind ? ' · ' + esc(r.kind) : ''}<div class="gst-known"></div>
+   <div class="gst-paste" style="margin-top:6px;padding:8px;border:1px dashed var(--line);border-radius:8px"><b>Fill name &amp; address:</b> 1) <button type="button" class="btn link" data-gstportal>Open GST portal ↗</button> (number is copied) · 2) type the captcha, search · 3) press <b>Ctrl + A</b>, <b>Ctrl + C</b> on the result · 4) paste here:
+   <textarea rows="2" placeholder="Paste here (Ctrl + V) — the copied result or a screenshot" style="margin-top:6px;width:100%"></textarea></div><div class="gst-msg" style="margin-top:4px"></div>`;
+  try { const k = await api('gst_known', { gst: r.g }); if (k.found) res.querySelector('.gst-known').innerHTML = `<div class="alert warn" style="margin-top:6px"><span class="m">Already in the CRM: <b>${esc(k.found.company)}</b> (handled by ${esc(k.found.owner)}). <button type="button" class="btn link" data-gstuse='${esc(JSON.stringify({ company: k.found.company, location: k.found.location, city: k.found.city }))}'>Fill from it</button></span></div>`; } catch (x) {}
 });
 
 // ---------- contacts: import from Excel / CSV ----------

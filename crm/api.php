@@ -800,6 +800,32 @@ case 'my_handovers':   // research / telecalling: clients I added and handed to 
   foreach ($rows as &$r) $r['owner'] = $um[$r['owner_id']] ?? '—'; unset($r);
   out(['rows' => $rows]);
 
+case 'gst_known':   // is this GSTIN already in the CRM? (fills the form from the saved client)
+  $g = strtoupper(preg_replace('/\s/', '', (string) ($in['gst'] ?? '')));
+  if (strlen($g) !== 15) out(['found' => null]);
+  $c = one('SELECT id, company, location, city, owner_id FROM ' . T('clients') . " WHERE UPPER(REPLACE(gst_no, ' ', '')) = ? ORDER BY id DESC", [$g]);
+  if ($c) { $c['owner'] = users_map()[$c['owner_id']] ?? '—'; unset($c['owner_id']); }
+  out(['found' => $c ?: null]);
+
+case 'gst_read_image':   // read a screenshot of the GST portal result with the card-reading AI key
+  require_once __DIR__ . '/lib/cards.php';
+  $f = $_FILES['file'] ?? null;
+  if (!$f || $f['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($f['tmp_name'])) fail('The screenshot did not upload. Please try again.');
+  $ai = cards_ai(); if ($ai['key'] === '') fail('Screenshot reading needs the AI key (Settings → Business card reading). You can paste the copied text instead.');
+  $imgs = card_images($f['tmp_name']); if (!$imgs) fail('Could not open this image. Paste a PNG or JPG screenshot.');
+  $content = [['type' => 'image', 'source' => ['type' => 'base64', 'media_type' => 'image/jpeg', 'data' => $imgs[0]]],
+    ['type' => 'text', 'text' => 'This is a screenshot of the Indian GST portal "Search Taxpayer" result. Copy exactly what is shown. Reply with JSON only: {"gstin":"","legal_name":"","trade_name":"","status":"","constitution":"","address":"","city":"","state":"","pincode":""}. "address" is the Principal Place of Business. Use "" for anything not visible. Do not guess.']];
+  $ch = curl_init($ai['url']);
+  curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode(['model' => $ai['model'], 'max_tokens' => 1500, 'temperature' => 0, 'messages' => [['role' => 'user', 'content' => $content]]]),
+    CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 90, CURLOPT_CONNECTTIMEOUT => 20, CURLOPT_HTTPHEADER => ['content-type: application/json', 'x-api-key: ' . $ai['key'], 'anthropic-version: 2023-06-01']]);
+  $res = curl_exec($ch); $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
+  $j = $res ? json_decode($res, true) : null; if ($code !== 200) fail('Could not read the screenshot: ' . ($j['error']['message'] ?? 'service not reachable'));
+  $text = ''; foreach ((array) ($j['content'] ?? []) as $b) if (($b['type'] ?? '') === 'text') $text .= $b['text'];
+  $a = strpos($text, '{'); $z = strrpos($text, '}'); $d = $a !== false ? json_decode(substr($text, $a, $z - $a + 1), true) : null;
+  if (!is_array($d) || empty($d['legal_name'])) fail('No GST details found in this image. Take the screenshot of the result area on the GST portal.');
+  $o = []; foreach (['gstin', 'legal_name', 'trade_name', 'status', 'constitution', 'address', 'city', 'state', 'pincode'] as $k) $o[$k] = mb_substr(trim((string) ($d[$k] ?? '')), 0, 400);
+  out($o);
+
 case 'sheet_read':   // read an uploaded Excel / CSV so the person can match its columns (the file itself is not kept)
   require_once __DIR__ . '/lib/sheet.php';
   $f = $_FILES['file'] ?? null;
