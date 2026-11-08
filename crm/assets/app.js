@@ -225,14 +225,16 @@ function projTable(ps, showOwner, showClient = true) {
 
 // ---------- CLIENTS ----------
 routes.clients = async () => {
-  const qv = C.cq || '';
-  const d = await api('clients', { q: qv });
+  const qv = C.cq || '', ow = isAdmin() ? (C.cown || '') : '';
+  const d = await api('clients', { q: qv, owner_id: ow });
+  const tot = d.clients.reduce((a, c) => (a.b += +c.business || 0, a.o += +c.due || +c.outstanding || 0, a), { b: 0, o: 0 });
   view().innerHTML = `
-  <div class="head"><div><h1>${isAdmin() ? 'All clients' : 'My clients'}</h1><p>${d.clients.length} client${d.clients.length === 1 ? '' : 's'}${qv ? ` matching “${esc(qv)}”` : ''}</p></div>
-   <div class="row"><input id="cq" placeholder="Search company, person, city, phone" value="${esc(qv)}" style="min-width:260px"><a class="btn" href="#newclient">+ New client</a></div></div>
+  <div class="head"><div><h1>${isAdmin() ? 'All clients' : 'My clients'}</h1><p>${d.clients.length} client${d.clients.length === 1 ? '' : 's'}${ow ? ` handled by ${esc((B.users.find(u => +u.id === +ow) || {}).name || '')}` : ''}${qv ? ` matching “${esc(qv)}”` : ''}${ow ? ` · business ${inr(tot.b)} · outstanding ${inr(tot.o)}` : ''}</p></div>
+   <div class="row">${isAdmin() ? `<select id="cown" aria-label="Handled by" style="min-width:200px"><option value="">All sales people</option>${B.users.filter(u => +u.active && (u.role === 'admin' || (B.dept_modules || {})[u.department] === 'records')).map(u => `<option value="${u.id}" ${+ow === +u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>` : ''}<input id="cq" placeholder="Search company, person, city, phone" value="${esc(qv)}" style="min-width:260px"><a class="btn" href="#newclient">+ New client</a></div></div>
   <div class="panel">${d.clients.length ? `<div class="tw"><table><tr><th>Company</th><th>Contact</th><th>City</th>${isAdmin() ? '<th>Handled by</th>' : ''}<th class="r">Won / orders</th><th class="r">Business</th><th class="r">Outstanding</th></tr>
   ${d.clients.map(c => `<tr class="click" data-go="client-${c.id}"><td><b>${esc(c.company)}</b>${+c.dnq ? '<div class="dnq">⛔ DO NOT QUOTE</div>' : ''}</td><td>${esc(c.person || '')}<div class="sub">${esc(c.designation || '')}</div></td><td>${esc(c.city || '')}</td>${isAdmin() ? `<td>${esc(c.owner)}</td>` : ''}<td class="r num">${c.won} / ${c.orders}</td><td class="r num">${inr(c.business)}</td><td class="r num">${inr(c.due)}</td></tr>`).join('')}
   </table></div>` : blank(qv ? 'No client matches that search.' : 'No clients yet. Add your first one.', '<a class="btn sm" href="#newclient">+ New client</a>')}</div>`;
+  if ($('#cown')) $('#cown').onchange = e => { C.cown = e.target.value; refresh(); };
   let t; $('#cq').oninput = e => { clearTimeout(t); t = setTimeout(() => { C.cq = e.target.value.trim(); refresh().then(() => { const i = $('#cq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 350); };
 };
 

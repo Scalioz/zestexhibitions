@@ -307,6 +307,7 @@ case 'clients':
   $qs = s($in['q'] ?? null, 100);
   $w = '1=1'; $p = [];
   if (!$ADMIN) { $w .= ' AND owner_id = ?'; $p[] = $MID; }
+  elseif (!empty($in['owner_id'])) { $w .= ' AND owner_id = ?'; $p[] = (int) $in['owner_id']; }   // admin: one person's clients
   if (!empty($in['dnq'])) $w .= ' AND dnq = 1';
   if ($qs) { $w .= ' AND (company LIKE ? OR person LIKE ? OR city LIKE ? OR email LIKE ? OR phone LIKE ?)'; array_push($p, "%$qs%", "%$qs%", "%$qs%", "%$qs%", "%$qs%"); }
   $cs = all('SELECT id, company, person, designation, city, email, phone, owner_id, dnq, dnq_reason, dnq_note, dnq_on, dnq_by FROM ' . T('clients') . " WHERE $w ORDER BY company LIMIT 500", $p);
