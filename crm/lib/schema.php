@@ -135,6 +135,10 @@ function migrate() {
     try { db()->exec('ALTER TABLE ' . T('users') . ' ADD COLUMN extra_depts TEXT'); } catch (PDOException $e) { /* already there */ }
     set_setting('schema_v', 18);
   }
+  if ($v < 19) {   // design made by Zest's designer, or provided by the customer
+    try { db()->exec('ALTER TABLE ' . T('projects') . " ADD COLUMN design_source VARCHAR(10) NOT NULL DEFAULT 'zest'"); } catch (PDOException $e) { /* already there */ }
+    set_setting('schema_v', 19);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';

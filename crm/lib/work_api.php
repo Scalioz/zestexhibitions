@@ -176,6 +176,7 @@ case 'assign_ops':
   $u = $uid ? one('SELECT id, name FROM ' . T('users') . ' WHERE id = ? AND active = 1', [$uid]) : null;
   if ($uid && !$u) fail('Pick an active employee.');
   if ($A === 'assign_designer') {
+    if ($u && ($p['design_source'] ?? 'zest') === 'client') fail('The customer is giving their own design for this order. Switch it to “Zest designs” on the Design tab first.');
     upd('projects', $p['id'], $u ? ['designer_id' => $u['id'], 'designed_by' => $u['name'], 'assigned_on' => (int) $p['designer_id'] === (int) $u['id'] && $p['assigned_on'] ? $p['assigned_on'] : today(), 'design_assigned_by' => $me['name']]
                                  : ['designer_id' => null, 'design_assigned_by' => null]);
   } else {
@@ -212,7 +213,7 @@ case 'jobs_board':
   $w = "p.status <> 'rejected'"; $p = [];
   if ($qs = s($in['q'] ?? null, 100)) { $w .= ' AND (c.company LIKE ? OR p.expo LIKE ?)'; $p[] = "%$qs%"; $p[] = "%$qs%"; }
   if (($in['show'] ?? '') === 'open') $w .= " AND p.status <> 'completed'";
-  $rows = all('SELECT p.id, p.expo, p.location, p.start_date, p.area_sqm, p.sides_open, p.status, p.owner_id, p.designer_id, p.designed_by, p.design_assigned_by, p.assigned_on, p.design_submitted_on, p.design_notes, p.design_approved_by,
+  $rows = all('SELECT p.id, p.expo, p.location, p.start_date, p.area_sqm, p.sides_open, p.status, p.owner_id, p.designer_id, p.designed_by, p.design_assigned_by, p.assigned_on, p.design_submitted_on, p.design_notes, p.design_approved_by, p.design_source,
      p.ops_id, p.ops_assigned_on, p.ops_updated_at, p.ops_json, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . " c ON c.id = p.client_id WHERE $w ORDER BY COALESCE(p.start_date, p.created_at) DESC LIMIT 300", $p);
   $ids = array_column($rows, 'id'); $fin = files_of('final', $ids); $wd = files_of('wd', $ids); $um = users_map();
   foreach ($rows as &$r) {

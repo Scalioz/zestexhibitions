@@ -374,7 +374,14 @@ PT.expo = p => `<div class="grid">${PF(p, 'expo', 'Expo name')}${PF(p, 'location
   ${isAdmin() ? `<label class="f">Handled by<select data-pf="owner_id">${B.users.filter(u => +u.active).map(u => `<option value="${u.id}" ${+u.id === +p.owner_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>` : ''}</div>
   <h3 style="margin:18px 0 8px">Client brief for this expo</h3><div class="row">${upBtn('pbrief', p.id, 'Upload brief (PDF / image / Word / Excel / PPT)')}${fileChips(p.files.pbrief, isAdmin())}</div>
   <h3 style="margin:18px 0 8px">Floor plan</h3><div class="row">${upBtn('floor', p.id, 'Upload floor plan (JPG / PDF)')}${fileChips(p.files.floor, isAdmin())}</div>`;
-PT.design = p => `<div class="inset" style="margin-bottom:14px"><div class="grid g3">
+const dsrcBlock = p => (isAdmin() || B.records) ? `<div class="inset" style="margin-bottom:14px"><b>Who makes the design?</b>
+  <div class="row" style="gap:18px;margin-top:6px"><label style="display:flex;gap:6px;align-items:center"><input type="radio" name="dsrc" data-dsrc="zest" ${p.design_source !== 'client' ? 'checked' : ''}> Zest designs it (assign our designer)</label>
+  <label style="display:flex;gap:6px;align-items:center"><input type="radio" name="dsrc" data-dsrc="client" ${p.design_source === 'client' ? 'checked' : ''}> Customer gives their own design</label></div></div>` : '';
+PT.design = p => p.design_source === 'client' ? `${dsrcBlock(p)}
+  <div class="alert" style="background:var(--ok-bg);color:var(--ok)"><b>Design provided by the customer</b><span class="m">No Zest designer is needed for this order. Upload the customer's design files below — production and the quote work from these.${p.design_ok_on ? ' The quote can be generated from the Order tab.' : ''}</span></div>
+  <div class="grid" style="margin-top:12px"><div><h3 style="margin-bottom:8px">Customer's design files</h3><div class="row">${upBtn('final', p.id, 'Upload customer design')}${fileChips(p.files.final, isAdmin())}</div></div>
+  <div><h3 style="margin-bottom:8px">Working drawing <span class="sub">(if order executed)</span></h3><div class="row">${upBtn('wd', p.id)}${fileChips(p.files.wd, isAdmin())}</div></div></div>`
+  : `${dsrcBlock(p)}<div class="inset" style="margin-bottom:14px"><div class="grid g3">
    ${isAdmin() ? `<label class="f">Assign designer<select data-assign="designer"><option value="0">Not assigned</option>${usersOfMod('design').map(u => `<option value="${u.id}" ${+u.id === +p.designer_id ? 'selected' : ''}>${esc(u.name)} · ${esc(u.department)}</option>`).join('')}</select></label>`
      : `<div class="sub"><b>Designer</b><br>${esc(p.designer || '—')}</div>`}
    <div class="sub"><b>Assigned by</b><br>${esc(p.design_assigned_by || '—')}${p.designer_id ? ' · ' + fd(p.assigned_on) : ''}</div>
@@ -726,7 +733,7 @@ function drawOps() { const b = $('#opsbox'); if (b) { const y = window.scrollY; 
 routes.jobs = async () => {
   const f = C.jobsf || (C.jobsf = { q: '', show: 'open' });
   const d = await api('jobs_board', f);
-  const needs = d.jobs.filter(j => ['won', 'quoted'].includes(j.status) && !j.designer_id).length;
+  const needs = d.jobs.filter(j => ['won', 'quoted'].includes(j.status) && !j.designer_id && j.design_source !== 'client').length;
   view().innerHTML = `
   <div class="head"><div><h1>Design & production</h1><p>Who is designing and producing each order, and how far they are.</p></div>
   </div>
@@ -734,8 +741,8 @@ routes.jobs = async () => {
   ${needs ? `<div class="alert warn"><b>${needs} order${needs > 1 ? 's' : ''} without a designer</b><span class="m">Open the order → Design tab → Assign designer.</span></div>` : ''}
   <div class="panel">${d.jobs.length ? `<p class="sub" style="margin-top:0">Pick a designer or production person in the row to assign the job. Click a row to open the order.</p><div class="tw"><table><tr><th>Client · expo</th><th>Expo date</th><th>Area · sides</th><th>Status</th><th>Sales</th><th>Designer</th><th>Design submitted</th><th>Files</th><th>Production</th><th>Vendor</th></tr>
    ${d.jobs.map(j => `<tr class="click" data-go="project-${j.id}-design"><td><b>${esc(j.company)}</b><div class="sub">${esc(j.expo)}</div></td><td class="num">${fd(j.start_date)}</td><td>${j.area_sqm ? num(j.area_sqm) + ' sqm' : '—'}<div class="sub">${j.sides_open ? sidesTxt(j.sides_open) : ''}</div></td><td>${pill(j.status)}</td><td>${esc(j.owner)}</td>
-    <td><select data-jassign="designer:${j.id}" aria-label="Designer for ${esc(j.expo)}"><option value="0">Not assigned</option>${usersOfMod('design').map(u => `<option value="${u.id}" ${+u.id === +j.designer_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>${j.designer ? `<div class="sub">by ${esc(j.design_assigned_by || '—')} · ${fd(j.assigned_on)}</div>` : ''}</td>
-    <td>${j.design_submitted_on ? `<span class="pill p-ok">${fd(j.design_submitted_on)}</span>` : j.designer ? '<span class="pill p-pending">pending</span>' : '—'}${j.design_notes ? `<div class="sub" title="${esc(j.design_notes)}">💬 ${esc(j.design_notes.slice(0, 40))}${j.design_notes.length > 40 ? '…' : ''}</div>` : ''}</td>
+    <td>${j.design_source === 'client' ? '<span class="pill p-off">Customer\'s design</span>' : `<select data-jassign="designer:${j.id}" aria-label="Designer for ${esc(j.expo)}"><option value="0">Not assigned</option>${usersOfMod('design').map(u => `<option value="${u.id}" ${+u.id === +j.designer_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>${j.designer ? `<div class="sub">by ${esc(j.design_assigned_by || '—')} · ${fd(j.assigned_on)}</div>` : ''}`}</td>
+    <td>${j.design_source === 'client' ? '<span class="sub">not needed</span>' : ''}${j.design_source === 'client' ? '' : j.design_submitted_on ? `<span class="pill p-ok">${fd(j.design_submitted_on)}</span>` : j.designer ? '<span class="pill p-pending">pending</span>' : '—'}${j.design_notes ? `<div class="sub" title="${esc(j.design_notes)}">💬 ${esc(j.design_notes.slice(0, 40))}${j.design_notes.length > 40 ? '…' : ''}</div>` : ''}</td>
     <td class="sub">Design ${j.final_n}<br>WD ${j.wd_n}</td>
     <td><select data-jassign="ops:${j.id}" aria-label="Production person for ${esc(j.expo)}"><option value="0">Not assigned</option>${usersOfMod('ops').map(u => `<option value="${u.id}" ${+u.id === +j.ops_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>${j.ops_person ? `<div class="sub">${j.ops_filled ? 'details filled ' + fd(j.ops_updated_at) : 'details pending'}</div>` : ''}</td>
     <td>${j.vendor ? `${esc(j.vendor.name)}<div class="sub">${inr(j.vendor.amount)}</div>` : '—'}</td></tr>`).join('')}</table></div>` : blank('No expo orders yet. Jobs come from orders: add a client with its expo under <a href="#newclient">+ New client</a>, or open a client and click “+ New expo order”. The order then shows here to assign a designer and production person.')}</div>`;
@@ -1828,6 +1835,7 @@ document.addEventListener('change', async e => {
     if (t.id === 'rcp-proj') { const c = t.selectedOptions[0]?.dataset.client; if (c) $('#rcp-client').value = c; return; }
     if (t.id === 'inv-proj') { const c = t.selectedOptions[0]?.dataset.client; if (c) $('#inv-client').value = c; return; }
     if (ds.deptmod !== undefined) { await act(() => api('settings_save', { dept_modules: { [ds.deptmod]: t.value } }), `${ds.deptmod}: ${MOD_LABEL[t.value]}`); await reboot(); return refresh(); }
+    if (ds.dsrc && C.project) { const ok = await act(() => api('design_source', { project_id: C.project.id, source: ds.dsrc }), ds.dsrc === 'client' ? 'Marked: customer gives their own design' : 'Marked: Zest designs it').catch(() => null); return refresh(); }
     if (ds.jassign) { const [kind, pid] = ds.jassign.split(':'); await act(() => api(kind === 'designer' ? 'assign_designer' : 'assign_ops', { project_id: pid, user_id: t.value }), +t.value ? 'Assigned' : 'Unassigned'); return refresh(); }
     if (ds.assign && C.project) { await act(() => api(ds.assign === 'designer' ? 'assign_designer' : 'assign_ops', { project_id: C.project.id, user_id: t.value }), +t.value ? 'Assigned' : 'Unassigned'); return refresh(); }
     if (t.id === 'lxu') { C.lxu = t.value; return refresh(); }

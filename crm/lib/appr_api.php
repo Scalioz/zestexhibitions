@@ -77,6 +77,18 @@ case 'appr_sent':
 
 
 // ----- customer approved the design (sales marks it) -----
+case 'design_source':   // sales rep (own order) or admin: the customer gives their own design → no Zest designer
+  can_sales();
+  $p = project_row($in['project_id'] ?? 0); $src = ($in['source'] ?? '') === 'client' ? 'client' : 'zest';
+  if ($src === 'client') {
+    if ($p['design_submitted_on'] && !$ADMIN) fail('Our designer has already submitted a design for this order. Ask admin to switch it.');
+    upd('projects', $p['id'], ['design_source' => 'client', 'designer_id' => null, 'design_assigned_by' => null, 'designed_by' => 'Customer',
+      'design_ok_on' => $p['design_ok_on'] ?: today(), 'design_ok_by' => $p['design_ok_on'] ? $p['design_ok_by'] : $me['name'] . ' (customer\'s own design)', 'design_ok_ver' => $p['design_ok_on'] ? $p['design_ok_ver'] : null]);
+  } else {
+    upd('projects', $p['id'], ['design_source' => 'zest', 'designed_by' => null] + (str_contains((string) $p['design_ok_by'], "customer's own design") ? ['design_ok_on' => null, 'design_ok_by' => null, 'design_ok_ver' => null] : []));
+  }
+  out(['ok' => true]);
+
 case 'design_client_ok':
   can_sales();
   $p = project_row($in['project_id'] ?? 0); $on = d($in['on'] ?? null) ?? today();
