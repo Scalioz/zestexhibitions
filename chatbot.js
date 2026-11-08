@@ -434,7 +434,7 @@
         }
         var data = {
           timestamp: new Date().toISOString(),
-          type: "Website Form Enquiry",
+          type: form.getAttribute("data-type") || "Website Form Enquiry",
           name: name,
           company: get("company"),
           phone: phone,
@@ -447,7 +447,11 @@
         };
         logLeadToSheet(data);
 
-        var waMsg = "Hi Zest team, I'm " + name + " (" + phone + ")" +
+        var isCI = data.type === "Commercial Interiors Enquiry";
+        var waMsg = isCI ? ("Hi Zest team, I'm " + name + " (" + phone + ")" + (data.company ? " from " + data.company : "") + ". Commercial interiors project" +
+          (data.sides ? " — " + data.sides : "") + (data.exhibition ? ", " + data.exhibition : "") + (data.area ? ", " + data.area : "") +
+          (data.dimensions ? ". Opening: " + data.dimensions : "") + ". " + (data.notes ? "Notes: " + data.notes + "." : "")) :
+          "Hi Zest team, I'm " + name + " (" + phone + ")" +
           (data.company ? " from " + data.company : "") + ". " +
           (data.exhibition ? "Exhibition: " + data.exhibition + ". " : "") +
           (data.area ? "Stall area: " + data.area + ". " : "") +
