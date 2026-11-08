@@ -5,7 +5,7 @@ if (!defined('ZEST_API')) exit;
 
 const UNITS = ['ft', 'm', 'in', 'cm', 'mm'];
 
-function lead_dept_ok() { global $ADMIN, $MODULE; if (!$ADMIN && !in_array($MODULE, ['leads', 'calls'], true)) fail('Your department does not have expo data.', 403); }
+function lead_dept_ok() { global $ADMIN, $MODS; if (!$ADMIN && !array_intersect(['leads', 'calls'], $MODS)) fail('Your department does not have expo data.', 403); }
 function expo_row($id) { $e = one('SELECT * FROM ' . T('expos') . ' WHERE id = ?', [(int) $id]); if (!$e) fail('Expo not found.', 404); return $e; }
 function clean_web($v) { $v = s($v, 255); if ($v && !preg_match('#^https?://#i', $v)) $v = 'https://' . $v; return $v; }
 function clean_email($v) { $v = strtolower(s($v, 160) ?? ''); if ($v && !filter_var($v, FILTER_VALIDATE_EMAIL)) fail("Email looks wrong: $v"); return $v ?: null; }
@@ -70,8 +70,8 @@ case 'lexpos':
   $people = [];
   if ($ADMIN) {
     $mods = setting('dept_modules', []);
-    foreach (all('SELECT id, name, department FROM ' . T('users') . " WHERE active = 1 AND role = 'employee' ORDER BY name") as $u) {
-      if (!in_array($mods[$u['department']] ?? 'none', ['leads', 'calls'], true)) continue;
+    foreach (all('SELECT id, name, department, extra_depts FROM ' . T('users') . " WHERE active = 1 AND role = 'employee' ORDER BY name") as $u) {
+      if (!array_intersect(['leads', 'calls'], user_mods($u))) continue;
       $people[] = ['id' => $u['id'], 'name' => $u['name'], 'dept' => $u['department'],
         'today' => (int) val('SELECT COUNT(*) FROM ' . T('leads') . ' WHERE user_id = ? AND created_at >= ?', [$u['id'], today() . ' 00:00:00']),
         'month' => (int) val('SELECT COUNT(*) FROM ' . T('leads') . ' WHERE user_id = ? AND created_at >= ?', [$u['id'], date('Y-m-01') . ' 00:00:00']),
@@ -154,7 +154,7 @@ case 'lead_del':
 
 // ================= DESIGN JOBS =================
 case 'design_jobs':
-  if (!$ADMIN && $MODULE !== 'design') fail('Your department does not have design jobs.', 403);
+  if (!$ADMIN && !in_array('design', $MODS, true)) fail('Your department does not have design jobs.', 403);
   $rows = all('SELECT p.id, p.expo, p.location, p.start_date, p.end_date, p.area_sqm, p.space_type, p.sides_open, p.stall_no, p.status, p.designer_id, p.design_assigned_by, p.assigned_on, p.design_submitted_on, p.design_notes, p.design_approved_by, c.company
     FROM ' . T('projects') . ' p JOIN ' . T('clients') . ' c ON c.id = p.client_id WHERE p.designer_id = ? ORDER BY (p.design_submitted_on IS NOT NULL), p.assigned_on DESC, p.id DESC', [$MID]);
   $ids = array_column($rows, 'id');
@@ -186,7 +186,7 @@ case 'assign_ops':
 
 // ================= PRODUCTION JOBS =================
 case 'ops_jobs':
-  if (!$ADMIN && $MODULE !== 'ops') fail('Your department does not have production jobs.', 403);
+  if (!$ADMIN && !in_array('ops', $MODS, true)) fail('Your department does not have production jobs.', 403);
   $rows = all('SELECT p.id, p.expo, p.location, p.start_date, p.area_sqm, p.sides_open, p.stall_no, p.status, p.ops_assigned_by, p.ops_assigned_on, p.ops_updated_at, c.company
     FROM ' . T('projects') . ' p JOIN ' . T('clients') . ' c ON c.id = p.client_id WHERE p.ops_id = ? ORDER BY COALESCE(p.start_date, p.created_at) DESC', [$MID]);
   foreach ($rows as &$r) $r['vendor'] = chosen_vendor($r['id']); unset($r);

@@ -7,7 +7,7 @@ if (!$me) { header('Location: login.php'); exit; }
 $mods = setting('dept_modules', []); $mod = $mods[$me['department']] ?? '';
 $a = one('SELECT a.*, p.owner_id, p.id AS pid FROM ' . T('approvals') . ' a JOIN ' . T('projects') . ' p ON p.id = a.project_id WHERE a.id = ?', [(int) ($_GET['id'] ?? 0)]);
 if (!$a || !$a['doc']) { http_response_code(404); exit('Quote not found.'); }
-if (!($me['role'] === 'admin' || $mod === 'accounts' || (int) $a['owner_id'] === (int) $me['id'])) { http_response_code(403); exit('This quote is not yours.'); }
+if (!($me['role'] === 'admin' || has_mod($me, 'accounts') || (int) $a['owner_id'] === (int) $me['id'])) { http_response_code(403); exit('This quote is not yours.'); }
 $d = json_decode($a['doc'], true); $co = setting('company', []);
 $ok = $a['status'] === 'approved';
 $h = fn($s) => htmlspecialchars((string) ($s ?? ''), ENT_QUOTES);

@@ -144,8 +144,8 @@ case 'sales_log':
   foreach ($rows as &$r) { $r['versions'] = array_reverse($hist[$r['project_id'] . ':' . $r['kind']] ?? []); } unset($r);
   // per sales person
   $mods = setting('dept_modules', []); $people = []; $m1 = date('Y-m-01');
-  foreach (all('SELECT id, name, department FROM ' . T('users') . " WHERE active = 1 AND role = 'employee' ORDER BY name") as $u) {
-    if (($mods[$u['department']] ?? 'none') !== 'records') continue;
+  foreach (all('SELECT id, name, department, extra_depts FROM ' . T('users') . " WHERE active = 1 AND role = 'employee' ORDER BY name") as $u) {
+    if (!has_mod($u, 'records')) continue;
     $ps = all('SELECT * FROM ' . T('projects') . ' WHERE owner_id = ?', [$u['id']]); $b = bills_for($ps);
     $won = array_filter($ps, fn($x) => is_won($x['status']));
     $cnt = fn($k, $extra = '') => (int) val('SELECT COUNT(*) FROM ' . T('approvals') . " WHERE requested_by = ? AND kind = ? $extra", [$u['id'], $k]);

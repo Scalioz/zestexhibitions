@@ -131,6 +131,10 @@ function migrate() {
     if (empty($c['bank_benef'])) $c['bank_benef'] = 'Zest Exhibitions';
     set_setting('company', $c); set_setting('schema_v', 17);
   }
+  if ($v < 18) {   // an employee can work in more than one department
+    try { db()->exec('ALTER TABLE ' . T('users') . ' ADD COLUMN extra_depts TEXT'); } catch (PDOException $e) { /* already there */ }
+    set_setting('schema_v', 18);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';

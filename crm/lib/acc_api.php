@@ -4,7 +4,7 @@ if (!defined('ZEST_API')) exit;
 require_once __DIR__ . '/acc.php';
 
 function need_acc() { global $ACC; if (!$ACC) fail('Only accounts can do this.', 403); }
-function need_claimer() { global $ADMIN, $MODULE; if (!$ADMIN && !in_array($MODULE, ['records', 'ops'], true)) fail('Expense claims are for sales and production.', 403); }
+function need_claimer() { global $ADMIN, $MODS; if (!$ADMIN && !array_intersect(['records', 'ops'], $MODS)) fail('Expense claims are for sales and production.', 403); }
 function money_id($id) { $a = acc_get($id); if (!$a || !in_array($a['sub'], ['bank', 'cash', 'petty'], true)) fail('Pick bank, cash or petty cash.'); return (int) $a['id']; }
 function acc_of_type($id, $type) { $a = acc_get($id); if (!$a || $a['type'] !== $type) fail("Pick an $type account."); return (int) $a['id']; }
 function mode_of($moneyId) { $s = acc_get($moneyId)['sub']; return $s === 'bank' ? 'Bank' : 'Cash'; }
@@ -48,7 +48,7 @@ function inv_totals($lines, $rate, $disc = 0, $mode = 'auto') {
 
 // ---------- invoice workflow: sales request → accounts prepare → admin approve ----------
 const INV_EDITABLE = ['requested', 'draft', 'on_hold', 'rejected'];
-function need_seller() { global $ADMIN, $MODULE; if (!$ADMIN && $MODULE !== 'records') fail('Invoice requests are raised by sales.', 403); }
+function need_seller() { global $ADMIN, $MODS; if (!$ADMIN && !in_array('records', $MODS, true)) fail('Invoice requests are raised by sales.', 403); }
 function inv_row($id) {
   $i = one('SELECT i.*, c.company, c.city, p.expo, p.owner_id, u.name AS requester FROM ' . T('invoices') . ' i JOIN ' . T('clients') . ' c ON c.id = i.client_id LEFT JOIN ' . T('projects') . ' p ON p.id = i.project_id LEFT JOIN ' . T('users') . ' u ON u.id = i.requested_by WHERE i.id = ?', [(int) $id]);
   if (!$i) fail('Invoice not found.', 404);
@@ -546,7 +546,7 @@ case 'inv_cancel':
 // ================= EXPENSE CLAIMS =================
 case 'claim_mine':
   need_claimer();
-  $opts = $MODULE === 'ops' ? all('SELECT p.id, p.expo, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . " c ON c.id = p.client_id WHERE p.ops_id = ? AND p.status <> 'rejected' ORDER BY p.id DESC", [$MID])
+  $opts = in_array('ops', $MODS, true) && !in_array('records', $MODS, true) ? all('SELECT p.id, p.expo, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . " c ON c.id = p.client_id WHERE p.ops_id = ? AND p.status <> 'rejected' ORDER BY p.id DESC", [$MID])
         : all('SELECT p.id, p.expo, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . " c ON c.id = p.client_id WHERE " . ($ADMIN ? '1=1' : 'p.owner_id = ?') . " AND p.status <> 'rejected' ORDER BY p.id DESC LIMIT 300", $ADMIN ? [] : [$MID]);
   out(['claims' => claims_out('c.user_id = ?', [$MID]), 'projects' => $opts, 'cats' => array_keys(CLAIM_CATS)]);
 

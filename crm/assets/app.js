@@ -95,7 +95,7 @@ async function route() {
   const r = parseHash();
   C.editing = null; C.leditId = null; C.lxu = '';
   if (isAdmin() && ({ leads: 'leadlog', mydesign: 'jobs', myops: 'jobs' })[r.name]) { location.hash = '#' + ({ leads: 'leadlog', mydesign: 'jobs', myops: 'jobs' })[r.name]; return; }
-  if (!isAdmin() && MODULE_ONLY[r.name] && !MODULE_ONLY[r.name].includes(B.module)) { location.hash = '#home'; return; }
+  if (!isAdmin() && MODULE_ONLY[r.name] && !MODULE_ONLY[r.name].some(x => (B.modules || [B.module]).includes(x))) { location.hash = '#home'; return; }
   if (ACC_ROUTES[r.name] && !B.acc) { location.hash = '#home'; return; }
   renderNav(r.name);
   const fn = routes[r.name] || routes.home;
@@ -108,7 +108,7 @@ const ADMIN_ONLY = { invappr: 1, clientlog: 1, saleslog: 1, leadlog: 1, jobs: 1,
 const RECORDS_ONLY = { refs: 1, clients: 1, client: 1, project: 1, newclient: 1, qgen: 1 };
 const ACC_ROUTES = { acc: 1, entry: 1, jv: 1, invoices: 1, invnew: 1, inv: 1, invappr: 1, claims: 1, topost: 1, books: 1, coa: 1, accset: 1 };
 const MODULE_ONLY = { contacts: ['records', 'ops', 'leads', 'calls'], myinv: ['records'], myexp: ['records', 'ops'],  leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
-const handsOver = () => !isAdmin() && ['leads', 'calls'].includes(B.module);   // research / telecalling add clients for sales
+const handsOver = () => !isAdmin() && !B.records && (B.modules || [B.module]).some(x => ['leads', 'calls'].includes(x));   // research / telecalling add clients for sales
 async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); window.scrollTo(0, y); }
 
 function renderNav(cur) {
@@ -120,9 +120,25 @@ function renderNav(cur) {
        <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('dnq', 'Do-not-quote list')}
        <div class="sec">Accounts</div>${L('acc', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}
        <div class="sec">Admin</div>${L('team', 'Team')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
+    : (B.modules || []).length > 1 ? multiNav(L)
     : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('report', 'Daily report', B.flags || '')}`
     : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('report', 'Daily report', B.flags || '')}`
     : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') + L('newclient', '+ New client') + L('contacts', 'Contacts') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('contacts', 'Contacts') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('report', 'Daily report', B.flags || '')}`;
+}
+
+// menu for someone working in more than one department: every section they need, each item once
+function multiNav(L) {
+  const m = k => (B.modules || []).includes(k), sec = t => `<div class="sec">${t}</div>`;
+  let h = L('home', 'My dashboard');
+  if (m('records')) h += sec('Sales') + L('clients', 'My clients') + L('newclient', '+ New client') + L('refs', 'Referral leads', B.ref_new || '') + L('myinv', 'My invoices', B.inv_attention || '');
+  if (m('leads') || m('calls')) h += sec(m('calls') && m('leads') ? 'Research & telecalling' : m('calls') ? 'Telecalling' : 'Data research') + L('leads', 'Expo data') + (m('records') ? '' : L('newclient', '+ New client'));
+  if (m('design')) h += sec('Design') + L('mydesign', 'My design jobs');
+  if (m('ops')) h += sec('Production') + L('myops', 'My production jobs');
+  if (m('accounts')) h += sec('Accounts') + L('acc', 'Accounts dashboard') + L('claims', 'Expense approvals', B.claims_waiting || '') + L('entry', '+ New entry') + L('invoices', 'Invoices', B.inv_todo || '') + L('topost', 'Post from orders') + L('books', 'Books & reports') + L('coa', 'Chart of accounts') + L('accset', 'Company settings');
+  h += sec('My work');
+  if (m('records') || m('ops') || m('leads') || m('calls')) h += L('contacts', 'Contacts');
+  if (m('records') || m('ops')) h += L('myexp', 'My expenses', B.claims_attention || '');
+  return h + L('report', 'Daily report', B.flags || '');
 }
 
 // ---------- HOME ----------
@@ -540,7 +556,7 @@ async function loadFull(id) {
 }
 
 // ---------- DEPARTMENT WORK: shared bits ----------
-const MOD_LABEL = { records: 'Clients & orders', leads: 'Expo data (research)', calls: 'Expo data (telecalling)', design: 'Design jobs', ops: 'Production jobs', none: 'Daily report only' };
+const MOD_LABEL = { records: 'Clients & orders', leads: 'Expo data (research)', calls: 'Expo data (telecalling)', design: 'Design jobs', ops: 'Production jobs', accounts: 'Accounts', none: 'Daily report only' };
 const modOf = dept => (B.dept_modules || {})[dept] || 'none';
 const usersOfMod = m => { const u = B.users.filter(x => +x.active && x.role === 'employee' && modOf(x.department) === m); return u.length ? u : B.users.filter(x => +x.active && x.role === 'employee'); };
 const SIDES = { 1: '1 side open', 2: '2 sides open (corner)', 3: '3 sides open', 4: '4 sides open (island)' };
@@ -553,7 +569,7 @@ function setPath(o, path, v) { const k = path.split('.'); let x = o; for (let i 
 // ---------- EXPO DATA (research + telecalling) ----------
 routes.leads = async () => {
   const d = await api('lexpos', { q: C.lq || '' });
-  const calls = B.module === 'calls';
+  const calls = (B.modules || [B.module]).includes('calls');
   view().innerHTML = `
   <div class="head"><div><h1>Expo data</h1><p>${calls ? 'Expos you are calling exhibitors for.' : 'Expos you are collecting exhibitor data for.'} Open an expo to add or correct entries.</p></div></div>
   <form class="panel" id="lx-new"><h2>Add an expo</h2><p class="sub" style="margin-top:0">If a colleague already added the same expo, pick it from the suggestions — your entries will sit under the same expo.</p>
@@ -572,7 +588,7 @@ routes.lexpo = async ({ id }) => {
   const d = await api('lexpo', { id, user_id: isAdmin() ? (C.lxu || '') : '' });
   C.lexpo = d; const x = d.expo;
   const admin = isAdmin();
-  const showNotes = admin ? true : B.module === 'calls';
+  const showNotes = admin ? true : (B.modules || [B.module]).includes('calls');
   const canDel = e => admin || (+e.user_id === +B.me.id && String(e.created_at).slice(0, 10) === B.today);
   const cols = 6 + (showNotes ? 1 : 0) + (admin ? 1 : 0);
   const people = admin ? [...new Map(d.entries.map(e => [e.user_id, e.entered_by])).entries()] : [];
@@ -1283,7 +1299,7 @@ function drawInv() {
 // all roles: one invoice with its full history
 routes.invd = async ({ id }) => {
   const { invoice: i, log, tax_child } = await api('inv_get', { id });
-  const acc = B.acc, admin = isAdmin(), seller = B.module === 'records' || admin;
+  const acc = B.acc, admin = isAdmin(), seller = B.records || admin;
   const back = acc ? '#invoices' : '#myinv';
   const acts = [];
   if (i.status === 'issued') acts.push(invDl(i));
@@ -1479,14 +1495,15 @@ routes.team = async () => {
   view().innerHTML = `
   <div class="head"><div><h1>Team</h1><p>Only admin sets role and department. The department decides the daily report format.</p></div></div>
   <div class="panel"><div class="tw"><table><tr><th>Name</th><th>Login email</th><th>Designation</th><th>Department</th><th>Access</th><th>Joined</th><th>Status</th><th></th></tr>
-   ${d.users.map(u => `<tr><td><b>${esc(u.name)}</b><div class="sub">${esc(u.phone || '')}</div></td><td>${esc(u.email)}</td><td>${esc(u.designation || '')}</td><td>${esc(u.department)}</td><td>${u.role === 'admin' ? '<span class="pill p-enquiry">admin</span>' : MOD_LABEL[modOf(u.department)]}</td><td class="num">${fd(u.joined_on)}</td><td>${+u.active ? '<span class="pill p-ok">active</span>' : '<span class="pill p-off">disabled</span>'}</td><td class="r"><button class="btn ghost sm" data-edituser="${u.id}">Edit</button></td></tr>`).join('')}</table></div></div>
+   ${d.users.map(u => `<tr><td><b>${esc(u.name)}</b><div class="sub">${esc(u.phone || '')}</div></td><td>${esc(u.email)}</td><td>${esc(u.designation || '')}</td><td>${esc(u.department)}${(u.extra || []).length ? `<div class="sub">+ ${u.extra.map(esc).join(', ')}</div>` : ''}</td><td>${u.role === 'admin' ? '<span class="pill p-enquiry">admin</span>' : MOD_LABEL[modOf(u.department)]}</td><td class="num">${fd(u.joined_on)}</td><td>${+u.active ? '<span class="pill p-ok">active</span>' : '<span class="pill p-off">disabled</span>'}</td><td class="r"><button class="btn ghost sm" data-edituser="${u.id}">Edit</button></td></tr>`).join('')}</table></div></div>
   <div class="panel"><h2>What each department works on</h2><p class="sub" style="margin-top:0">Decides the screens an employee gets as soon as their login is created. Everyone also has the daily report.</p>
    <div class="tw"><table><tr><th>Department</th><th>Works on</th><th class="r">People</th></tr>${B.departments.map(x => `<tr><td><b>${esc(x)}</b></td><td><select data-deptmod="${esc(x)}" aria-label="${esc(x)} works on">${Object.entries(MOD_LABEL).map(([k, l]) => `<option value="${k}" ${modOf(x) === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td><td class="r num">${d.users.filter(u => u.department === x && +u.active && u.role === 'employee').length}</td></tr>`).join('')}</table></div></div>
   <form class="panel" id="uform"><h2>${ed ? 'Edit ' + esc(ed.name) : 'Create employee login'}</h2>
    <div class="grid"><label class="f">Full name *<input name="name" required value="${esc(ed?.name)}"></label>
     <label class="f">Email (login ID) *<input name="email" type="email" ${ed ? 'disabled' : 'required'} value="${esc(ed?.email)}"></label>
     <label class="f">Designation<input name="designation" placeholder="e.g. Sales Executive" value="${esc(ed?.designation)}"></label>
-    <label class="f">Department *<select name="department">${deptOpts(ed?.department)}</select></label>
+    <label class="f">Main department *<select name="department">${deptOpts(ed?.department)}</select><span class="sub" style="font-weight:400">Decides the daily report format</span></label>
+    <div class="f" style="grid-column:1/-1"><span>Also works in <span class="sub" style="font-weight:400">(optional — gives the screens of these departments too)</span></span><div class="row" style="gap:14px;flex-wrap:wrap;margin-top:6px">${B.departments.map(x => `<label style="display:flex;gap:6px;align-items:center;font-weight:400"><input type="checkbox" name="extra_depts" value="${esc(x)}" ${(ed?.extra || []).includes(x) ? 'checked' : ''}> ${esc(x)}</label>`).join('')}</div></div>
     <label class="f">Phone<input name="phone" value="${esc(ed?.phone)}"></label>
     <label class="f">Access<select name="role"><option value="employee">Employee</option><option value="admin" ${ed?.role === 'admin' ? 'selected' : ''}>Admin (sees everything)</option></select></label>
     ${ed ? '' : `<label class="f">Joining date<input type="date" name="joined_on" value="${B.today}"></label>`}
@@ -1495,7 +1512,7 @@ routes.team = async () => {
    <div class="row" style="margin-top:12px"><button class="btn">${ed ? 'Save changes' : 'Create login'}</button>${ed ? '<button type="button" class="btn ghost" id="ucancel">Cancel</button>' : ''}</div>
    <p class="sub">Share the email and password with the employee. They can change the password from Account.</p></form>`;
   $('#uform').onsubmit = async e => {
-    e.preventDefault(); const o = Object.fromEntries(new FormData(e.target)); if (ed) { o.id = ed.id; o.active = o.active === '1'; }
+    e.preventDefault(); const fd0 = new FormData(e.target), o = Object.fromEntries(fd0); o.extra_depts = fd0.getAll('extra_depts'); if (ed) { o.id = ed.id; o.active = o.active === '1'; }
     await act(() => api('user_save', o), ed ? 'Saved' : 'Login created'); C.editUser = null; await reboot(); refresh();
   };
   if ($('#ucancel')) $('#ucancel').onclick = () => { C.editUser = null; refresh(); };

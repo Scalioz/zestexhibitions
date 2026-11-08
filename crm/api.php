@@ -29,11 +29,12 @@ $MID = (int) $me['id'];
 // What this person works on, set per department by admin (Team page):
 // records = clients & orders, leads = expo data research, calls = telecalling, design = design jobs, ops = production jobs, none = daily report only
 $MODULE = $ADMIN ? 'admin' : (setting('dept_modules', default_dept_modules())[$me['department']] ?? 'none');
-$RECORDS = $ADMIN || $MODULE === 'records';
-$ACC = $ADMIN || $MODULE === 'accounts';
+$MODS = $ADMIN ? [] : user_mods($me);   // main department + extra departments
+$RECORDS = $ADMIN || in_array('records', $MODS, true);
+$ACC = $ADMIN || in_array('accounts', $MODS, true);
 $RECORD_ACTIONS = ['clients', 'client', 'client_save', 'dup', 'dnq', 'contact_add', 'contact_del', 'project_create', 'project', 'project_save',
   'child_add', 'child_update', 'child_del', 'vq_select', 'vendor_add'];
-$HANDOVER = in_array($MODULE, ['leads', 'calls'], true);   // research / telecalling can add a new client and hand it to a sales person
+$HANDOVER = !$RECORDS && array_intersect(['leads', 'calls'], $MODS) ? true : false;   // research / telecalling can add a new client and hand it to a sales person
 if (in_array($A, $RECORD_ACTIONS, true) && !$RECORDS && !($HANDOVER && ($A === 'dup' || ($A === 'client_save' && empty($in['id']))))) fail('Your department does not have access to client records.', 403);
 if ($A === 'upload' && !$RECORDS && !in_array($in['entity'] ?? '', ['ritem', 'final', 'wd', 'claim', 'voucher'], true)) fail('Your department does not have access to client records.', 403);
 
@@ -45,7 +46,7 @@ function upload_limit_mb() { return max(1, min(UPLOAD_MAX_MB, ini_mb('upload_max
 function ref_hist($r, $text) { $h = json_decode($r['history'] ?? '', true) ?: []; $h[] = ['at' => now(), 'text' => $text]; return json_encode($h, JSON_UNESCAPED_UNICODE); }
 function ref_targets() {   // who a referral can go to: sales people and admins
   $mods = setting('dept_modules', default_dept_modules());
-  return array_values(array_filter(all('SELECT id, name, role, department, designation FROM ' . T('users') . ' WHERE active = 1 ORDER BY role, name'), fn($u) => $u['role'] === 'admin' || ($mods[$u['department']] ?? '') === 'records'));
+  return array_values(array_map(function ($u) { unset($u['extra_depts']); return $u; }, array_filter(all('SELECT id, name, role, department, designation, extra_depts FROM ' . T('users') . ' WHERE active = 1 ORDER BY role, name'), fn($u) => $u['role'] === 'admin' || has_mod($u, 'records'))));
 }
 function touch_activity() {   // marks today as a working day with work logged
   global $ADMIN, $MID; if ($ADMIN) return;
@@ -128,6 +129,7 @@ case 'boot':
     'today' => today(),
     'records' => $RECORDS,
     'module' => $MODULE,
+    'modules' => $MODS,
     'dept_modules' => setting('dept_modules', default_dept_modules()),
     'furniture_items' => setting('furniture_items', default_furniture()),
     'acc' => $ACC,
@@ -138,7 +140,7 @@ case 'boot':
     'claims_waiting' => $ACC ? (int) val('SELECT COUNT(*) FROM ' . T('claims') . " WHERE status = 'submitted'") : 0,
     'inv_todo' => $ACC ? (int) val('SELECT COUNT(*) FROM ' . T('invoices') . " WHERE status IN ('requested','on_hold','rejected')") : 0,
     'inv_pending' => $ADMIN ? (int) val('SELECT COUNT(*) FROM ' . T('invoices') . " WHERE status = 'pending'") : 0,
-    'inv_attention' => $MODULE === 'records' ? (int) val('SELECT COUNT(*) FROM ' . T('invoices') . ' i LEFT JOIN ' . T('projects') . " p ON p.id = i.project_id WHERE i.status IN ('on_hold','rejected') AND (i.requested_by = ? OR p.owner_id = ?)", [$MID, $MID]) : 0,
+    'inv_attention' => in_array('records', $MODS, true) ? (int) val('SELECT COUNT(*) FROM ' . T('invoices') . ' i LEFT JOIN ' . T('projects') . " p ON p.id = i.project_id WHERE i.status IN ('on_hold','rejected') AND (i.requested_by = ? OR p.owner_id = ?)", [$MID, $MID]) : 0,
     'pending_approvals' => $ADMIN ? (int) val('SELECT COUNT(*) FROM ' . T('approvals') . " WHERE status = 'pending'") : 0,
   ]);
 
@@ -715,7 +717,7 @@ case 'report_delete':  // admin only: in case an employee submitted wrong data a
 // ----- TEAM -----
 case 'users':
   need_admin();
-  out(['users' => all('SELECT id, name, email, role, designation, department, phone, active, joined_on FROM ' . T('users') . ' ORDER BY active DESC, name')]);
+  out(['users' => array_map(fn($u) => $u + ['extra' => json_decode($u['extra_depts'] ?? '', true) ?: []], all('SELECT id, name, email, role, designation, department, extra_depts, phone, active, joined_on FROM ' . T('users') . ' ORDER BY active DESC, name'))]);
 
 case 'user_save':
   need_admin();
@@ -723,6 +725,7 @@ case 'user_save':
   $role = ($in['role'] ?? 'employee') === 'admin' ? 'admin' : 'employee';
   if (!$data['name']) fail('Enter the name.');
   if (!$data['department']) fail('Pick a department.');
+  $data['extra_depts'] = json_encode(array_values(array_filter(array_unique((array) ($in['extra_depts'] ?? [])), fn($d) => $d !== $data['department'] && in_array($d, setting('departments', []), true))), JSON_UNESCAPED_UNICODE);
   if (empty($in['id'])) {
     $email = strtolower(s($in['email'] ?? null, 160) ?? '');
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) fail('Enter a valid email.');
@@ -972,7 +975,7 @@ case 'settings_save':
   }
   if (isset($in['dept_modules'])) {
     $m = setting('dept_modules', default_dept_modules());
-    foreach ((array) $in['dept_modules'] as $dname => $mod) if (in_array($dname, setting('departments', []), true) && in_array($mod, ['records', 'leads', 'calls', 'design', 'ops', 'none'], true)) $m[$dname] = $mod;
+    foreach ((array) $in['dept_modules'] as $dname => $mod) if (in_array($dname, setting('departments', []), true) && in_array($mod, ['records', 'leads', 'calls', 'design', 'ops', 'accounts', 'none'], true)) $m[$dname] = $mod;
     set_setting('dept_modules', $m);
   }
   if (isset($in['furniture_items'])) set_setting('furniture_items', array_values(array_unique(array_filter(array_map(fn($x) => s($x, 80), (array) $in['furniture_items'])))));

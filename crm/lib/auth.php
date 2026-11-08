@@ -19,12 +19,17 @@ function current_user() {
   start_session();
   $u = null;
   if (!empty($_SESSION['uid'])) {
-    $u = one('SELECT id, name, email, role, designation, department, phone, joined_on FROM ' . T('users') . ' WHERE id = ? AND active = 1', [$_SESSION['uid']]);
+    $u = one('SELECT * FROM ' . T('users') . ' WHERE id = ? AND active = 1', [$_SESSION['uid']]);
+    if ($u) unset($u['pass_hash']);
     if (!$u) { $_SESSION = []; }
   }
   return $u;
 }
 
+// Everything a person works on: their main department plus any extra departments admin gave them.
+function user_depts($u) { $x = json_decode($u['extra_depts'] ?? '', true); return array_values(array_unique(array_filter(array_merge([$u['department'] ?? ''], is_array($x) ? $x : [])))); }
+function user_mods($u) { $m = (array) setting('dept_modules', []); return array_values(array_unique(array_filter(array_map(fn($d) => $m[$d] ?? null, user_depts($u)), fn($v) => $v && $v !== 'none'))); }
+function has_mod($u, $mod) { return in_array($mod, user_mods($u), true); }
 function is_admin() { $u = current_user(); return $u && $u['role'] === 'admin'; }
 
 function try_login($email, $pass) {

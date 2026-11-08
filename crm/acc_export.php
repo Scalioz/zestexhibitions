@@ -5,7 +5,7 @@ require_once __DIR__ . '/lib/acc.php';
 require_once __DIR__ . '/lib/xlsx.php';
 $me = current_user();
 if (!$me) { header('Location: login.php'); exit; }
-if (!($me['role'] === 'admin' || (setting('dept_modules', [])[$me['department']] ?? '') === 'accounts')) { http_response_code(403); exit('Only accounts can export.'); }
+if (!($me['role'] === 'admin' || has_mod($me, 'accounts'))) { http_response_code(403); exit('Only accounts can export.'); }
 try { $r = run_report($_GET['r'] ?? '', $_GET); } catch (UserError $e) { http_response_code(400); exit($e->getMessage()); }
 $rows = [$r['cols']];
 foreach ($r['rows'] as $x) $rows[] = array_map(fn($v) => is_numeric($v) && !is_string($v) ? round((float) $v, 2) : $v, $x['c']);

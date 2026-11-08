@@ -4,7 +4,7 @@ require_once __DIR__ . '/lib/auth.php';
 require_once __DIR__ . '/lib/acc.php';
 $me = current_user();
 if (!$me) { header('Location: login.php'); exit; }
-$isAcc = $me['role'] === 'admin' || (setting('dept_modules', [])[$me['department']] ?? '') === 'accounts';
+$isAcc = $me['role'] === 'admin' || has_mod($me, 'accounts');
 $i = one('SELECT i.*, c.company, c.location, c.city, c.gst_no, c.person, c.phone, c.email, p.expo, p.owner_id FROM ' . T('invoices') . ' i JOIN ' . T('clients') . ' c ON c.id = i.client_id LEFT JOIN ' . T('projects') . ' p ON p.id = i.project_id WHERE i.id = ?', [(int) ($_GET['id'] ?? 0)]);
 if (!$i) { http_response_code(404); exit('Invoice not found.'); }
 if (!$isAcc && (int) $i['requested_by'] !== (int) $me['id'] && (int) $i['owner_id'] !== (int) $me['id']) { http_response_code(403); exit('This invoice is not yours.'); }
