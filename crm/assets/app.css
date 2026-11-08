@@ -144,3 +144,4 @@ table.rep tr.rk-t td{font-weight:700;border-top:2px solid var(--line)}
 table.rep tr.rk-bad td{color:var(--bad);font-weight:700}
 table.rep tr.rk-good td{color:var(--ok);font-weight:700}
 .grid.g2{grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));align-items:start}.grid.g2>.panel{min-width:0;margin:0}
+[hidden]{display:none!important}

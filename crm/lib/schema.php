@@ -139,6 +139,19 @@ function migrate() {
     try { db()->exec('ALTER TABLE ' . T('projects') . " ADD COLUMN design_source VARCHAR(10) NOT NULL DEFAULT 'zest'"); } catch (PDOException $e) { /* already there */ }
     set_setting('schema_v', 19);
   }
+  if ($v < 20) {   // attendance, leave, permission, work from home
+    $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
+    $PK = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT UNSIGNED AUTO_INCREMENT PRIMARY KEY';
+    $E = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+    foreach (['CREATE TABLE IF NOT EXISTS ' . T('attendance') . " (id $PK, user_id INT NOT NULL, adate DATE NOT NULL, check_in DATETIME, check_out DATETIME, in_ip VARCHAR(45), out_ip VARCHAR(45), off_net INT NOT NULL DEFAULT 0, note TEXT, created_at DATETIME NOT NULL)$E",
+      'CREATE UNIQUE INDEX zc_att_ud ON ' . T('attendance') . ' (user_id, adate)',
+      'CREATE TABLE IF NOT EXISTS ' . T('att_requests') . " (id $PK, user_id INT NOT NULL, kind VARCHAR(12) NOT NULL, leave_type VARCHAR(10), from_date DATE NOT NULL, to_date DATE NOT NULL, half VARCHAR(8), from_time VARCHAR(5), to_time VARCHAR(5),
+        reason TEXT, status VARCHAR(10) NOT NULL DEFAULT 'pending', paid_days DECIMAL(5,1) NOT NULL DEFAULT 0, unpaid_days DECIMAL(5,1) NOT NULL DEFAULT 0, admin_note TEXT, decided_by VARCHAR(120), decided_at DATETIME, seen INT NOT NULL DEFAULT 0, created_at DATETIME NOT NULL)$E",
+      'CREATE INDEX zc_attr_u ON ' . T('att_requests') . ' (user_id, status)', 'CREATE INDEX zc_attr_d ON ' . T('att_requests') . ' (status, from_date)'] as $q) { try { db()->exec($q); } catch (PDOException $e) { if (stripos($q, 'CREATE TABLE') === 0) throw $e; } }
+    foreach (['shift_start VARCHAR(5)', 'shift_end VARCHAR(5)'] as $col) { try { db()->exec('ALTER TABLE ' . T('users') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ } }
+    if (setting('att_from') === null) set_setting('att_from', today());
+    set_setting('schema_v', 20);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';

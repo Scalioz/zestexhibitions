@@ -101,29 +101,29 @@ async function route() {
   const fn = routes[r.name] || routes.home;
   if ((r.name in ADMIN_ONLY) && !isAdmin()) { location.hash = '#home'; return; }
   if ((r.name in RECORDS_ONLY) && !B.records && !(r.name === 'newclient' && handsOver())) { location.hash = '#home'; return; }
-  try { await fn(r); } catch (e) { if (e.message !== 'signed out') view().innerHTML = `<div class="alert bad"><b>Could not load this page</b><span class="m">${esc(e.message)}</span></div>`; }
+  try { await fn(r); attStrip(); } catch (e) { if (e.message !== 'signed out') view().innerHTML = `<div class="alert bad"><b>Could not load this page</b><span class="m">${esc(e.message)}</span></div>`; }
   window.scrollTo(0, 0);
 }
-const ADMIN_ONLY = { invappr: 1, clientlog: 1, saleslog: 1, leadlog: 1, jobs: 1, reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
+const ADMIN_ONLY = { att: 1, invappr: 1, clientlog: 1, saleslog: 1, leadlog: 1, jobs: 1, reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
 const RECORDS_ONLY = { refs: 1, clients: 1, client: 1, project: 1, newclient: 1, qgen: 1 };
 const ACC_ROUTES = { acc: 1, entry: 1, jv: 1, invoices: 1, invnew: 1, inv: 1, invappr: 1, claims: 1, topost: 1, books: 1, coa: 1, accset: 1 };
 const MODULE_ONLY = { contacts: ['records', 'ops', 'leads', 'calls'], myinv: ['records'], myexp: ['records', 'ops'],  leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
 const handsOver = () => !isAdmin() && !B.records && (B.modules || [B.module]).some(x => ['leads', 'calls'].includes(x));   // research / telecalling add clients for sales
-async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); window.scrollTo(0, y); }
+async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); attStrip(); window.scrollTo(0, y); }
 
 function renderNav(cur) {
   const map = { qgen: 'clients', jv: 'books', inv: 'invoices', invnew: 'invoices', invd: B.acc ? 'invoices' : 'myinv', acc: isAdmin() ? 'acc' : 'home', client: 'clients', project: 'clients', lexpo: isAdmin() ? 'leadlog' : 'leads', opsjob: isAdmin() ? 'jobs' : 'myops' };
   const on = map[cur] || cur;
   const L = (k, l, b) => `<a href="#${k}" class="${on === k ? 'on' : ''}">${l}${b ? `<span class="badge">${b}</span>` : ''}</a>`;
   $('#nav').innerHTML = isAdmin()
-    ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('saleslog', 'Sales log', B.pending_approvals || '')}${L('invappr', 'Invoice approvals', B.inv_pending || '')}${L('leadlog', 'Expo data log')}${L('jobs', 'Design & production')}${L('reportlog', 'Daily reports', B.flags || '')}
+    ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('saleslog', 'Sales log', B.pending_approvals || '')}${L('invappr', 'Invoice approvals', B.inv_pending || '')}${L('leadlog', 'Expo data log')}${L('jobs', 'Design & production')}${L('reportlog', 'Daily reports', B.flags || '')}${L('att', 'Attendance', B.att_pending || '')}
        <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('dnq', 'Do-not-quote list')}
        <div class="sec">Accounts</div>${L('acc', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}
        <div class="sec">Admin</div>${L('team', 'Team')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
     : (B.modules || []).length > 1 ? multiNav(L)
-    : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('report', 'Daily report', B.flags || '')}`
-    : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('report', 'Daily report', B.flags || '')}`
-    : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') + L('newclient', '+ New client') + L('contacts', 'Contacts') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('contacts', 'Contacts') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('report', 'Daily report', B.flags || '')}`;
+    : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
+    : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
+    : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') + L('newclient', '+ New client') + L('contacts', 'Contacts') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('contacts', 'Contacts') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`;
 }
 
 // menu for someone working in more than one department: every section they need, each item once
@@ -138,7 +138,7 @@ function multiNav(L) {
   h += sec('My work');
   if (m('records') || m('ops') || m('leads') || m('calls')) h += L('contacts', 'Contacts');
   if (m('records') || m('ops')) h += L('myexp', 'My expenses', B.claims_attention || '');
-  return h + L('report', 'Daily report', B.flags || '');
+  return h + L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '');
 }
 
 // ---------- HOME ----------
@@ -191,6 +191,7 @@ async function adminHome(r) {
   view().innerHTML = `
   <div class="head"><div><h1>Business dashboard</h1><p>${f.from || f.to ? `Expos from ${f.from ? fd(f.from) : 'start'} to ${f.to ? fd(f.to) : 'today'}` : 'All time'} · ${f.owner_id ? 'business brought by <b>' + esc((B.users.find(u => +u.id === +f.owner_id) || {}).name || '') + '</b>' : 'all employees'}</p></div>
    <form class="row" id="dashf"><label class="f">Sales person<select name="owner_id"><option value="">Everyone</option>${B.users.filter(u => +u.active && (u.role === 'admin' || (B.dept_modules || {})[u.department] === 'records')).map(u => `<option value="${u.id}" ${+f.owner_id === +u.id ? 'selected' : ''}>${esc(u.name)}${u.role === 'admin' ? ' (admin)' : ''}</option>`).join('')}</select></label><label class="f">From<input type="date" name="from" value="${f.from}"></label><label class="f">To<input type="date" name="to" value="${f.to}"></label><button class="btn ghost sm" style="align-self:flex-end">Apply</button>${f.from || f.to || f.owner_id ? '<button type="button" class="btn link" id="dashclear" style="align-self:flex-end">Clear</button>' : ''}</form></div>
+  ${B.att_pending ? `<div class="alert warn"><b>${B.att_pending} leave / permission request${B.att_pending > 1 ? 's' : ''} waiting</b><div><a class="btn sm" href="#att-0-requests">Review requests</a></div></div>` : ''}
   ${B.ref_new ? `<div class="alert warn"><b>${B.ref_new} referral lead${B.ref_new > 1 ? 's' : ''} handed to you</b><div><a class="btn sm" href="#refs">Open referral leads</a></div></div>` : ''}
   ${B.inv_pending ? `<div class="alert warn"><b>${B.inv_pending} invoice${B.inv_pending > 1 ? 's' : ''} waiting for your approval</b><div><a class="btn sm" href="#invappr">Review invoices</a></div></div>` : ''}
   ${B.pending_approvals ? `<div class="alert warn"><b>${B.pending_approvals} design / quote approval${B.pending_approvals > 1 ? 's' : ''} waiting</b><div><a class="btn sm" href="#saleslog">Open sales log</a></div></div>` : ''}
@@ -497,7 +498,7 @@ routes.reportlog = async () => {
     <span class="dsum">${rc ? `<span class="pill p-received">${rc} received</span>` : ''}${pd ? `<span class="pill p-pending">${pd} pending</span>` : ''}${ms ? `<span class="pill p-missing">${ms} not received</span>` : ''}${!day.rows.length ? `<span class="sub">${day.off ? 'No report expected' : 'No one to track'}</span>` : ''}</span></summary><div class="in">
    ${day.rows.length ? day.rows.map(r => r.status === 'received'
      ? `<details><summary><b>${esc(r.user.name)}</b><span class="sub">${esc(r.user.department)}</span><span class="pill p-received">received ${r.at}</span><span class="sub" style="margin-left:auto">${r.items.length} entr${r.items.length === 1 ? 'y' : 'ies'}</span></summary><div class="in">${reportTable(r.items, r.fields)}<div class="row" style="margin-top:8px"><button class="btn ghost sm" data-repedit="${r.id}">Edit report</button><button class="btn link" data-repdel="${r.id}">Delete report</button></div></div></details>`
-     : `<details><summary><b>${esc(r.user.name)}</b><span class="sub">${esc(r.user.department)}</span><span class="pill p-${r.status === 'work' ? 'received' : r.status}">${r.status === 'work' ? 'work logged' : r.status === 'pending' ? 'pending today' : 'report not received'}</span>${r.status === 'work' && r.leads ? `<span class="sub" style="margin-left:auto">${r.leads} expo entr${r.leads === 1 ? 'y' : 'ies'}</span>` : ''}</summary></details>`).join('')
+     : `<details><summary><b>${esc(r.user.name)}</b><span class="sub">${esc(r.user.department)}</span><span class="pill p-${r.status === 'work' ? 'received' : r.status === 'leave' ? 'off' : r.status}">${r.status === 'work' ? 'work logged' : r.status === 'pending' ? 'pending today' : r.status === 'leave' ? esc(r.leave || 'on leave') : 'report not received'}</span>${r.status === 'work' && r.leads ? `<span class="sub" style="margin-left:auto">${r.leads} expo entr${r.leads === 1 ? 'y' : 'ies'}</span>` : ''}</summary></details>`).join('')
      : `<div class="sub">${day.off ? 'No report expected.' : 'No employees to track on this day.'}</div>`}</div></details>`; }).join('')}</div>`;
   C.openDays = C.openDays || {};
   document.querySelectorAll('.log details.day').forEach(el => el.addEventListener('toggle', () => { C.openDays[el.dataset.day] = el.open; }));
@@ -1029,6 +1030,126 @@ document.addEventListener('click', async e => {
    <textarea rows="2" placeholder="Paste here (Ctrl + V) — the copied result or a screenshot" style="margin-top:6px;width:100%"></textarea></div><div class="gst-msg" style="margin-top:4px"></div>`;
   try { const k = await api('gst_known', { gst: r.g }); if (k.found) res.querySelector('.gst-known').innerHTML = `<div class="alert warn" style="margin-top:6px"><span class="m">Already in the CRM: <b>${esc(k.found.company)}</b> (handled by ${esc(k.found.owner)}). <button type="button" class="btn link" data-gstuse='${esc(JSON.stringify({ company: k.found.company, location: k.found.location, city: k.found.city }))}'>Fill from it</button></span></div>`; } catch (x) {}
 });
+
+
+// ---------- attendance: check in / out, leave, permission, work from home ----------
+const ATT_PILL = { ontime: ['p-ok', '✅ On time'], late: ['p-quoted', '🟠 Late'], absent: ['p-missing', '❌ Not checked in'], notyet: ['p-off', 'Not yet'], leave: ['p-enquiry', '🌴 On leave'], requested: ['p-pending', '⏳ Leave requested'], off: ['p-off', 'Holiday / week off'] };
+const attPill = st => `<span class="pill ${(ATT_PILL[st.code] || ['p-off'])[0]}">${st.code === 'late' ? '🟠 Late ' + (st.late_min >= 60 ? Math.floor(st.late_min / 60) + ' h ' + (st.late_min % 60) + ' min' : st.late_min + ' min') : st.code === 'leave' ? '🌴 ' + esc(st.label) : (st.code === 'absent' && st.date < B.today ? '❌ Absent' : (ATT_PILL[st.code] || [0, esc(st.label)])[1])}</span>${st.wfh ? ' <span class="pill p-enquiry">🏠 WFH</span>' : ''}`;
+const REQ_ST = { pending: ['p-pending', 'waiting for admin'], approved: ['p-ok', 'approved'], rejected: ['p-bad', 'rejected'], cancelled: ['p-off', 'cancelled'] };
+const reqWhen = r => `${fd(r.from_date)}${r.to_date !== r.from_date ? ' – ' + fd(r.to_date) : ''}${r.half ? ` (${r.half} half)` : ''}${r.kind === 'permission' ? ` · ${esc(r.from_time)}–${esc(r.to_time)}` : ''}`;
+const reqPay = r => r.kind === 'leave' && r.split ? (r.split.unpaid ? `<span class="pill p-bad">${num(r.split.unpaid)} day${+r.split.unpaid === 1 ? '' : 's'} unpaid / deductible</span>` : '') + (r.split.paid ? ` <span class="pill p-ok">${num(r.split.paid)} paid</span>` : '') : '';
+
+function attStrip() {
+  const old = $('#attstrip'); if (old) old.remove();
+  if (isAdmin() || !B.att_today || B.att_today.code === 'off') return;
+  const t = B.att_today, v = view(); if (!v) return;
+  let h;
+  if (t.code === 'leave') h = `<span>🌴 You are on <b>${esc(t.label)}</b> today.</span>`;
+  else if (!t.in) h = `<span>${t.code === 'absent' ? `<b style="color:var(--bad)">You have not checked in yet</b> — you were expected by ${esc(t.expected)}.` : t.code === 'requested' ? '⏳ Your leave request for today is waiting for admin. If you are working, check in.' : `Good ${new Date().getHours() < 12 ? 'morning' : 'day'} — check in when you start work.`}${t.wfh ? ' 🏠 Work from home approved.' : ''}</span><button class="btn sm" data-attin>✓ Check in</button>`;
+  else if (!t.out) h = `<span>✓ Checked in at <b>${esc(t.in)}</b> ${attPill(t)}${t.notes.length ? ' · ' + t.notes.map(esc).join(' · ') : ''}</span><button class="btn ghost sm" data-attout>Check out</button>`;
+  else h = `<span>Today: <b>${esc(t.in)} – ${esc(t.out)}</b> ${attPill(t)}</span><button class="btn link" data-attout>Update check-out</button>`;
+  if (B.att_news) h += `<a class="btn link" href="#myatt">${B.att_news} request${B.att_news > 1 ? 's' : ''} decided →</a>`;
+  v.insertAdjacentHTML('afterbegin', `<div id="attstrip" class="panel row" style="align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-left:4px solid ${t.code === 'absent' ? 'var(--bad)' : t.in ? 'var(--ok)' : 'var(--warn)'}">${h}</div>`);
+  v.querySelectorAll('#attstrip [data-attin],#attstrip [data-attout]').forEach(b => b.onclick = async () => {
+    b.disabled = true; const r = await act(() => api(b.dataset.attin !== undefined ? 'att_in' : 'att_out'), b.dataset.attin !== undefined ? 'Checked in' : 'Checked out').catch(() => null);
+    await reboot(); b.disabled = false; if (r) refresh(); });
+}
+
+function attApplyForm(admin) {
+  const emps = B.users.filter(u => +u.active && u.role !== 'admin');
+  return `<form class="panel" id="attapply"><h2>${admin ? 'Mark leave / permission for someone' : 'Apply for leave, permission or work from home'}</h2>${admin ? '<p class="sub" style="margin-top:0">Recorded as approved straight away — e.g. when someone calls in sick.</p>' : ''}
+   <div class="grid g3">${admin ? `<label class="f">Employee *<select name="user_id" required><option value="">Pick</option>${emps.map(u => `<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></label>` : ''}
+    <label class="f">What *<select name="kind" data-attkind><option value="leave">Leave</option><option value="permission">Permission (a few hours)</option><option value="wfh">Work from home</option></select></label>
+    <label class="f" data-for="leave">Leave type *<select name="leave_type"><option value="casual">Casual leave</option><option value="sick">Sick leave</option><option value="unpaid">Unpaid leave</option></select></label>
+    <label class="f" data-for="leave">Full or half day<select name="half"><option value="">Full day(s)</option><option value="first">First half only</option><option value="second">Second half only</option></select></label>
+    <label class="f">Date / from *<input type="date" name="from_date" required value="${B.today}"></label>
+    <label class="f" data-for="leave wfh">To date <span class="sub" style="font-weight:400">(for more than one day)</span><input type="date" name="to_date"></label>
+    <label class="f" data-for="permission" hidden>Time from *<input type="time" name="from_time" value="10:00"></label>
+    <label class="f" data-for="permission" hidden>Time to *<input type="time" name="to_time" value="12:00"></label>
+    <label class="f wide">Reason ${admin ? '' : '*'}<textarea name="reason" rows="2" ${admin ? '' : 'required'} placeholder="${admin ? 'e.g. Called in sick at 9:30' : 'e.g. Fever, doctor visit'}"></textarea></label></div>
+   <div class="sub" style="margin-top:6px" data-for="leave">1 paid leave (casual or sick) per month after the 6-month probation. More than that, or any leave during probation, is unpaid / deductible. Unused leave does not carry over.</div>
+   <div style="margin-top:10px"><button class="btn">${admin ? 'Save as approved' : 'Send to admin'}</button></div></form>`;
+}
+function attApplyWire(admin) {
+  const f = $('#attapply'); if (!f) return;
+  const sync = () => { const k = f.kind.value; f.querySelectorAll('[data-for]').forEach(el => { el.hidden = !el.dataset.for.split(' ').includes(k); }); };
+  f.kind.onchange = sync; sync();
+  f.onsubmit = async e => { e.preventDefault(); const o = Object.fromEntries(new FormData(f)); const r = await act(() => api('att_apply', o), admin ? 'Saved as approved' : 'Sent to admin for approval').catch(() => null); if (r) { await reboot(); refresh(); } };
+}
+
+routes.myatt = async () => {
+  const ym = C.attym || '', d = await api('att_me', { month: ym }); B.att_news = 0; renderNav('myatt'); const m = d.month;
+  view().innerHTML = `<div class="head"><div><h1>My attendance</h1><p>Check in when you start, check out when you leave. Apply for leave or permission here — admin approves.</p></div></div>
+  <div class="kpis"><div class="kpi hl"><span>Today</span><b style="font-size:18px">${d.today.in ? esc(d.today.in) + (d.today.out ? ' – ' + esc(d.today.out) : '') : '—'}</b><small>${esc(d.today.label)}</small></div>
+   <div class="kpi"><span>Paid leave this month</span><b>${num(d.paid_used)} / ${num(d.paid_allow)}</b><small>${d.probation_end ? 'In probation until ' + fd(d.probation_end) + ' — leave is unpaid' : d.paid_used >= d.paid_allow ? 'Used — more leave is unpaid' : 'Available'}</small></div>
+   <div class="kpi"><span>Present · late (${esc(d.ym)})</span><b>${m.present} · ${m.late}</b><small>of ${m.working} working days</small></div>
+   <div class="kpi"><span>Leave · permission · WFH</span><b>${m.leave + m.half / 2} · ${m.permission} · ${m.wfh}</b><small>${m.unpaid ? num(m.unpaid) + ' unpaid day(s)' : 'No unpaid days'}</small></div></div>
+  ${attApplyForm(false)}
+  <div class="panel"><h2>My requests</h2>${d.requests.length ? `<div class="tw"><table><tr><th>Applied</th><th>What</th><th>When</th><th>Reason</th><th>Status</th><th></th></tr>${d.requests.map(r => `<tr><td class="num">${fd(r.created_at)}</td><td><b>${esc(r.label)}</b></td><td>${reqWhen(r)}</td><td>${esc(r.reason || '')}</td>
+    <td><span class="pill ${REQ_ST[r.status][0]}">${REQ_ST[r.status][1]}</span> ${r.status === 'approved' ? reqPay(r) : ''}${r.admin_note ? `<div class="sub">Admin: ${esc(r.admin_note)}</div>` : ''}</td><td>${r.status === 'pending' ? `<button class="btn link" data-attcancel="${r.id}">Cancel</button>` : ''}</td></tr>`).join('')}</table></div>` : '<div class="sub">No requests yet.</div>'}</div>
+  <div class="panel"><div class="ph"><h2>Day by day</h2><input type="month" id="attym" value="${esc(d.ym)}" style="max-width:180px"></div>
+   <div class="tw"><table><tr><th>Date</th><th>Expected by</th><th>In</th><th>Out</th><th>Status</th><th>Notes</th></tr>${m.days.slice().reverse().map(x => `<tr><td class="num">${fd(x.date)} <span class="sub">${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(x.date).getDay()]}</span></td><td class="num">${x.code === 'off' ? '' : esc(x.expected)}</td><td class="num">${esc(x.in)}</td><td class="num">${esc(x.out)}</td><td>${x.code === 'off' ? '<span class="sub">holiday / week off</span>' : attPill(x)}</td><td class="sub">${x.notes.map(esc).join(' · ')}</td></tr>`).join('')}</table></div></div>`;
+  attApplyWire(false);
+  $('#attym').onchange = e => { C.attym = e.target.value; refresh(); };
+  view().querySelectorAll('[data-attcancel]').forEach(b => b.onclick = async () => { await act(() => api('att_cancel', { id: b.dataset.attcancel }), 'Request cancelled'); refresh(); });
+};
+
+routes.att = async r => {
+  const tab = ['today', 'requests', 'month', 'settings'].includes(r.tab) ? r.tab : 'today';
+  const tabs = `<div class="tabs" style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:0 8px">${[['today', 'Today'], ['requests', 'Requests' + (B.att_pending ? ` <span class="badge">${B.att_pending}</span>` : '')], ['month', 'Monthly sheet'], ['settings', 'Settings']].map(([k, l]) => `<a href="#att-0-${k}" class="${tab === k ? 'on' : ''}">${l}</a>`).join('')}</div>`;
+  const head = `<div class="head"><div><h1>Attendance</h1><p>Who checked in, who is late, who is on leave — and requests waiting for you.</p></div></div>${tabs}`;
+  if (tab === 'today') {
+    const d = await api('att_board', { date: C.attd || '' }); B.att_pending = d.pending; renderNav('att');
+    const cnt = k => d.rows.filter(x => x.code === k).length;
+    view().innerHTML = `${head}<div class="panel row" style="align-items:flex-end;justify-content:space-between"><label class="f">Date<input type="date" id="attd" value="${d.date}" max="${B.today}"></label>
+     <div class="row">${[['ontime', '✅ On time'], ['late', '🟠 Late'], ['absent', '❌ Not checked in'], ['leave', '🌴 Leave'], ['requested', '⏳ Requested']].map(([k, l]) => `<span class="pill ${ATT_PILL[k][0]}">${l} · ${cnt(k)}</span>`).join('')}<span class="pill p-enquiry">🏠 WFH · ${d.rows.filter(x => x.wfh).length}</span></div></div>
+     ${!d.working ? '<div class="alert"><b>Holiday / week off</b><span class="m">No attendance expected on this date.</span></div>' : ''}
+     <div class="panel">${d.rows.length ? `<div class="tw"><table><tr><th>Employee</th><th>Status</th><th>Expected by</th><th>In</th><th>Out</th><th>Notes</th><th></th></tr>${d.rows.map(x => `<tr><td><b>${esc(x.user.name)}</b><div class="sub">${esc(x.user.department)} · shift ${esc(x.shift)}</div></td><td>${attPill(x)}</td><td class="num">${x.code === 'off' || x.code === 'leave' ? '' : esc(x.expected)}</td><td class="num">${esc(x.in)}${x.off_net ? ' <span class="sub" title="Checked in from outside the office network">· outside office</span>' : ''}</td><td class="num">${esc(x.out)}</td><td class="sub">${x.notes.map(esc).join(' · ')}</td>
+      <td><button class="btn link" data-attedit="${x.user.id}" data-in="${esc(x.in)}" data-out="${esc(x.out)}">Edit</button></td></tr>`).join('')}</table></div>` : blank(d.from && d.date < d.from ? 'Attendance tracking started on ' + fd(d.from) + '.' : 'No employees to track.')}</div>
+     <form class="panel" id="atteditf" hidden><h3 id="attedith">Correct check-in / check-out</h3><div class="grid g3"><label class="f">Check in<input type="time" name="in"></label><label class="f">Check out<input type="time" name="out"></label><label class="f">Note<input name="note" placeholder="e.g. Forgot to check in — confirmed on call"></label></div><input type="hidden" name="user_id"><div class="row" style="margin-top:8px"><button class="btn sm">Save</button><button type="button" class="btn link" id="atteditx">Cancel</button></div></form>`;
+    $('#attd').onchange = e => { C.attd = e.target.value; refresh(); };
+    view().querySelectorAll('[data-attedit]').forEach(b => b.onclick = () => { const f = $('#atteditf'); f.hidden = false; f.user_id.value = b.dataset.attedit; f.in.value = b.dataset.in; f.out.value = b.dataset.out; $('#attedith').textContent = 'Correct times · ' + b.closest('tr').querySelector('b').textContent + ' · ' + fd(d.date); f.scrollIntoView({ behavior: 'smooth' }); });
+    $('#atteditx').onclick = () => { $('#atteditf').hidden = true; };
+    $('#atteditf').onsubmit = async e => { e.preventDefault(); const o = Object.fromEntries(new FormData(e.target)); o.date = d.date; await act(() => api('att_set', o), 'Attendance corrected'); refresh(); };
+  } else if (tab === 'requests') {
+    const st = C.attst || 'pending', d = await api('att_requests', { status: st }); B.att_pending = +(d.counts.pending || 0); renderNav('att');
+    view().innerHTML = `${head}<div class="row" style="margin:12px 0">${['pending', 'approved', 'rejected', 'cancelled'].map(k => `<button class="btn ${st === k ? '' : 'ghost'} sm" data-attst="${k}">${cap(k)} ${d.counts[k] ? '· ' + d.counts[k] : ''}</button>`).join('')}</div>
+     ${d.rows.length ? d.rows.map(q => `<div class="panel" style="border-left:3px solid ${st === 'pending' ? 'var(--warn)' : st === 'approved' ? 'var(--ok)' : 'var(--line)'}"><div class="ph"><h3>${esc(q.name)} <span class="sub">· ${esc(q.department)}</span> · ${esc(q.label)}</h3><span class="sub">applied ${fd(q.created_at)}</span></div>
+       <div><b>${reqWhen(q)}</b></div><div style="margin-top:4px">Reason: ${esc(q.reason || '—')}</div>
+       ${q.kind === 'leave' && q.split ? `<div style="margin-top:6px">${q.split.unpaid ? `⚠ <b>${num(q.split.unpaid)} day(s) unpaid / deductible</b>` : `✓ <b>Paid</b>`}${q.split.paid && q.split.unpaid ? ` · ${num(q.split.paid)} paid` : ''}${q.split.why.length ? `<div class="sub">${q.split.why.map(esc).join(' · ')}</div>` : ''}</div>` : ''}
+       ${st === 'pending' ? `<form class="row" data-attdec="${q.id}" style="margin-top:10px;align-items:flex-end"><label class="f" style="flex:1;min-width:220px">Note to ${esc(q.name)} <span class="sub" style="font-weight:400">(needed to reject)</span><input name="note"></label><button class="btn sm" data-a="approve">Approve</button><button class="btn danger sm" data-a="reject">Reject</button></form>`
+        : `<div class="sub" style="margin-top:6px">${esc(REQ_ST[q.status][1])}${q.decided_by ? ' by ' + esc(q.decided_by) + ' · ' + fd(q.decided_at) : ''}${q.admin_note ? ' · ' + esc(q.admin_note) : ''}</div>${st === 'approved' ? `<button class="btn link" data-attcancel="${q.id}">Cancel this</button>` : ''}`}</div>`).join('') : `<div class="panel">${blank('Nothing here.')}</div>`}
+     ${attApplyForm(true)}`;
+    view().querySelectorAll('[data-attst]').forEach(b => b.onclick = () => { C.attst = b.dataset.attst; refresh(); });
+    view().querySelectorAll('[data-attdec]').forEach(f => f.querySelectorAll('button').forEach(b => b.onclick = async e => { e.preventDefault(); const ok = await act(() => api('att_decide', { id: f.dataset.attdec, action: b.dataset.a, note: f.note.value }), b.dataset.a === 'approve' ? 'Approved' : 'Rejected').catch(() => null); if (ok) { await reboot(); refresh(); } }));
+    view().querySelectorAll('[data-attcancel]').forEach(b => b.onclick = async () => { await act(() => api('att_cancel', { id: b.dataset.attcancel }), 'Cancelled'); refresh(); });
+    attApplyWire(true);
+  } else if (tab === 'month') {
+    const ym = C.attmym || '', d = await api('att_month', { month: ym, user_id: C.attmu || '' });
+    view().innerHTML = `${head}<div class="panel row" style="align-items:flex-end;justify-content:space-between"><div class="row"><label class="f">Month<input type="month" id="attmym" value="${esc(d.ym)}"></label>${C.attmu ? '<button class="btn ghost sm" id="attmall" style="align-self:flex-end">← Everyone</button>' : ''}</div><a class="btn" href="att_export.php?month=${esc(d.ym)}">⬇ Export to Excel</a></div>
+     <div class="panel"><div class="tw"><table><tr><th>Employee</th><th class="r">Working days</th><th class="r">Present</th><th class="r">Late</th><th class="r">Absent</th><th class="r">Leave</th><th class="r">Half days</th><th class="r">Paid</th><th class="r">Unpaid</th><th class="r">Permission</th><th class="r">WFH</th><th class="r">No check-out</th></tr>
+      ${d.rows.map(x => `<tr class="click" data-attmu="${x.user.id}"><td><b>${esc(x.user.name)}</b><div class="sub">${esc(x.user.department)} · ${esc(x.user.shift)}${x.user.probation_end ? ' · probation till ' + fd(x.user.probation_end) : ''}</div></td>${['working', 'present', 'late', 'absent', 'leave', 'half', 'paid', 'unpaid', 'permission', 'wfh', 'no_out'].map(k => `<td class="r num" ${k === 'unpaid' && +x[k] ? 'style="color:var(--bad);font-weight:600"' : k === 'late' && x[k] ? 'style="color:var(--warn)"' : ''}>${num(x[k])}</td>`).join('')}</tr>`).join('')}</table></div>
+      ${C.attmu && d.rows[0] ? `<h3 style="margin-top:16px">${esc(d.rows[0].user.name)} — day by day</h3><div class="tw"><table><tr><th>Date</th><th>Expected</th><th>In</th><th>Out</th><th>Status</th><th>Notes</th></tr>${d.rows[0].days.slice().reverse().map(x => `<tr><td class="num">${fd(x.date)}</td><td class="num">${x.code === 'off' ? '' : esc(x.expected)}</td><td class="num">${esc(x.in)}</td><td class="num">${esc(x.out)}</td><td>${x.code === 'off' ? '<span class="sub">holiday / week off</span>' : attPill(x)}</td><td class="sub">${x.notes.map(esc).join(' · ')}</td></tr>`).join('')}</table></div>` : '<p class="sub">Click a person to see their days.</p>'}</div>`;
+    $('#attmym').onchange = e => { C.attmym = e.target.value; refresh(); };
+    view().querySelectorAll('[data-attmu]').forEach(tr => tr.onclick = () => { C.attmu = tr.dataset.attmu; refresh(); });
+    if ($('#attmall')) $('#attmall').onclick = () => { C.attmu = ''; refresh(); };
+  } else {
+    const d = await api('att_board', {}); const c = d.cfg;
+    view().innerHTML = `${head}<form class="panel" id="attset"><h2>Shift & alert</h2><div class="grid g3"><label class="f">Shift start<input type="time" name="start" value="${esc(c.start)}"></label><label class="f">Shift end<input type="time" name="end" value="${esc(c.end)}"></label><label class="f">Buffer before flagging (minutes)<input type="number" name="buffer" min="0" max="120" value="${+c.buffer}"></label></div>
+     <p class="sub">A different shift for one person: Team → Edit → Shift start / end.</p>
+     <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" name="email" ${+c.email ? 'checked' : ''}> Email me the list of people not checked in (and new leave requests)</label>
+     <h3 style="margin-top:16px">Office network <span class="sub" style="font-weight:400">(optional — only marks check-ins from outside; nobody is blocked, so work from home still works)</span></h3>
+     <div class="grid"><label class="f">Office internet address(es)<textarea name="office_ips" rows="2" placeholder="Leave empty to not mark">${esc((c.office_ips || []).join('\n'))}</textarea></label><div class="sub" style="align-self:end">This computer's address now: <b>${esc(d.ip)}</b><br><button type="button" class="btn ghost sm" id="attmyip" style="margin-top:6px">I'm in the office — use this network</button></div></div>
+     <h3 style="margin-top:16px">WhatsApp group alert <span class="sub" style="font-weight:400">(optional — needs a spare number connected to a gateway such as Whapi)</span></h3>
+     <div class="grid g3"><label class="f">Gateway address<input name="wa_url" value="${esc(c.wa.url)}"></label><label class="f">Gateway token<input name="wa_token" placeholder="${c.wa.token ? esc(c.wa.token) + ' (saved — leave blank to keep)' : 'paste token'}"></label><label class="f">Group ID<input name="wa_group" value="${esc(c.wa.group)}" placeholder="e.g. 1203630...@g.us"></label></div>
+     <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" name="wa_on" ${+c.wa.on ? 'checked' : ''}> Post alerts in the WhatsApp group</label>
+     <div class="row" style="margin-top:14px"><button class="btn">Save settings</button><button type="button" class="btn ghost sm" data-atttest="email">Send test email</button><button type="button" class="btn ghost sm" data-atttest="wa">Send test WhatsApp</button></div></form>`;
+    const f = $('#attset'), save = extra => api('att_settings', Object.assign({ start: f.start.value, end: f.end.value, buffer: f.buffer.value, email: f.email.checked ? 1 : 0, office_ips: f.office_ips.value, wa: { on: f.wa_on.checked ? 1 : 0, url: f.wa_url.value, token: f.wa_token.value, group: f.wa_group.value } }, extra || {}));
+    f.onsubmit = async e => { e.preventDefault(); await act(() => save(), 'Attendance settings saved'); refresh(); };
+    $('#attmyip').onclick = async () => { await act(() => save({ add_my_ip: 1 }), 'This network is marked as the office'); refresh(); };
+    view().querySelectorAll('[data-atttest]').forEach(b => b.onclick = async () => { const r = await act(() => api('att_test', { what: b.dataset.atttest })).catch(() => null); if (r) toast(r.ok ? 'Sent — check ' + (b.dataset.atttest === 'wa' ? 'the WhatsApp group' : 'your inbox') : 'Could not send. ' + (b.dataset.atttest === 'wa' ? 'Check the gateway token and group ID, and that it is switched on.' : 'The server could not send email.'), !r.ok); });
+  }
+};
 
 // ---------- contacts: import from Excel / CSV ----------
 const IMP_F = [['name', 'Name', 'name|fullname|contactname|contactperson|person|contact|personname|firstname'], ['designation', 'Designation', 'designation|title|jobtitle|position|role|post'],
@@ -1572,6 +1693,8 @@ routes.team = async () => {
     <label class="f">Main department *<select name="department">${deptOpts(ed?.department)}</select><span class="sub" style="font-weight:400">Decides the daily report format</span></label>
     <div class="f" style="grid-column:1/-1"><span>Also works in <span class="sub" style="font-weight:400">(optional — gives the screens of these departments too)</span></span><div class="row" style="gap:14px;flex-wrap:wrap;margin-top:6px">${B.departments.map(x => `<label style="display:flex;gap:6px;align-items:center;font-weight:400"><input type="checkbox" name="extra_depts" value="${esc(x)}" ${(ed?.extra || []).includes(x) ? 'checked' : ''}> ${esc(x)}</label>`).join('')}</div></div>
     <label class="f">Phone<input name="phone" value="${esc(ed?.phone)}"></label>
+    <label class="f">Shift start <span class="sub" style="font-weight:400">(blank = company time)</span><input type="time" name="shift_start" value="${esc(ed?.shift_start || '')}"></label>
+    <label class="f">Shift end<input type="time" name="shift_end" value="${esc(ed?.shift_end || '')}"></label>
     <label class="f">Access<select name="role"><option value="employee">Employee</option><option value="admin" ${ed?.role === 'admin' ? 'selected' : ''}>Admin (sees everything)</option></select></label>
     ${ed ? '' : `<label class="f">Joining date<input type="date" name="joined_on" value="${B.today}"></label>`}
     <label class="f">${ed ? 'New password (leave blank to keep)' : 'Password * (min 8)'}<input name="password" type="text" autocomplete="new-password" ${ed ? '' : 'required minlength="8"'}></label>

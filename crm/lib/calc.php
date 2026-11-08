@@ -49,6 +49,8 @@ function missing_days($user, $end) {
   $hol = array_column(all('SELECT hdate FROM ' . T('holidays') . ' WHERE hdate BETWEEN ? AND ?', [$from, $end]), 'hdate');
   $done = array_column(all('SELECT rdate FROM ' . T('reports') . ' WHERE user_id = ? AND rdate BETWEEN ? AND ?', [$user['id'], $from, $end]), 'rdate');
   // a day with work logged (expo data, design or production updates) also counts as reported
+  try { foreach (all('SELECT from_date, to_date FROM ' . T('att_requests') . " WHERE user_id = ? AND kind = 'leave' AND status = 'approved' AND (half IS NULL OR half = '') AND to_date >= ? AND from_date <= ?", [$user['id'], $from, $end]) as $lv)   // approved full-day leave: no report expected
+    for ($x = $lv['from_date']; $x <= $lv['to_date']; $x = date('Y-m-d', strtotime($x . ' +1 day'))) $done[] = $x; } catch (PDOException $e) { /* table not created yet */ }
   $done = array_merge($done, array_column(all('SELECT adate FROM ' . T('activity') . ' WHERE user_id = ? AND adate BETWEEN ? AND ?', [$user['id'], $from, $end]), 'adate'));
   $out = [];
   for ($d = $from; $d <= $end; $d = date('Y-m-d', strtotime($d . ' +1 day'))) {

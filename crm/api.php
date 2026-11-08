@@ -19,6 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail('POST only', 405);
 if (!hash_equals($_SESSION['csrf'], $_SERVER['HTTP_X_CSRF'] ?? '')) fail('Page expired. Reload the page.', 419);
 session_write_close();   // release the session so one person's parallel requests don't queue behind each other
 migrate();
+try { require_once __DIR__ . '/lib/att.php'; att_tick(); } catch (Throwable $e) { error_log('[zestcrm] attendance tick: ' . $e->getMessage()); }
 
 $isUpload = str_starts_with($_SERVER['CONTENT_TYPE'] ?? '', 'multipart/form-data');
 if ($isUpload && empty($_POST) && empty($_FILES) && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) fail('File is too large for the server (max ' . upload_limit_mb() . ' MB).');
@@ -110,6 +111,7 @@ define('ZEST_API', 1);
 if (in_array($A, ['lexpos', 'lexpo', 'lexpo_save', 'lead_add', 'lead_bulk', 'lead_update', 'lead_del', 'design_jobs', 'design_save', 'assign_designer', 'assign_ops',
   'ops_jobs', 'ops_job', 'ops_save', 'jobs_board'], true)) require __DIR__ . '/lib/work_api.php';
 if (str_starts_with($A, 'acc_') || str_starts_with($A, 'inv_') || str_starts_with($A, 'claim_')) require __DIR__ . '/lib/acc_api.php';
+if (str_starts_with($A, 'att_')) require __DIR__ . '/lib/att_api.php';
 if (in_array($A, ['appr_request', 'appr_cancel', 'appr_decide', 'appr_sent', 'sales_log', 'design_client_ok', 'design_source', 'quote_prefill', 'quote_save'], true)) require __DIR__ . '/lib/appr_api.php';
 
 // ---------- actions ----------
@@ -133,6 +135,9 @@ case 'boot':
     'dept_modules' => setting('dept_modules', default_dept_modules()),
     'furniture_items' => setting('furniture_items', default_furniture()),
     'acc' => $ACC,
+    'att_pending' => $ADMIN ? (int) val('SELECT COUNT(*) FROM ' . T('att_requests') . " WHERE status = 'pending'") : 0,
+    'att_news' => $ADMIN ? 0 : (int) val('SELECT COUNT(*) FROM ' . T('att_requests') . " WHERE user_id = ? AND status IN ('approved','rejected') AND seen = 0", [$MID]),
+    'att_today' => $ADMIN ? null : (function () use ($me, $MID) { $d = today(); if (!att_tracked_users($d) || ($me['joined_on'] ?: '2000-01-01') > $d) return null; return att_status($me, $d, one('SELECT * FROM ' . T('attendance') . ' WHERE user_id = ? AND adate = ?', [$MID, $d]), att_reqs($d, $d, ['approved', 'pending'], $MID)[$MID] ?? []); })(),
     'handover' => $HANDOVER ? ref_targets() : [],
     'ref_new' => (int) val('SELECT COUNT(*) FROM ' . T('referrals') . " WHERE assigned_to = ? AND status = 'new'", [$MID]),
     'ref_open' => (int) val('SELECT COUNT(*) FROM ' . T('referrals') . " WHERE assigned_to = ? AND status IN ('new','seen')", [$MID]),
@@ -668,6 +673,8 @@ case 'report_log':
   $track = setting('track_from', today());
   $act = []; foreach (all('SELECT user_id, adate FROM ' . T('activity') . ' WHERE adate BETWEEN ? AND ?', [$from, $to]) as $a) $act[$a['user_id'] . '|' . $a['adate']] = 1;
   $leadN = []; foreach (all('SELECT user_id, created_at FROM ' . T('leads') . ' WHERE created_at BETWEEN ? AND ?', ["$from 00:00:00", "$to 23:59:59"]) as $l) { $k = $l['user_id'] . '|' . substr($l['created_at'], 0, 10); $leadN[$k] = ($leadN[$k] ?? 0) + 1; }
+  $lvd = []; foreach (all('SELECT user_id, from_date, to_date, leave_type FROM ' . T('att_requests') . " WHERE kind = 'leave' AND status = 'approved' AND (half IS NULL OR half = '') AND to_date >= ? AND from_date <= ?", [$from, $to]) as $lv)
+    for ($x = $lv['from_date']; $x <= $lv['to_date']; $x = date('Y-m-d', strtotime($x . ' +1 day'))) $lvd[$lv['user_id'] . '|' . $x] = ucfirst($lv['leave_type']) . ' leave';
   $days = [];
   for ($dd = $to; $dd >= $from; $dd = date('Y-m-d', strtotime($dd . ' -1 day'))) {
     $isOff = in_array((int) date('w', strtotime($dd)), $off, true);
@@ -679,6 +686,8 @@ case 'report_log':
           'items' => array_map(fn($it) => json_decode($it['data_json'], true) + ['_id' => (int) $it['id'], '_files' => $fl[$it['id']] ?? []], $items[$r['id']] ?? [])];
       } elseif (isset($act[$u['id'] . '|' . $dd])) {
         $day['rows'][] = ['user' => $u, 'status' => 'work', 'leads' => $leadN[$u['id'] . '|' . $dd] ?? 0];
+      } elseif (!$day['off'] && isset($lvd[$u['id'] . '|' . $dd])) {
+        $day['rows'][] = ['user' => $u, 'status' => 'leave', 'leave' => $lvd[$u['id'] . '|' . $dd]];
       } elseif (!$day['off'] && $dd >= $u['joined_on'] && $dd >= $track) {
         $day['rows'][] = ['user' => $u, 'status' => $dd === today() ? 'pending' : 'missing'];
       }
@@ -722,11 +731,12 @@ case 'report_delete':  // admin only: in case an employee submitted wrong data a
 // ----- TEAM -----
 case 'users':
   need_admin();
-  out(['users' => array_map(fn($u) => $u + ['extra' => json_decode($u['extra_depts'] ?? '', true) ?: []], all('SELECT id, name, email, role, designation, department, extra_depts, phone, active, joined_on FROM ' . T('users') . ' ORDER BY active DESC, name'))]);
+  out(['users' => array_map(fn($u) => $u + ['extra' => json_decode($u['extra_depts'] ?? '', true) ?: []], all('SELECT id, name, email, role, designation, department, extra_depts, phone, active, joined_on, shift_start, shift_end FROM ' . T('users') . ' ORDER BY active DESC, name'))]);
 
 case 'user_save':
   need_admin();
   $data = ['name' => s($in['name'] ?? null, 120), 'designation' => s($in['designation'] ?? null, 120), 'department' => s($in['department'] ?? null, 60), 'phone' => s($in['phone'] ?? null, 30)];
+  if (array_key_exists('shift_start', $in)) { require_once __DIR__ . '/lib/att.php'; $data['shift_start'] = att_hm($in['shift_start'] ?? '') ?: null; $data['shift_end'] = att_hm($in['shift_end'] ?? '') ?: null; }
   $role = ($in['role'] ?? 'employee') === 'admin' ? 'admin' : 'employee';
   if (!$data['name']) fail('Enter the name.');
   if (!$data['department']) fail('Pick a department.');
