@@ -13,8 +13,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 $h = fn($s) => htmlspecialchars($s ?? '', ENT_QUOTES);
 ?><!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Sign in · Zest CRM</title><link rel="icon" href="assets/mark.svg">
+<link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#1b2a5c"><link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Zest CRM">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="assets/auth.css"></head>
 <body><div class="auth">
@@ -32,4 +34,5 @@ $h = fn($s) => htmlspecialchars($s ?? '', ENT_QUOTES);
   </form>
   <p class="hint">Forgot your password? Ask your admin to reset it.</p>
   <p class="foot">Zest Exhibitions · G-79/1, Shaheen Bagh, Okhla, New Delhi 110025</p>
-</div></main></div></body></html>
+</div></main></div><script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});</script>
+</body></html>

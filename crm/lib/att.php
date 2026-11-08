@@ -52,7 +52,7 @@ function att_status($u, $date, $rec, $reqs) {
     $in = att_min(substr($rec['check_in'], 11, 5)); $o['late_min'] = max(0, $in - $exp);
     $code = $o['late_min'] > $buf ? 'late' : 'ontime';
     if (!$rec['check_out'] && ($date < today() || ($date === today() && (int) date('H') * 60 + (int) date('i') > $end + 30))) $o['notes'][] = 'Forgot to check out';
-    return $o + ['code' => $code, 'label' => $code === 'late' ? 'Late by ' . $o['late_min'] . ' min' : 'On time'];
+    return $o + ['code' => $code, 'label' => $code === 'late' ? 'Late by ' . ($o['late_min'] >= 60 ? intdiv($o['late_min'], 60) . ' h ' . ($o['late_min'] % 60) . ' min' : $o['late_min'] . ' min') : 'On time'];
   }
   $nowMin = (int) date('H') * 60 + (int) date('i');
   if ($pending) return $o + ['code' => 'requested', 'label' => att_kind_label($pending) . ' requested — not decided', 'req' => (int) $pending['id']];

@@ -10,10 +10,13 @@ $v = filemtime(__DIR__ . '/assets/app.js') . filemtime(__DIR__ . '/assets/app.cs
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="csrf" content="<?= $h($_SESSION['csrf']) ?>">
 <title>Zest CRM</title><link rel="icon" href="assets/mark.svg">
+<link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#1b2a5c"><link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Zest CRM">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
 <link rel="stylesheet" href="assets/app.css?v=<?= $v ?>"></head>
 <body>
 <header class="top">
+  <button class="menu-btn" id="menuBtn" aria-label="Menu" aria-expanded="false"><span></span><span></span><span></span></button>
   <a href="#home"><img src="assets/logo-white.png" alt="Zest Exhibitions" class="logo"></a>
   <span class="app">CRM</span>
   <div class="me">
@@ -29,4 +32,5 @@ $v = filemtime(__DIR__ . '/assets/app.js') . filemtime(__DIR__ . '/assets/app.cs
 </div>
 <div class="toast" id="toast" hidden></div>
 <script src="assets/app.js?v=<?= $v ?>"></script>
+<script>if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));</script>
 </body></html>

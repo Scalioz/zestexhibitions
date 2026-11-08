@@ -2091,6 +2091,12 @@ document.addEventListener('submit', async e => {
 });
 
 // ---------- start ----------
+// phone: slide-in menu
+document.addEventListener('click', e => {
+  const mb = e.target.closest('#menuBtn');
+  if (mb) { const o = document.body.classList.toggle('menu-open'); mb.setAttribute('aria-expanded', o); return; }
+  if (document.body.classList.contains('menu-open') && (e.target.closest('#nav a') || !e.target.closest('#nav'))) document.body.classList.remove('menu-open');
+});
 async function reboot() { Object.assign(B, await api('boot')); B.weekly_off = (B.weekly_off || []).map(Number); }
 (async () => {
   try { await reboot(); } catch (e) { view().innerHTML = `<div class="alert bad"><b>Could not start</b><span class="m">${esc(e.message)}</span></div>`; return; }

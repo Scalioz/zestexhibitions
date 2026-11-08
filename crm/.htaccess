@@ -25,3 +25,12 @@ RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
   php_value memory_limit 768M
   php_value max_execution_time 300
 </IfModule>
+# Installable app (phone home screen)
+<IfModule mod_mime.c>
+AddType application/manifest+json .webmanifest
+</IfModule>
+<IfModule mod_headers.c>
+<FilesMatch "^sw\.js$">
+  Header set Cache-Control "no-cache"
+</FilesMatch>
+</IfModule>
