@@ -546,7 +546,8 @@ case 'child_del':
   ins('audit', ['user_id' => $MID, 'at' => now(), 'project_id' => $r['project_id'], 'kind' => $k, 'entry_id' => $r['id'], 'action' => 'delete', 'before_json' => json_encode($r), 'after_json' => null]);
   out(['ok' => true]);
 
-case 'vq_select':
+case 'vq_select':   // only admin decides which vendor gets the job
+  need_admin();
   $r = one('SELECT * FROM ' . T('vendor_quotes') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]); if (!$r) fail('Not found', 404);
   project_row($r['project_id']);
   q('UPDATE ' . T('vendor_quotes') . ' SET selected = CASE WHEN id = ? THEN 1 ELSE 0 END WHERE project_id = ?', [$r['id'], $r['project_id']]);
