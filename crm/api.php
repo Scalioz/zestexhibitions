@@ -182,6 +182,8 @@ case 'home':
   $w = '1=1'; $prm = [];
   if ($from) { $w .= ' AND COALESCE(p.start_date, DATE(p.created_at)) >= ?'; $prm[] = $from; }
   if ($to) { $w .= ' AND COALESCE(p.start_date, DATE(p.created_at)) <= ?'; $prm[] = $to; }
+  $who = (int) ($in['owner_id'] ?? 0);   // one sales person's business only
+  if ($who) { $w .= ' AND p.owner_id = ?'; $prm[] = $who; }
   $ps = visible_projects($w, $prm); $b = bills_for($ps);
   $won = array_values(array_filter($ps, fn($p) => is_won($p['status'])));
   $lost = array_values(array_filter($ps, fn($p) => $p['status'] === 'rejected'));
@@ -194,16 +196,18 @@ case 'home':
   }
   // employees
   $emps = [];
-  foreach (all('SELECT * FROM ' . T('users') . " WHERE active = 1 AND role = 'employee' ORDER BY name") as $u) {
+  foreach (all('SELECT * FROM ' . T('users') . " WHERE active = 1 ORDER BY (role = 'admin') DESC, name") as $u) {   // admins too: their own orders count
+    if ($who && (int) $u['id'] !== $who) continue;
+    $isAdm = $u['role'] === 'admin';
     $mine = array_filter($ps, fn($p) => (int) $p['owner_id'] === (int) $u['id']);
     $mw = array_filter($mine, fn($p) => is_won($p['status']));
     $ml = array_filter($mine, fn($p) => $p['status'] === 'rejected');
-    $emps[] = ['id' => $u['id'], 'name' => $u['name'], 'designation' => $u['designation'], 'department' => $u['department'],
+    $emps[] = ['id' => $u['id'], 'name' => $u['name'], 'designation' => $u['designation'], 'department' => $isAdm ? 'Admin' : $u['department'], 'admin' => $isAdm,
       'clients' => (int) val('SELECT COUNT(*) FROM ' . T('clients') . ' WHERE owner_id = ?', [$u['id']]),
       'orders' => count($mine), 'won' => count($mw), 'business' => $sumk($mw, 'total'),
       'missed' => array_sum(array_map(fn($p) => (float) $p['offered'], $ml)), 'collected' => $sumk($mine, 'received'),
       'reports_month' => (int) val('SELECT COUNT(*) FROM ' . T('reports') . ' WHERE user_id = ? AND rdate >= ?', [$u['id'], date('Y-m-01')]),
-      'missing' => missing_days($u, $yday)];
+      'missing' => $isAdm ? [] : missing_days($u, $yday)];
   }
   // customers
   $cust = [];
