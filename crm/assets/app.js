@@ -233,7 +233,7 @@ routes.newclient = async () => {
   ${n.ref_id ? '<div class="alert"><b>From a referral lead</b><span class="m">Saving this client marks the referral as “added as client”. Add the expo details if you have them.</span></div>' : ''}
   <div class="head"><div><h1>New client</h1><p>${handsOver() ? 'Add a client you found and hand it to a sales person. They see it on their dashboard straight away.' : ''} As you type the company, email or phone, the CRM checks every past record, including other employees' clients.</p></div></div>
   <div class="panel"><h2>Client details</h2>
-   <div class="grid">${F('company', 'Company name *')}${F('email', 'Email', 'email')}${F('phone', 'Phone', 'tel')}${F('person', 'Contact person')}${F('designation', 'Designation')}${F('city', 'City')}${F('gst_no', 'GSTIN')}
+   <div class="grid">${F('company', 'Company name *')}${F('email', 'Email', 'email')}${F('phone', 'Phone', 'tel')}${F('person', 'Contact person')}${F('designation', 'Designation')}${F('city', 'City')}${gstF(`<input data-nc="gst_no" value="${esc(n.gst_no)}" maxlength="15" style="text-transform:uppercase">`)}
    ${handsOver() ? `<label class="f">Hand to sales person *<select data-nc="owner_id"><option value="">Pick who takes this client</option>${(B.handover || []).map(u => `<option value="${u.id}" ${+n.owner_id === +u.id ? 'selected' : ''}>${esc(u.name)}${u.role === 'admin' ? ' (admin)' : u.designation ? ' · ' + esc(u.designation) : ''}</option>`).join('')}</select></label>` : ''}
    ${isAdmin() ? `<label class="f">Handled by<select data-nc="owner_id"><option value="">Me</option>${B.users.filter(u => +u.active).map(u => `<option value="${u.id}" ${+n.owner_id === +u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>` : ''}</div>
    <div class="grid" style="margin-top:12px"><label class="f">Company location / address<textarea data-nc="location">${esc(n.location)}</textarea></label><label class="f">Notes<textarea data-nc="notes">${esc(n.notes)}</textarea></label></div>
@@ -285,7 +285,7 @@ routes.client = async ({ id }) => {
   <div class="panel"><h2>Orders</h2>${projTable(c.projects.map(p => ({ ...p, company: c.company })), isAdmin(), false)}</div>
   <div class="grid">
    <div class="panel"><div class="ph"><h3>Client details</h3>${edit ? '' : '<button class="btn ghost sm" id="ce-open">Edit</button>'}</div>
-    ${edit ? `<form id="ce-form"><div class="grid g3">${F('company', 'Company name')}${F('email', 'Email', 'email')}${F('phone', 'Phone')}${F('person', 'Contact person')}${F('designation', 'Designation')}${F('city', 'City')}${F('gst_no', 'GSTIN')}</div>
+    ${edit ? `<form id="ce-form"><div class="grid g3">${F('company', 'Company name')}${F('email', 'Email', 'email')}${F('phone', 'Phone')}${F('person', 'Contact person')}${F('designation', 'Designation')}${F('city', 'City')}${gstF(`<input name="gst_no" value="${esc(c.gst_no || '')}" maxlength="15" style="text-transform:uppercase">`)}</div>
       <div class="grid" style="margin-top:10px"><label class="f">Location / address<textarea name="location">${esc(c.location)}</textarea></label><label class="f">Notes<textarea name="notes">${esc(c.notes)}</textarea></label></div>
       ${isAdmin() ? `<div class="grid g3" style="margin-top:10px"><label class="f">Handled by<select name="owner_id">${B.users.filter(u => +u.active).map(u => `<option value="${u.id}" ${+u.id === +c.owner_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label><label class="row sub" style="align-self:end"><input type="checkbox" name="move_orders" checked> Move their orders too</label></div>` : ''}
       <div class="row" style="margin-top:10px"><button class="btn">Save</button><button type="button" class="btn ghost" id="ce-cancel">Cancel</button></div></form>`
@@ -915,6 +915,37 @@ routes.refs = async () => {
 };
 function refAlert() { const n = B.ref_new; if (!n) return; const w = $('.welcome') || $('.head'); if (w) w.insertAdjacentHTML('afterend', `<div class="alert warn"><b>${n} new referral lead${n > 1 ? 's' : ''} for you</b><span class="m">Handed to you by admin or the research / telecalling team. <a href="#refs">Open referral leads →</a></span></div>`); }
 
+
+
+// ---------- GSTIN check (free: format + check digit; state and PAN come from the number itself) ----------
+const GST_STATES = { '01': 'Jammu & Kashmir', '02': 'Himachal Pradesh', '03': 'Punjab', '04': 'Chandigarh', '05': 'Uttarakhand', '06': 'Haryana', '07': 'Delhi', '08': 'Rajasthan', '09': 'Uttar Pradesh', '10': 'Bihar', '11': 'Sikkim', '12': 'Arunachal Pradesh', '13': 'Nagaland', '14': 'Manipur', '15': 'Mizoram', '16': 'Tripura', '17': 'Meghalaya', '18': 'Assam', '19': 'West Bengal', '20': 'Jharkhand', '21': 'Odisha', '22': 'Chhattisgarh', '23': 'Madhya Pradesh', '24': 'Gujarat', '26': 'Dadra & Nagar Haveli and Daman & Diu', '27': 'Maharashtra', '29': 'Karnataka', '30': 'Goa', '31': 'Lakshadweep', '32': 'Kerala', '33': 'Tamil Nadu', '34': 'Puducherry', '35': 'Andaman & Nicobar Islands', '36': 'Telangana', '37': 'Andhra Pradesh', '38': 'Ladakh', '97': 'Other Territory', '99': 'Centre Jurisdiction' };
+function gstCheck(raw) {
+  const g = String(raw || '').toUpperCase().replace(/\s/g, '');
+  if (!g) return { ok: false, msg: 'Enter the GSTIN first.' };
+  if (g.length !== 15) return { ok: false, msg: `No match found — a GSTIN has 15 characters, this has ${g.length}. Please key in the correct GSTIN.` };
+  if (!/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(g)) return { ok: false, msg: 'No match found — this is not a valid GSTIN pattern. Please key in the correct GSTIN.' };
+  if (!GST_STATES[g.slice(0, 2)]) return { ok: false, msg: 'No match found — the first two digits are not a valid state code. Please key in the correct GSTIN.' };
+  const C = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'; let sum = 0;
+  for (let i = 0; i < 14; i++) { const v = C.indexOf(g[i]) * (i % 2 ? 2 : 1); sum += Math.floor(v / 36) + (v % 36); }
+  if (C[(36 - (sum % 36)) % 36] !== g[14]) return { ok: false, msg: 'No match found — one character looks mistyped (the check digit does not match). Please key in the correct GSTIN.' };
+  const kind = { P: 'Individual / proprietor', C: 'Company', F: 'Firm / LLP', H: 'HUF', A: 'Association of persons', T: 'Trust', G: 'Government', L: 'Local authority', B: 'Body of individuals', J: 'Artificial juridical person' }[g[5]] || '';
+  return { ok: true, g, state: GST_STATES[g.slice(0, 2)], pan: g.slice(2, 12), kind };
+}
+const gstF = input => `<label class="f">GSTIN${input}<span style="display:block;margin-top:4px"><button type="button" class="btn link" data-gstv>✓ Validate GSTIN</button></span><span class="gst-res sub" style="display:block;line-height:1.5"></span></label>`;
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-gstv],[data-gstportal]'); if (!b) return; e.preventDefault(); e.stopPropagation();
+  const box = b.closest('label'), inp = box.querySelector('input'), res = box.querySelector('.gst-res');
+  if (b.dataset.gstportal !== undefined) {
+    const g = inp.value.trim().toUpperCase(); try { navigator.clipboard.writeText(g); } catch (x) {}
+    window.open('https://services.gst.gov.in/services/searchtp', '_blank', 'noopener'); toast('GSTIN copied — paste it on the GST portal and type the captcha'); return;
+  }
+  const r = gstCheck(inp.value);
+  if (!r.ok) { res.innerHTML = `<span style="color:var(--bad)">✕ ${esc(r.msg)}</span>`; return; }
+  inp.value = r.g; inp.dispatchEvent(new Event('input', { bubbles: true }));
+  const form = box.closest('form') || document, loc = form.querySelector('[data-nc="location"],[name="location"]');
+  if (loc && !loc.value.toLowerCase().includes(r.state.toLowerCase())) { loc.value = loc.value.trim() ? loc.value.trim().replace(/[,\s]+$/, '') + ', ' + r.state : r.state; loc.dispatchEvent(new Event('input', { bubbles: true })); }
+  res.innerHTML = `<span style="color:var(--ok)">✓ Valid GSTIN</span> · State: <b>${esc(r.state)}</b> · PAN: <b>${esc(r.pan)}</b>${r.kind ? ' · ' + esc(r.kind) : ''}<br>For the registered name &amp; address: <button type="button" class="btn link" data-gstportal>View on GST portal ↗</button>`;
+});
 
 // ---------- contacts: import from Excel / CSV ----------
 const IMP_F = [['name', 'Name', 'name|fullname|contactname|contactperson|person|contact|personname|firstname'], ['designation', 'Designation', 'designation|title|jobtitle|position|role|post'],
