@@ -125,6 +125,12 @@ function migrate() {
     if (val('SELECT COUNT(*) FROM ' . T('accounts')) && !val('SELECT COUNT(*) FROM ' . T('accounts') . " WHERE sub = 'roundoff'")) ins('accounts', ['code' => '4910', 'name' => 'Round off', 'type' => 'income', 'sub' => 'roundoff', 'opening' => 0, 'active' => 1, 'created_at' => now()]);
     set_setting('schema_v', 16);
   }
+  if ($v < 17) {   // standard note on every invoice / proforma; account name shown on bank details
+    $c = (array) setting('company', []); $e = 'Electricity charges during fabrication and expo days at the venue are not included in the above quote. Client pays them directly to the event organiser.';
+    if (stripos($c['terms'] ?? '', 'Electricity charges') === false) $c['terms'] = trim(($c['terms'] ?? '') . "\n" . $e);
+    if (empty($c['bank_benef'])) $c['bank_benef'] = 'Zest Exhibitions';
+    set_setting('company', $c); set_setting('schema_v', 17);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';

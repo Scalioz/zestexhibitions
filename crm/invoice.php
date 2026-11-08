@@ -38,6 +38,8 @@ tr.t td{font-weight:bold;background:#eef1f7}tr.g td{font-weight:bold;background:
 .words{margin:10px 0;font-weight:bold}.small{color:#555;font-size:10.5px;line-height:1.6}
 .foot{display:flex;justify-content:space-between;gap:20px;margin-top:30px}.sig{text-align:center;min-width:220px}.sig .ln{border-top:1px solid #333;margin-top:46px;padding-top:5px}
 @media print{body{background:#fff}.page{box-shadow:none;margin:0;padding:0;max-width:none}.bar{display:none}}
+.bank{margin-top:12px;font-size:13.5px;line-height:1.6;border:1px solid #c9d3df;padding:10px 12px;border-radius:4px}
+.terms{margin-top:12px;font-size:13.5px;line-height:1.6;font-weight:700}
 </style></head><body>
 <div class="bar"><a href="index.php#invd-<?= (int) $i['id'] ?>">← Back</a><?php if ($ok): ?><button id="dl">⬇ Download PDF</button><button id="sh" hidden>Share (WhatsApp / email)</button><a href="#" onclick="window.print();return false">Print</a><?php else: ?><span class="warnbar">Not approved yet — download is available after admin approves it.</span><?php endif; ?></div>
 <div class="page">
@@ -59,8 +61,8 @@ tr.t td{font-weight:bold;background:#eef1f7}tr.g td{font-weight:bold;background:
 <?php if ($ro != 0): ?><tr><td></td><td colspan="4">Round off</td><td class="n"><?= $sgn($ro) ?></td></tr><?php endif; ?>
 <tr class="g"><td></td><td colspan="4">Grand total</td><td class="n">₹<?= $m($i['total']) ?></td></tr></table>
 <div class="words">Amount in words: Rupees <?= amount_words($i['total']) ?> Only</div>
-<?php if (!empty($co['bank_name']) || !empty($co['bank_acno'])): ?><div class="small"><b>Bank details:</b> <?= $h($co['bank_name']) ?> · A/c <?= $h($co['bank_acno']) ?> · IFSC <?= $h($co['bank_ifsc']) ?></div><?php endif; ?>
-<?php if ($i['notes'] || !empty($co['terms'])): ?><div class="small" style="margin-top:6px"><b>Terms:</b> <?= nl2br($h(trim(($co['terms'] ?? '') . "\n" . ($i['notes'] ?? '')))) ?></div><?php endif; ?>
+<?php if (!empty($co['bank_name']) || !empty($co['bank_acno'])): ?><div class="bank"><b>Bank details</b><br>Account name: <b><?= $h(($co['bank_benef'] ?? '') ?: 'Zest Exhibitions') ?></b><br>Bank: <?= $h($co['bank_name']) ?><?= !empty($co['bank_branch']) ? ', ' . $h($co['bank_branch']) : '' ?><br>A/c no.: <b><?= $h($co['bank_acno']) ?></b> &nbsp;·&nbsp; IFSC: <b><?= $h($co['bank_ifsc']) ?></b><?= !empty($co['bank_swift']) ? ' &nbsp;·&nbsp; SWIFT: ' . $h($co['bank_swift']) : '' ?></div><?php endif; ?>
+<?php if ($i['notes'] || !empty($co['terms'])): ?><div class="terms"><b>Payment terms</b><br><?= nl2br($h(trim(($i['notes'] ?? '') . "\n" . ($co['terms'] ?? '')))) ?></div><?php endif; ?>
 <div class="foot"><div class="small">This is a computer-generated <?= $i['kind'] === 'tax' ? 'invoice' : 'proforma invoice' ?>.</div><div class="sig">For <?= $h($co['name'] ?? 'Zest Exhibitions') ?><div class="ln">Authorised Signatory</div></div></div>
 </div>
 <?php if ($ok): ?><script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
