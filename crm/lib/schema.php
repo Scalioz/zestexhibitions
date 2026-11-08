@@ -152,6 +152,14 @@ function migrate() {
     if (setting('att_from') === null) set_setting('att_from', today());
     set_setting('schema_v', 20);
   }
+  if ($v < 21) {   // secure links to send a quote / invoice / file to a client
+    $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
+    $PK = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT UNSIGNED AUTO_INCREMENT PRIMARY KEY';
+    $E = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+    foreach (['CREATE TABLE IF NOT EXISTS ' . T('share_links') . " (id $PK, token VARCHAR(40) NOT NULL, kind VARCHAR(10) NOT NULL, ref_id INT NOT NULL, created_by INT, created_at DATETIME NOT NULL, expires_at DATETIME NOT NULL, revoked INT NOT NULL DEFAULT 0)$E",
+      'CREATE UNIQUE INDEX zc_share_t ON ' . T('share_links') . ' (token)'] as $q) { try { db()->exec($q); } catch (PDOException $e) { if (stripos($q, 'CREATE TABLE') === 0) throw $e; } }
+    set_setting('schema_v', 21);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';

@@ -79,8 +79,25 @@ async function uploadAll(entity, id, files) {   // returns a short note on how m
 }
 async function act(fn, okMsg) { try { const r = await fn(); if (okMsg) toast(okMsg); return r; } catch (e) { toast(e.message, true); throw e; } }
 
+// ---------- WhatsApp: notify a teammate / client, share files ----------
+const phoneOf = uid => (B.users.find(u => +u.id === +uid) || {}).phone || '';
+const firstName = uid => ((B.users.find(u => +u.id === +uid) || {}).name || '').split(' ')[0];
+const adminPhone = () => (B.users.find(u => u.role === 'admin' && +u.active && u.phone && +u.id !== +B.me.id) || B.users.find(u => u.role === 'admin' && u.phone) || {}).phone || '';
+function waUrl(phone, text) { let d = String(phone || '').replace(/\D/g, ''); if (d.length === 10) d = '91' + d; if (d.length > 12 && d.startsWith('0')) d = d.replace(/^0+/, ''); return 'https://wa.me/' + (d.length >= 11 ? d : '') + '?text=' + encodeURIComponent(text); }
+const crmLink = hash => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.php' + hash;
+const waBtn = (phone, text, label) => `<a class="btn wa sm" href="${esc(waUrl(phone, text))}" target="_blank" rel="noopener" title="${phone ? 'Opens WhatsApp to ' + esc(phone) : 'Opens WhatsApp — pick the contact'}">💬 ${esc(label)}</a>`;
+async function shareFile(id, name) {
+  const dlg = t => toast(t);
+  try {
+    const r = await fetch('file.php?id=' + id, { credentials: 'same-origin' }); if (!r.ok) throw new Error('Could not open the file');
+    const b = await r.blob(), f = new File([b], name || 'file', { type: b.type });
+    if (navigator.canShare && navigator.canShare({ files: [f] })) { try { await navigator.share({ files: [f] }); return; } catch (e) { if (e.name === 'AbortError') return; } }
+    const l = await api('share_link', { kind: 'file', id }); window.open(waUrl('', (name || 'File') + ' — Zest Exhibitions\n' + l.url), '_blank', 'noopener'); dlg('Opened WhatsApp with a secure link (valid ' + l.days + ' days)');
+  } catch (e) { toast(e.message || 'Could not share', true); }
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-fshare]'); if (!b) return; e.preventDefault(); e.stopPropagation(); shareFile(b.dataset.fshare, b.dataset.fname); });
 const fileChips = (list, canDel) => list && list.length
-  ? `<div class="files">${list.map(f => `<a class="chip" href="file.php?id=${f.id}" target="_blank" rel="noopener" title="${esc(f.orig_name)}">📎 <span>${esc(f.orig_name)}</span></a>${canDel ? `<button class="btn link" data-delfile="${f.id}" title="Remove file" aria-label="Remove ${esc(f.orig_name)}">✕</button>` : ''}`).join('')}</div>` : '<span class="sub">No file yet</span>';
+  ? `<div class="files">${list.map(f => `<a class="chip" href="file.php?id=${f.id}" target="_blank" rel="noopener" title="${esc(f.orig_name)}">📎 <span>${esc(f.orig_name)}</span></a><button class="btn link wa-ico" data-fshare="${f.id}" data-fname="${esc(f.orig_name)}" title="Share on WhatsApp" aria-label="Share ${esc(f.orig_name)} on WhatsApp">💬</button>${canDel ? `<button class="btn link" data-delfile="${f.id}" title="Remove file" aria-label="Remove ${esc(f.orig_name)}">✕</button>` : ''}`).join('')}</div>` : '<span class="sub">No file yet</span>';
 const upBtn = (entity, id, label = 'Upload', accept) => `<label class="up">⬆ ${esc(label)}<input type="file" multiple data-upload="${entity}" data-eid="${id}" accept="${accept || '.pdf,.jpg,.jpeg,.png,.webp,.heic,.xlsx,.xls,.csv,.doc,.docx,.ppt,.pptx,.dwg,.dxf,.skp,.zip'}"></label>`;
 
 // line drawing of an exhibition stall, used in empty states
@@ -111,6 +128,22 @@ const MODULE_ONLY = { contacts: ['records', 'ops', 'leads', 'calls'], myinv: ['r
 const handsOver = () => !isAdmin() && !B.records && (B.modules || [B.module]).some(x => ['leads', 'calls'].includes(x));   // research / telecalling add clients for sales
 async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); attStrip(); window.scrollTo(0, y); }
 
+// phone app: bottom tab bar with the 4 things each person uses most, plus Menu
+const TB_ICON = { home: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>', clients: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.8c1.6.8 2.6 2.6 3 5.2"/>',
+  att: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', report: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/>', appr: '<path d="M9 12l2 2 4-4"/><rect x="3" y="4" width="18" height="16" rx="2"/>',
+  leads: '<path d="M4 6h16M4 12h16M4 18h10"/>', jobs: '<path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 6l3 3"/>', money: '<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/>', menu: '<path d="M4 7h16M4 12h16M4 17h16"/>' };
+function tabBar(cur) {
+  const m = k => (B.modules || [B.module]).includes(k);
+  const T = isAdmin() ? [['home', 'Home', 'home'], ['saleslog', 'Approvals', 'appr', (B.pending_approvals || 0) + (B.inv_pending || 0)], ['att', 'Attendance', 'att', B.att_pending], ['clients', 'Clients', 'clients']]
+    : [['home', 'Home', 'home'], B.records ? ['clients', 'Clients', 'clients'] : m('leads') || m('calls') ? ['leads', 'Expo data', 'leads'] : m('design') ? ['mydesign', 'Design', 'jobs'] : m('ops') ? ['myops', 'Production', 'jobs'] : B.acc ? ['invoices', 'Invoices', 'money', B.inv_todo] : null,
+       ['myatt', 'Attendance', 'att', B.att_news], ['report', 'Report', 'report', B.flags]].filter(Boolean);
+  const map = { client: 'clients', project: 'clients', lexpo: 'leads', opsjob: 'myops', invd: 'invoices', inv: 'invoices' };
+  const on = map[cur] || cur;
+  let el = $('#tabbar'); if (!el) { el = document.createElement('div'); el.id = 'tabbar'; el.setAttribute('role', 'navigation'); el.setAttribute('aria-label', 'Quick menu'); document.body.appendChild(el); }
+  el.innerHTML = T.map(([k, l, ic, n]) => `<a href="#${k}" class="${on === k ? 'on' : ''}"><svg viewBox="0 0 24 24" aria-hidden="true">${TB_ICON[ic]}</svg><span>${l}</span>${n ? `<i>${n > 99 ? '99+' : n}</i>` : ''}</a>`).join('')
+    + `<a href="#" id="tbMenu"><svg viewBox="0 0 24 24" aria-hidden="true">${TB_ICON.menu}</svg><span>Menu</span></a>`;
+}
+document.addEventListener('click', e => { if (e.target.closest('#tbMenu')) { e.preventDefault(); e.stopPropagation(); document.body.classList.toggle('menu-open'); } }, true);
 function renderNav(cur) {
   const map = { qgen: 'clients', jv: 'books', inv: 'invoices', invnew: 'invoices', invd: B.acc ? 'invoices' : 'myinv', acc: isAdmin() ? 'acc' : 'home', client: 'clients', project: 'clients', lexpo: isAdmin() ? 'leadlog' : 'leads', opsjob: isAdmin() ? 'jobs' : 'myops' };
   const on = map[cur] || cur;
@@ -124,6 +157,8 @@ function renderNav(cur) {
     : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
     : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
     : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') + L('newclient', '+ New client') + L('contacts', 'Contacts') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('contacts', 'Contacts') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`;
+  $('#nav').insertAdjacentHTML('beforeend', `<div class="nav-acc"><div class="sec">${esc(B.me.name)}</div><a href="#account">Account</a><a href="logout.php">Sign out</a></div>`);
+  tabBar(cur);
 }
 
 // menu for someone working in more than one department: every section they need, each item once
@@ -271,7 +306,7 @@ routes.newclient = async () => {
   <div class="row"><button class="btn" id="nc-save">${handsOver() ? 'Save & hand over' : 'Save client'}</button><a class="btn ghost" href="${handsOver() ? '#home' : '#clients'}">Cancel</a></div>
   ${handsOver() ? '<div class="panel" id="myhand" style="margin-top:16px"><h2>Clients you added</h2><div class="sub">Loading…</div></div>' : ''}`;
   dupCheck();
-  if (handsOver()) api('my_handovers').then(d => { const el = $('#myhand'); if (el) el.innerHTML = `<h2>Clients you added</h2>${d.rows.length ? `<div class="tw"><table><tr><th>Added</th><th>Company</th><th>Contact</th><th>City</th><th>Handed to</th></tr>${d.rows.map(r => `<tr><td class="num">${fd(r.created_at)}</td><td><b>${esc(r.company)}</b></td><td>${esc(r.person || '')}<div class="sub">${esc(r.phone || '')}</div></td><td>${esc(r.city || '')}</td><td>${esc(r.owner)}</td></tr>`).join('')}</table></div>` : '<div class="sub">None yet.</div>'}`; }).catch(() => {});
+  if (handsOver()) api('my_handovers').then(d => { const el = $('#myhand'); if (el) el.innerHTML = `<h2>Clients you added</h2>${d.rows.length ? `<div class="tw"><table><tr><th>Added</th><th>Company</th><th>Contact</th><th>City</th><th>Handed to</th></tr>${d.rows.map(r => `<tr><td class="num">${fd(r.created_at)}</td><td><b>${esc(r.company)}</b></td><td>${esc(r.person || '')}<div class="sub">${esc(r.phone || '')}</div></td><td>${esc(r.city || '')}</td><td>${esc(r.owner)} ${waBtn(phoneOf(r.owner_id), `Hi ${(r.owner || '').split(' ')[0]}, I have added a new client for you in the CRM: ${r.company}${r.person ? ', ' + r.person : ''}${r.phone ? ' — ' + r.phone : ''}${r.city ? ' (' + r.city + ')' : ''}.\n${crmLink('#refs')}`, 'Notify')}</td></tr>`).join('')}</table></div>` : '<div class="sub">None yet.</div>'}`; }).catch(() => {});
 };
 let dupT;
 function dupCheck() {
@@ -308,7 +343,7 @@ routes.client = async ({ id }) => {
       <div class="grid" style="margin-top:10px"><label class="f">Location / address<textarea name="location">${esc(c.location)}</textarea></label><label class="f">Notes<textarea name="notes">${esc(c.notes)}</textarea></label></div>
       ${isAdmin() ? `<div class="grid g3" style="margin-top:10px"><label class="f">Handled by<select name="owner_id">${B.users.filter(u => +u.active).map(u => `<option value="${u.id}" ${+u.id === +c.owner_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label><label class="row sub" style="align-self:end"><input type="checkbox" name="move_orders" checked> Move their orders too</label></div>` : ''}
       <div class="row" style="margin-top:10px"><button class="btn">Save</button><button type="button" class="btn ghost" id="ce-cancel">Cancel</button></div></form>`
-    : `<div>${esc(c.person || '—')}${c.designation ? ' · ' + esc(c.designation) : ''}</div><div class="sub">${esc(c.email || '')}${c.email && c.phone ? ' · ' : ''}${esc(c.phone || '')}</div><div class="sub">${esc(c.location || '')}</div>${c.gst_no ? `<div class="sub">GSTIN ${esc(c.gst_no)}</div>` : ''}${c.notes ? `<p class="sub">${esc(c.notes)}</p>` : ''}`}
+    : `<div>${esc(c.person || '—')}${c.designation ? ' · ' + esc(c.designation) : ''}</div><div class="sub">${esc(c.email || '')}${c.email && c.phone ? ' · ' : ''}${esc(c.phone || '')}</div>${c.phone ? `<div style="margin:6px 0">${waBtn(c.phone, `Dear ${c.person || 'Sir / Madam'}, greetings from Zest Exhibitions. `, 'WhatsApp ' + (c.person ? c.person.split(' ')[0] : 'client'))}</div>` : ''}<div class="sub">${esc(c.location || '')}</div>${c.gst_no ? `<div class="sub">GSTIN ${esc(c.gst_no)}</div>` : ''}${c.notes ? `<p class="sub">${esc(c.notes)}</p>` : ''}`}
    </div>
    <div class="panel"><h3>Others in the deal</h3>
     ${c.contacts.length ? `<div class="tw"><table>${c.contacts.map(o => `<tr><td><b>${esc(o.name)}</b><div class="sub">${esc(o.designation || '')}</div></td><td class="sub">${esc(o.phone || '')}<br>${esc(o.email || '')}</td><td class="r"><button class="btn link" data-delcontact="${o.id}" aria-label="Remove">✕</button></td></tr>`).join('')}</table></div>` : '<div class="sub">Nobody added.</div>'}
@@ -498,7 +533,7 @@ routes.reportlog = async () => {
     <span class="dsum">${rc ? `<span class="pill p-received">${rc} received</span>` : ''}${pd ? `<span class="pill p-pending">${pd} pending</span>` : ''}${ms ? `<span class="pill p-missing">${ms} not received</span>` : ''}${!day.rows.length ? `<span class="sub">${day.off ? 'No report expected' : 'No one to track'}</span>` : ''}</span></summary><div class="in">
    ${day.rows.length ? day.rows.map(r => r.status === 'received'
      ? `<details><summary><b>${esc(r.user.name)}</b><span class="sub">${esc(r.user.department)}</span><span class="pill p-received">received ${r.at}</span><span class="sub" style="margin-left:auto">${r.items.length} entr${r.items.length === 1 ? 'y' : 'ies'}</span></summary><div class="in">${reportTable(r.items, r.fields)}<div class="row" style="margin-top:8px"><button class="btn ghost sm" data-repedit="${r.id}">Edit report</button><button class="btn link" data-repdel="${r.id}">Delete report</button></div></div></details>`
-     : `<details><summary><b>${esc(r.user.name)}</b><span class="sub">${esc(r.user.department)}</span><span class="pill p-${r.status === 'work' ? 'received' : r.status === 'leave' ? 'off' : r.status}">${r.status === 'work' ? 'work logged' : r.status === 'pending' ? 'pending today' : r.status === 'leave' ? esc(r.leave || 'on leave') : 'report not received'}</span>${r.status === 'work' && r.leads ? `<span class="sub" style="margin-left:auto">${r.leads} expo entr${r.leads === 1 ? 'y' : 'ies'}</span>` : ''}</summary></details>`).join('')
+     : `<details><summary><b>${esc(r.user.name)}</b><span class="sub">${esc(r.user.department)}</span><span class="pill p-${r.status === 'work' ? 'received' : r.status === 'leave' ? 'off' : r.status}">${r.status === 'work' ? 'work logged' : r.status === 'pending' ? 'pending today' : r.status === 'leave' ? esc(r.leave || 'on leave') : 'report not received'}</span>${r.status === 'missing' ? ' ' + waBtn(phoneOf(r.user.id), `Hi ${r.user.name.split(' ')[0]}, your daily report for ${fd(day.date)} has not been received. Please submit it in the CRM.\n${crmLink('#report')}`, 'Remind') : ''}${r.status === 'work' && r.leads ? `<span class="sub" style="margin-left:auto">${r.leads} expo entr${r.leads === 1 ? 'y' : 'ies'}</span>` : ''}</summary></details>`).join('')
      : `<div class="sub">${day.off ? 'No report expected.' : 'No employees to track on this day.'}</div>`}</div></details>`; }).join('')}</div>`;
   C.openDays = C.openDays || {};
   document.querySelectorAll('.log details.day').forEach(el => el.addEventListener('toggle', () => { C.openDays[el.dataset.day] = el.open; }));
@@ -765,8 +800,11 @@ function apprActions(a) {
   if (st === 'pending') return `${isAdmin() ? `<div class="row" style="flex-wrap:nowrap;gap:6px"><input data-anote="${a.id}" placeholder="Note (needed to reject)" style="min-width:160px">
       <button class="btn sm" data-adec="approved:${a.id}">Approve</button><button class="btn sm danger" data-adec="rejected:${a.id}">Reject</button></div>` : ''}
     ${mine || isAdmin() ? `<div class="row" style="margin-top:4px">${upBtn('appr', a.id, 'Add file')}<button class="btn link" data-acancel="${a.id}">Withdraw</button></div>` : ''}`;
-  if (st === 'approved' && (B.records || isAdmin())) return `<div class="row" style="flex-wrap:nowrap;gap:6px"><input type="date" data-sentdate="${a.id}" value="${B.today}" aria-label="Date sent to customer" style="max-width:150px"><button class="btn sm" data-asent="${a.id}">Mark sent to customer</button></div>`;
-  return '';
+  const what = `${a.kind} V${a.version}${a.quote_no ? ' (' + a.quote_no + ')' : ''} for ${a.company || C.project?.company || ''}${a.expo || C.project?.expo ? ' — ' + (a.expo || C.project?.expo) : ''}`;
+  const tell = isAdmin() && ['approved', 'rejected', 'sent'].includes(st) && +a.requested_by !== +B.me.id ? waBtn(phoneOf(a.requested_by), `Hi ${firstName(a.requested_by)}, your ${what} is ${st === 'rejected' ? 'REJECTED' : 'APPROVED ✅'}${a.admin_note ? ' — ' + a.admin_note : ''}.\nOpen: ${crmLink('#project-' + a.project_id + '-' + (a.kind === 'quote' ? 'order' : 'design'))}`, 'Notify ' + (firstName(a.requested_by) || 'sales')) : '';
+  if (st === 'pending' && mine && !isAdmin()) return waBtn(adminPhone(), `Hi, I have sent ${what} for your approval.\nOpen: ${crmLink('#saleslog')}`, 'Remind admin') + `<div class="row" style="margin-top:4px">${upBtn('appr', a.id, 'Add file')}<button class="btn link" data-acancel="${a.id}">Withdraw</button></div>`;
+  if (st === 'approved' && (B.records || isAdmin())) return `${a.kind === 'quote' && a.has_doc ? `<a class="btn wa sm" href="quote.php?id=${a.id}">💬 Send quote to client</a> ` : ''}${tell}<div class="row" style="flex-wrap:nowrap;gap:6px;margin-top:6px"><input type="date" data-sentdate="${a.id}" value="${B.today}" aria-label="Date sent to customer" style="max-width:150px"><button class="btn sm" data-asent="${a.id}">Mark sent to customer</button></div>`;
+  return tell;
 }
 function apprTable(list, showAmount) {
   return `<div class="tw"><table><tr><th>Ver.</th><th>Sent for approval</th>${showAmount ? '<th class="r">Amount</th>' : ''}<th>Files</th><th>Sales note</th><th>Admin decision</th><th>Sent to customer</th><th>Status</th><th></th></tr>
@@ -928,6 +966,8 @@ routes.refs = async () => {
     <td>${refPill(r)}${r.status === 'converted' && r.client_id ? `<div><a href="#client-${r.client_id}">${esc(r.client_company || 'Open client')} →</a></div>` : ''}${r.status === 'closed' ? `<div class="sub">${esc(r.closed_reason || '')}</div>` : ''}</td>
     <td style="min-width:220px">${refTake(r)}
      ${isAdmin() && ['new', 'seen'].includes(r.status) ? `<form class="row" data-refmove="${r.id}" style="margin-top:6px;flex-wrap:nowrap"><select name="assigned_to" aria-label="Hand to someone else" style="min-width:0">${toOpts(r.assigned_to)}</select><button class="btn ghost sm">Reassign</button></form>` : ''}
+     ${isAdmin() && ['new', 'seen'].includes(r.status) && +r.assigned_to !== +B.me.id ? waBtn(phoneOf(r.assigned_to), `Hi ${firstName(r.assigned_to)}, I have handed you a referral lead: ${r.name}, ${r.company}${r.area ? ' (' + r.area + ')' : ''} — ${r.phone}.${r.note ? ' ' + r.note : ''}\nOpen: ${crmLink('#refs')}`, 'Notify ' + firstName(r.assigned_to)) : ''}
+     ${+r.assigned_to === +B.me.id && ['new', 'seen'].includes(r.status) ? waBtn(r.phone, `Dear ${r.name}, greetings from Zest Exhibitions. `, 'WhatsApp ' + r.name.split(' ')[0]) : ''}
      ${isAdmin() && r.status === 'closed' ? `<button class="btn link" data-refreopen="${r.id}">Reopen</button>` : ''}</td></tr>`).join('')}</table></div>` : blank(isAdmin() ? 'No referral leads yet. Use the form above to hand one to your team.' : 'No referral leads handed to you.')}</div>`;
   const rf = $('#reff'); if (rf) {
     let tm; rf.addEventListener('input', e => { if (!['company', 'phone'].includes(e.target.name)) return; clearTimeout(tm); tm = setTimeout(async () => {
@@ -1086,7 +1126,7 @@ routes.myatt = async () => {
    <div class="kpi"><span>Leave · permission · WFH</span><b>${m.leave + m.half / 2} · ${m.permission} · ${m.wfh}</b><small>${m.unpaid ? num(m.unpaid) + ' unpaid day(s)' : 'No unpaid days'}</small></div></div>
   ${attApplyForm(false)}
   <div class="panel"><h2>My requests</h2>${d.requests.length ? `<div class="tw"><table><tr><th>Applied</th><th>What</th><th>When</th><th>Reason</th><th>Status</th><th></th></tr>${d.requests.map(r => `<tr><td class="num">${fd(r.created_at)}</td><td><b>${esc(r.label)}</b></td><td>${reqWhen(r)}</td><td>${esc(r.reason || '')}</td>
-    <td><span class="pill ${REQ_ST[r.status][0]}">${REQ_ST[r.status][1]}</span> ${r.status === 'approved' ? reqPay(r) : ''}${r.admin_note ? `<div class="sub">Admin: ${esc(r.admin_note)}</div>` : ''}</td><td>${r.status === 'pending' ? `<button class="btn link" data-attcancel="${r.id}">Cancel</button>` : ''}</td></tr>`).join('')}</table></div>` : '<div class="sub">No requests yet.</div>'}</div>
+    <td><span class="pill ${REQ_ST[r.status][0]}">${REQ_ST[r.status][1]}</span> ${r.status === 'approved' ? reqPay(r) : ''}${r.admin_note ? `<div class="sub">Admin: ${esc(r.admin_note)}</div>` : ''}</td><td style="white-space:nowrap">${r.status === 'pending' ? waBtn(adminPhone(), `Hi, I have applied for ${r.label.toLowerCase()} on ${fd(r.from_date)}${r.to_date !== r.from_date ? ' – ' + fd(r.to_date) : ''}${r.kind === 'permission' ? ' (' + r.from_time + '–' + r.to_time + ')' : ''}. Reason: ${r.reason || ''}. Please approve in the CRM.`, 'Tell admin') + ` <button class="btn link" data-attcancel="${r.id}">Cancel</button>` : ''}</td></tr>`).join('')}</table></div>` : '<div class="sub">No requests yet.</div>'}</div>
   <div class="panel"><div class="ph"><h2>Day by day</h2><input type="month" id="attym" value="${esc(d.ym)}" style="max-width:180px"></div>
    <div class="tw"><table><tr><th>Date</th><th>Expected by</th><th>In</th><th>Out</th><th>Status</th><th>Notes</th></tr>${m.days.slice().reverse().map(x => `<tr><td class="num">${fd(x.date)} <span class="sub">${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(x.date).getDay()]}</span></td><td class="num">${x.code === 'off' ? '' : esc(x.expected)}</td><td class="num">${esc(x.in)}</td><td class="num">${esc(x.out)}</td><td>${x.code === 'off' ? '<span class="sub">holiday / week off</span>' : attPill(x)}</td><td class="sub">${x.notes.map(esc).join(' · ')}</td></tr>`).join('')}</table></div></div>`;
   attApplyWire(false);
@@ -1105,7 +1145,7 @@ routes.att = async r => {
      <div class="row">${[['ontime', '✅ On time'], ['late', '🟠 Late'], ['absent', '❌ Not checked in'], ['leave', '🌴 Leave'], ['requested', '⏳ Requested']].map(([k, l]) => `<span class="pill ${ATT_PILL[k][0]}">${l} · ${cnt(k)}</span>`).join('')}<span class="pill p-enquiry">🏠 WFH · ${d.rows.filter(x => x.wfh).length}</span></div></div>
      ${!d.working ? '<div class="alert"><b>Holiday / week off</b><span class="m">No attendance expected on this date.</span></div>' : ''}
      <div class="panel">${d.rows.length ? `<div class="tw"><table><tr><th>Employee</th><th>Status</th><th>Expected by</th><th>In</th><th>Out</th><th>Notes</th><th></th></tr>${d.rows.map(x => `<tr><td><b>${esc(x.user.name)}</b><div class="sub">${esc(x.user.department)} · shift ${esc(x.shift)}</div></td><td>${attPill(x)}</td><td class="num">${x.code === 'off' || x.code === 'leave' ? '' : esc(x.expected)}</td><td class="num">${esc(x.in)}${x.off_net ? ' <span class="sub" title="Checked in from outside the office network">· outside office</span>' : ''}</td><td class="num">${esc(x.out)}</td><td class="sub">${x.notes.map(esc).join(' · ')}</td>
-      <td><button class="btn link" data-attedit="${x.user.id}" data-in="${esc(x.in)}" data-out="${esc(x.out)}">Edit</button></td></tr>`).join('')}</table></div>` : blank(d.from && d.date < d.from ? 'Attendance tracking started on ' + fd(d.from) + '.' : 'No employees to track.')}</div>
+ <td>${x.code === 'absent' ? waBtn(phoneOf(x.user.id), `Hi ${x.user.name.split(' ')[0]}, you have not checked in yet today (expected by ${x.expected}). Please check in on the CRM.`, 'Remind') : ''}<button class="btn link" data-attedit="${x.user.id}" data-in="${esc(x.in)}" data-out="${esc(x.out)}">Edit</button></td></tr>`).join('')}</table></div>` : blank(d.from && d.date < d.from ? 'Attendance tracking started on ' + fd(d.from) + '.' : 'No employees to track.')}</div>
      <form class="panel" id="atteditf" hidden><h3 id="attedith">Correct check-in / check-out</h3><div class="grid g3"><label class="f">Check in<input type="time" name="in"></label><label class="f">Check out<input type="time" name="out"></label><label class="f">Note<input name="note" placeholder="e.g. Forgot to check in — confirmed on call"></label></div><input type="hidden" name="user_id"><div class="row" style="margin-top:8px"><button class="btn sm">Save</button><button type="button" class="btn link" id="atteditx">Cancel</button></div></form>`;
     $('#attd').onchange = e => { C.attd = e.target.value; refresh(); };
     view().querySelectorAll('[data-attedit]').forEach(b => b.onclick = () => { const f = $('#atteditf'); f.hidden = false; f.user_id.value = b.dataset.attedit; f.in.value = b.dataset.in; f.out.value = b.dataset.out; $('#attedith').textContent = 'Correct times · ' + b.closest('tr').querySelector('b').textContent + ' · ' + fd(d.date); f.scrollIntoView({ behavior: 'smooth' }); });
@@ -1118,7 +1158,7 @@ routes.att = async r => {
        <div><b>${reqWhen(q)}</b></div><div style="margin-top:4px">Reason: ${esc(q.reason || '—')}</div>
        ${q.kind === 'leave' && q.split ? `<div style="margin-top:6px">${q.split.unpaid ? `⚠ <b>${num(q.split.unpaid)} day(s) unpaid / deductible</b>` : `✓ <b>Paid</b>`}${q.split.paid && q.split.unpaid ? ` · ${num(q.split.paid)} paid` : ''}${q.split.why.length ? `<div class="sub">${q.split.why.map(esc).join(' · ')}</div>` : ''}</div>` : ''}
        ${st === 'pending' ? `<form class="row" data-attdec="${q.id}" style="margin-top:10px;align-items:flex-end"><label class="f" style="flex:1;min-width:220px">Note to ${esc(q.name)} <span class="sub" style="font-weight:400">(needed to reject)</span><input name="note"></label><button class="btn sm" data-a="approve">Approve</button><button class="btn danger sm" data-a="reject">Reject</button></form>`
-        : `<div class="sub" style="margin-top:6px">${esc(REQ_ST[q.status][1])}${q.decided_by ? ' by ' + esc(q.decided_by) + ' · ' + fd(q.decided_at) : ''}${q.admin_note ? ' · ' + esc(q.admin_note) : ''}</div>${st === 'approved' ? `<button class="btn link" data-attcancel="${q.id}">Cancel this</button>` : ''}`}</div>`).join('') : `<div class="panel">${blank('Nothing here.')}</div>`}
+        : `<div class="sub" style="margin-top:6px">${esc(REQ_ST[q.status][1])}${q.decided_by ? ' by ' + esc(q.decided_by) + ' · ' + fd(q.decided_at) : ''}${q.admin_note ? ' · ' + esc(q.admin_note) : ''}</div>${['approved', 'rejected'].includes(q.status) ? `<div style="margin-top:6px">${waBtn(phoneOf(q.user_id), `Hi ${q.name.split(' ')[0]}, your ${q.label.toLowerCase()} for ${fd(q.from_date)}${q.to_date !== q.from_date ? ' – ' + fd(q.to_date) : ''} is ${q.status === 'approved' ? 'APPROVED ✅' + (q.kind === 'leave' && +q.unpaid_days ? ' (' + num(q.unpaid_days) + ' day(s) unpaid)' : '') : 'REJECTED'}${q.admin_note ? ' — ' + q.admin_note : ''}.`, 'Notify ' + q.name.split(' ')[0])}</div>` : ''}${st === 'approved' ? `<button class="btn link" data-attcancel="${q.id}">Cancel this</button>` : ''}`}</div>`).join('') : `<div class="panel">${blank('Nothing here.')}</div>`}
      ${attApplyForm(true)}`;
     view().querySelectorAll('[data-attst]').forEach(b => b.onclick = () => { C.attst = b.dataset.attst; refresh(); });
     view().querySelectorAll('[data-attdec]').forEach(f => f.querySelectorAll('button').forEach(b => b.onclick = async e => { e.preventDefault(); const ok = await act(() => api('att_decide', { id: f.dataset.attdec, action: b.dataset.a, note: f.note.value }), b.dataset.a === 'approve' ? 'Approved' : 'Rejected').catch(() => null); if (ok) { await reboot(); refresh(); } }));
@@ -1490,7 +1530,10 @@ routes.invd = async ({ id }) => {
   const acc = B.acc, admin = isAdmin(), seller = B.records || admin;
   const back = acc ? '#invoices' : '#myinv';
   const acts = [];
-  if (i.status === 'issued') acts.push(invDl(i));
+  if (i.status === 'issued') acts.push(invDl(i), `<a class="btn wa sm" href="invoice.php?id=${i.id}">💬 Send to client</a>`);
+  const who = +i.requested_by || +i.owner_id;
+  if (admin && who && who !== +B.me.id && ['issued', 'on_hold', 'rejected'].includes(i.status)) acts.push(waBtn(phoneOf(who), `Hi ${firstName(who)}, ${invKind(i).toLowerCase()} ${i.inv_no || ''} for ${i.company} is ${i.status === 'issued' ? 'APPROVED ✅ — you can download and send it' : i.status === 'on_hold' ? 'ON HOLD — details needed' : 'REJECTED — needs correction'}${i.reason ? ': ' + i.reason : ''}.\nOpen: ${crmLink('#invd-' + i.id)}`, 'Notify ' + (firstName(who) || 'sales')));
+  if (acc && !admin && i.status === 'pending') acts.push(waBtn(adminPhone(), `Hi, ${invKind(i).toLowerCase()} for ${i.company} is ready for your approval.\nOpen: ${crmLink('#invappr')}`, 'Remind admin'));
   else if (i.status !== 'cancelled') acts.push(`<a class="btn ghost sm" href="invoice.php?id=${i.id}" target="_blank" rel="noopener">Preview</a>`);
   if (acc && INV_EDIT.includes(i.status)) acts.push(`<a class="btn sm" href="#inv-${i.id}">${i.status === 'requested' ? 'Prepare invoice' : 'Edit & correct'}</a>`);
   if (i.status === 'issued' && i.kind === 'proforma' && !tax_child) acts.push(acc ? `<button class="btn ghost sm" data-invconv="${i.id}">Make tax invoice</button>` : `<button class="btn ghost sm" data-invreqtax="${i.id}">Request tax invoice</button>`);

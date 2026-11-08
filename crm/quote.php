@@ -2,12 +2,14 @@
 // Printable / downloadable quotation (generated in the CRM), in Zest's quotation format.
 require_once __DIR__ . '/lib/auth.php';
 require_once __DIR__ . '/lib/acc.php';
-$me = current_user();
-if (!$me) { header('Location: login.php'); exit; }
-$mods = setting('dept_modules', []); $mod = $mods[$me['department']] ?? '';
-$a = one('SELECT a.*, p.owner_id, p.id AS pid FROM ' . T('approvals') . ' a JOIN ' . T('projects') . ' p ON p.id = a.project_id WHERE a.id = ?', [(int) ($_GET['id'] ?? 0)]);
+require_once __DIR__ . '/lib/share.php';
+require_once __DIR__ . '/lib/share_bar.php';
+$pub = share_open('quote');   // client opening a secure link
+$me = $pub ? null : current_user();
+if (!$pub && !$me) { header('Location: login.php'); exit; }
+$a = one('SELECT a.*, p.owner_id, p.id AS pid, c.phone AS client_phone FROM ' . T('approvals') . ' a JOIN ' . T('projects') . ' p ON p.id = a.project_id JOIN ' . T('clients') . ' c ON c.id = p.client_id WHERE a.id = ?', [(int) ($pub ? $pub['ref_id'] : ($_GET['id'] ?? 0))]);
 if (!$a || !$a['doc']) { http_response_code(404); exit('Quote not found.'); }
-if (!($me['role'] === 'admin' || has_mod($me, 'accounts') || (int) $a['owner_id'] === (int) $me['id'])) { http_response_code(403); exit('This quote is not yours.'); }
+if (!$pub && !($me['role'] === 'admin' || has_mod($me, 'accounts') || (int) $a['owner_id'] === (int) $me['id'])) { http_response_code(403); exit('This quote is not yours.'); }
 $d = json_decode($a['doc'], true); $co = setting('company', []);
 $ok = $a['status'] === 'approved';
 $h = fn($s) => htmlspecialchars((string) ($s ?? ''), ENT_QUOTES);
@@ -45,7 +47,8 @@ tr.subrow td.d{padding-left:34px}
 @media print{body{background:#fff}.page{box-shadow:none;margin:0;padding:0;max-width:none}.bar{display:none}}
 @media (max-width:640px){.page{padding:22px 18px;margin:10px}}
 </style></head><body>
-<div class="bar"><a href="index.php#project-<?= (int) $a['pid'] ?>-order">← Back</a><?php if ($ok): ?><button id="dl">⬇ Download PDF</button><button id="sh" hidden>Share (WhatsApp / email)</button><a href="#" onclick="window.print();return false">Print</a><?php else: ?><span class="warnbar"><?= $a['status'] === 'rejected' ? 'Rejected by admin — make a new version.' : 'Not approved yet — download is available after admin approves it.' ?></span><?php endif; ?></div>
+<?php if ($ok): echo share_bar('quote', $a['id'], $fname, 'Dear ' . trim(($d['salutation'] ?? '') . ' ' . ($d['attn'] ?? '')) . ",\nPlease find attached our quotation " . ($a['quote_no'] ?: '') . ' for ' . ($d['expo'] ?? 'your stall') . ".\n\nRegards,\n" . ($d['prepared_by'] ?? '') . ($d['prepared_phone'] ?? '' ? ' · ' . $d['prepared_phone'] : '') . "\nZest Exhibitions", $a['client_phone'], $pub ? null : 'index.php#project-' . (int) $a['pid'] . '-order');
+else: ?><div class="bar"><a href="index.php#project-<?= (int) $a['pid'] ?>-order">← Back</a><span class="warnbar"><?= $a['status'] === 'rejected' ? 'Rejected by admin — make a new version.' : 'Not approved yet — download and sharing open after admin approves it.' ?></span></div><?php endif; ?>
 <div class="page">
 <?php if (!$ok): ?><div class="wm">NOT APPROVED</div><?php endif; ?>
 <div class="logo"><img src="assets/logo.png" alt="<?= $h($co['name'] ?? 'Zest Exhibitions') ?>"></div>
@@ -77,16 +80,5 @@ tr.subrow td.d{padding-left:34px}
 <div class="sig keep"><div><?= $d['prepared_by'] ? 'Prepared by: <b>' . $h($d['prepared_by']) . '</b>' . ($d['prepared_phone'] ? '<br>' . $h($d['prepared_phone']) : '') : '' ?></div><div class="ln">For <?= $h($co['name'] ?? 'Zest Exhibitions') ?><br>Authorised Signatory</div></div>
 <div class="foot">☎ <?= $h($co['phone'] ?? '') ?><?= !empty($co['email']) ? ' &nbsp;|&nbsp; ✉ ' . $h($co['email']) : '' ?><?= !empty($co['website']) ? ' &nbsp;|&nbsp; 🌐 ' . $h($co['website']) : '' ?></div>
 </div>
-<?php if ($ok): ?><script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-<script>
-const FN = <?= json_encode($fname) ?>, PG = document.querySelector('.page');
-const opt = { margin: [10, 8, 10, 8], filename: FN, image: { type: 'jpeg', quality: 0.95 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }, pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', '.keep'] } };
-const prep = () => { PG.style.boxShadow = 'none'; PG.style.margin = '0'; }, done = () => { PG.style.boxShadow = ''; PG.style.margin = ''; };
-document.getElementById('dl').onclick = async () => { if (!window.html2pdf) { window.print(); return; } prep(); try { await html2pdf().set(opt).from(PG).save(); } finally { done(); } };
-const sh = document.getElementById('sh');
-if (window.html2pdf && navigator.canShare && navigator.canShare({ files: [new File([''], 'x.pdf', { type: 'application/pdf' })] })) {
-  sh.hidden = false;
-  sh.onclick = async () => { prep(); try { const b = await html2pdf().set(opt).from(PG).outputPdf('blob'); await navigator.share({ files: [new File([b], FN, { type: 'application/pdf' })], title: FN }); } catch (e) {} finally { done(); } };
-}
-</script><?php endif; ?>
+<?php if ($ok): ?><script>window.PDFOPT = { margin: [10, 8, 10, 8], filename: FN, image: { type: 'jpeg', quality: 0.95 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }, pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', '.keep'] } };</script><?php endif; ?>
 </body></html>

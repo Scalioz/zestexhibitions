@@ -127,7 +127,7 @@ case 'boot':
     'templates' => setting('templates', []),
     'reasons' => all('SELECT id, label FROM ' . T('reasons') . ' WHERE active = 1 ORDER BY id'),
     'vendors' => all('SELECT id, name, phone, email, city FROM ' . T('vendors') . ' WHERE active = 1 ORDER BY name'),
-    'users' => all('SELECT id, name, role, designation, department, active FROM ' . T('users') . ' ORDER BY name'),
+    'users' => all('SELECT id, name, role, designation, department, active, phone FROM ' . T('users') . ' ORDER BY name'),
     'today' => today(),
     'records' => $RECORDS,
     'module' => $MODULE,
@@ -814,6 +814,19 @@ case 'my_handovers':   // research / telecalling: clients I added and handed to 
   $rows = all('SELECT id, company, person, phone, city, owner_id, created_at FROM ' . T('clients') . ' WHERE created_by = ? AND owner_id <> ? ORDER BY id DESC LIMIT 100', [$MID, $MID]);
   foreach ($rows as &$r) $r['owner'] = $um[$r['owner_id']] ?? '—'; unset($r);
   out(['rows' => $rows]);
+
+case 'share_link':   // secure link for a client: quote / invoice / file
+  require_once __DIR__ . '/lib/share.php'; require_once __DIR__ . '/lib/fileauth.php';
+  $kind = $in['kind'] ?? ''; $id = (int) ($in['id'] ?? 0);
+  if ($kind === 'quote') { $a = one('SELECT a.status, p.owner_id FROM ' . T('approvals') . ' a JOIN ' . T('projects') . ' p ON p.id = a.project_id WHERE a.id = ?', [$id]);
+    if (!$a || $a['status'] !== 'approved') fail('Only an approved quote can be sent.'); if (!$ADMIN && !$ACC && (int) $a['owner_id'] !== $MID) fail('Not your quote.', 403); }
+  elseif ($kind === 'invoice') { $i = one('SELECT i.status, i.requested_by, p.owner_id FROM ' . T('invoices') . ' i LEFT JOIN ' . T('projects') . ' p ON p.id = i.project_id WHERE i.id = ?', [$id]);
+    if (!$i || $i['status'] !== 'issued') fail('Only an approved invoice can be sent.'); if (!$ACC && (int) $i['requested_by'] !== $MID && (int) ($i['owner_id'] ?? 0) !== $MID) fail('Not your invoice.', 403); }
+  elseif ($kind === 'file') { $f = one('SELECT * FROM ' . T('files') . ' WHERE id = ?', [$id]); if (!$f || !file_allowed($me, $f)) fail('You do not have access to this file.', 403); }
+  else fail('Unknown item.');
+  $page = ['quote' => 'quote.php', 'invoice' => 'invoice.php', 'file' => 'file.php'][$kind];
+  $base = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? '') . rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/'), '/\\') . '/';
+  out(['url' => $base . $page . '?t=' . share_make($kind, $id, $MID), 'days' => 30]);
 
 case 'gst_known':   // is this GSTIN already in the CRM? (fills the form from the saved client)
   $g = strtoupper(preg_replace('/\s/', '', (string) ($in['gst'] ?? '')));

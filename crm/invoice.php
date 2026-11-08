@@ -2,10 +2,13 @@
 // Printable proforma / tax invoice with Zest letterhead.
 require_once __DIR__ . '/lib/auth.php';
 require_once __DIR__ . '/lib/acc.php';
-$me = current_user();
-if (!$me) { header('Location: login.php'); exit; }
-$isAcc = $me['role'] === 'admin' || has_mod($me, 'accounts');
-$i = one('SELECT i.*, c.company, c.location, c.city, c.gst_no, c.person, c.phone, c.email, p.expo, p.owner_id FROM ' . T('invoices') . ' i JOIN ' . T('clients') . ' c ON c.id = i.client_id LEFT JOIN ' . T('projects') . ' p ON p.id = i.project_id WHERE i.id = ?', [(int) ($_GET['id'] ?? 0)]);
+require_once __DIR__ . '/lib/share.php';
+require_once __DIR__ . '/lib/share_bar.php';
+$pub = share_open('invoice');   // client opening a secure link
+$me = $pub ? null : current_user();
+if (!$pub && !$me) { header('Location: login.php'); exit; }
+$isAcc = $pub || $me['role'] === 'admin' || has_mod($me, 'accounts');
+$i = one('SELECT i.*, c.company, c.location, c.city, c.gst_no, c.person, c.phone, c.email, p.expo, p.owner_id FROM ' . T('invoices') . ' i JOIN ' . T('clients') . ' c ON c.id = i.client_id LEFT JOIN ' . T('projects') . ' p ON p.id = i.project_id WHERE i.id = ?', [(int) ($pub ? $pub['ref_id'] : ($_GET['id'] ?? 0))]);
 if (!$i) { http_response_code(404); exit('Invoice not found.'); }
 if (!$isAcc && (int) $i['requested_by'] !== (int) $me['id'] && (int) $i['owner_id'] !== (int) $me['id']) { http_response_code(403); exit('This invoice is not yours.'); }
 $ok = $i['status'] === 'issued';
@@ -41,7 +44,8 @@ tr.t td{font-weight:bold;background:#eef1f7}tr.g td{font-weight:bold;background:
 .bank{margin-top:12px;font-size:13.5px;line-height:1.6;border:1px solid #c9d3df;padding:10px 12px;border-radius:4px}
 .terms{margin-top:12px;font-size:13.5px;line-height:1.6;font-weight:700}
 </style></head><body>
-<div class="bar"><a href="index.php#invd-<?= (int) $i['id'] ?>">← Back</a><?php if ($ok): ?><button id="dl">⬇ Download PDF</button><button id="sh" hidden>Share (WhatsApp / email)</button><a href="#" onclick="window.print();return false">Print</a><?php else: ?><span class="warnbar">Not approved yet — download is available after admin approves it.</span><?php endif; ?></div>
+<?php if ($ok): echo share_bar('invoice', $i['id'], $fname, 'Dear ' . ($i['person'] ?: 'Sir / Madam') . ",\nPlease find attached our " . ($i['kind'] === 'tax' ? 'tax invoice ' : 'proforma invoice ') . $i['inv_no'] . ($i['expo'] ? ' for ' . $i['expo'] : '') . ' — amount ₹' . inr2($i['total']) . ".\n\nRegards,\nZest Exhibitions", $i['phone'], $pub ? null : 'index.php#invd-' . (int) $i['id']);
+else: ?><div class="bar"><a href="index.php#invd-<?= (int) $i['id'] ?>">← Back</a><span class="warnbar">Not approved yet — download and sharing open after admin approves it.</span></div><?php endif; ?>
 <div class="page">
 <div class="hdr"><img src="assets/logo.png" alt="<?= $h($co['name'] ?? 'Zest Exhibitions') ?>">
 <div class="addr"><b><?= $h(strtoupper($co['name'] ?? 'ZEST EXHIBITIONS')) ?></b><br><?= nl2br($h($co['address'] ?? '')) ?><br>Tel: <?= $h($co['phone'] ?? '') ?><?= !empty($co['gstin']) ? '<br>GSTIN: ' . $h($co['gstin']) : '' ?><?= !empty($co['pan']) ? ' · PAN: ' . $h($co['pan']) : '' ?></div></div>
@@ -65,20 +69,5 @@ tr.t td{font-weight:bold;background:#eef1f7}tr.g td{font-weight:bold;background:
 <?php if ($i['notes'] || !empty($co['terms'])): ?><div class="terms"><b>Payment terms</b><br><?= nl2br($h(trim(($i['notes'] ?? '') . "\n" . ($co['terms'] ?? '')))) ?></div><?php endif; ?>
 <div class="foot"><div class="small">This is a computer-generated <?= $i['kind'] === 'tax' ? 'invoice' : 'proforma invoice' ?>.</div><div class="sig">For <?= $h($co['name'] ?? 'Zest Exhibitions') ?><div class="ln">Authorised Signatory</div></div></div>
 </div>
-<?php if ($ok): ?><script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-<script>
-const FN = <?= json_encode($fname) ?>, PG = document.querySelector('.page');
-const opt = { margin: [8, 8, 8, 8], filename: FN, image: { type: 'jpeg', quality: 0.96 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
-const prep = () => { PG.style.boxShadow = 'none'; PG.style.margin = '0'; };
-const done = () => { PG.style.boxShadow = ''; PG.style.margin = ''; };
-document.getElementById('dl').onclick = async () => {
-  if (!window.html2pdf) { window.print(); return; }   // library not reachable: use the browser's Save as PDF
-  prep(); try { await html2pdf().set(opt).from(PG).save(); } finally { done(); }
-};
-const sh = document.getElementById('sh');
-if (window.html2pdf && navigator.canShare && navigator.canShare({ files: [new File([''], 'x.pdf', { type: 'application/pdf' })] })) {
-  sh.hidden = false;
-  sh.onclick = async () => { prep(); try { const b = await html2pdf().set(opt).from(PG).outputPdf('blob'); await navigator.share({ files: [new File([b], FN, { type: 'application/pdf' })], title: FN }); } catch (e) {} finally { done(); } };
-}
-</script><?php endif; ?>
+<?php if ($ok): ?><script>window.PDFOPT = { margin: [8, 8, 8, 8], filename: FN, image: { type: 'jpeg', quality: 0.96 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };</script><?php endif; ?>
 </body></html>
