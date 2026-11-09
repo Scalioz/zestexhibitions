@@ -99,14 +99,22 @@ function expo_remember($name, $loc = null, $start = null, $end = null) {
 }
 // company profile sent to new clients (WhatsApp / email) — PDF uploaded by admin, messages editable
 function profile_msgs() {
-  $d = ['wa' => "Dear {name},\n\nGreetings from Zest Exhibitions!\n\nThank you for your time. Here is our company profile:\n{link}\n\nWe design and build exhibition stalls and turnkey commercial interiors — concept, 3D design, fabrication and on-site installation, all in-house.\n\nHappy to discuss your requirement for {expo}.\n\nWarm regards,\n{me}\nZest Exhibitions\n{my_phone}",
+  $d = ['wa' => "Dear {name},\n\nGreetings from Zest Exhibitions!\n\nThank you for your time. Please find our company profile attached.\n\nWe design and build exhibition stalls and turnkey commercial interiors — concept, 3D design, fabrication and on-site installation, all in-house.\n\nHappy to discuss your requirement for {expo}.\n\nWarm regards,\n{me}\nZest Exhibitions\n{my_phone}",
     'subj' => 'Zest Exhibitions — Company Profile',
-    'body' => "Dear {name},\n\nGreetings from Zest Exhibitions!\n\nThank you for your time. Please find our company profile at the link below:\n{link}\n\nWe design and build exhibition stalls and turnkey commercial interiors for brands across India — concept, 3D design, fabrication and on-site installation, all handled in-house.\n\nWe would be happy to discuss your requirement for {expo} and share a design and quote.\n\nWarm regards,\n{me}\nZest Exhibitions\n{my_phone}\nwww.zestexhibitions.com"];
+    'body' => "Dear {name},\n\nGreetings from Zest Exhibitions!\n\nThank you for your time. Please find our company profile attached.\n\nWe design and build exhibition stalls and turnkey commercial interiors for brands across India — concept, 3D design, fabrication and on-site installation, all handled in-house.\n\nWe would be happy to discuss your requirement for {expo} and share a design and quote.\n\nWarm regards,\n{me}\nZest Exhibitions\n{my_phone}\nwww.zestexhibitions.com"];
   return array_merge($d, array_filter((array) setting('profile_msgs', []), 'strlen'));
 }
 function profile_info() {
   $f = one('SELECT id, orig_name, size, created_at FROM ' . T('files') . " WHERE entity = 'profile' ORDER BY id DESC");
-  return ['file' => $f ?: null, 'msgs' => profile_msgs()];
+  require_once __DIR__ . '/lib/mailer.php'; require_once __DIR__ . '/lib/att.php'; $w = att_cfg()['wa'];
+  return ['file' => $f ?: null, 'msgs' => profile_msgs(), 'mail_ready' => mail_ready(), 'wa_gateway' => (bool) ($w['token'] ?? '')];
+}
+function profile_pdf() {
+  $f = one('SELECT * FROM ' . T('files') . " WHERE entity = 'profile' ORDER BY id DESC");
+  $path = $f ? __DIR__ . '/uploads/' . $f['stored_name'] : '';
+  if (!$f || !is_file($path)) fail('Admin has not uploaded the company profile yet (Holidays & lists → Company profile).');
+  $name = (preg_replace('/[^\w .()-]/u', '', pathinfo($f['orig_name'], PATHINFO_FILENAME)) ?: 'Zest-Exhibitions-Profile') . '.pdf';
+  return [$name, file_get_contents($path)];
 }
 function expo_list() { return all('SELECT id, name, edate, end_date, city, venue FROM ' . T('expos') . ' ORDER BY edate DESC, name LIMIT 1500'); }
 function users_map() { $m = []; foreach (all('SELECT id, name FROM ' . T('users')) as $u) $m[$u['id']] = $u['name']; return $m; }
@@ -1002,7 +1010,8 @@ case 'ref_reopen':
 case 'settings':
   need_admin();
   require_once __DIR__ . '/lib/quote.php';
-  out(['holidays' => all('SELECT * FROM ' . T('holidays') . ' ORDER BY hdate DESC'), 'track_from' => setting('track_from'), 'quote_defaults' => quote_defaults(), 'cards_ai' => (function () { require_once __DIR__ . '/lib/cards.php'; $a = cards_ai(); return ['has_key' => $a['key'] !== '', 'hint' => $a['key'] ? substr($a['key'], 0, 7) . '••••' . substr($a['key'], -4) : '', 'model' => $a['model']]; })()]);
+  out(['holidays' => all('SELECT * FROM ' . T('holidays') . ' ORDER BY hdate DESC'), 'track_from' => setting('track_from'), 'quote_defaults' => quote_defaults(), 'cards_ai' => (function () { require_once __DIR__ . '/lib/cards.php'; $a = cards_ai(); return ['has_key' => $a['key'] !== '', 'hint' => $a['key'] ? substr($a['key'], 0, 7) . '••••' . substr($a['key'], -4) : '', 'model' => $a['model']]; })(),
+    'smtp' => (function () { require_once __DIR__ . '/lib/mailer.php'; $c = mail_cfg(); $c['has_pass'] = $c['pass'] !== ''; unset($c['pass']); return $c; })()]);
 
 case 'storage':   // admin: how much space files use, and compress older files
   need_admin(); require_once __DIR__ . '/lib/shrink.php';
@@ -1038,6 +1047,12 @@ case 'settings_save':
     if (isset($q['scope'])) $cur['scope'] = s($q['scope'], 120) ?? QUOTE_DEFAULTS['scope'];
     set_setting('quote_defaults', $cur);
   }
+  if (isset($in['smtp'])) { require_once __DIR__ . '/lib/mailer.php'; $m = (array) $in['smtp']; $cur = mail_cfg();
+    $sec = in_array($m['secure'] ?? '', ['ssl', 'tls', 'none'], true) ? $m['secure'] : 'ssl';
+    $cur = ['host' => s($m['host'] ?? null, 120) ?? '', 'port' => max(1, min(65535, (int) ($m['port'] ?? 465))), 'secure' => $sec, 'user' => strtolower(s($m['user'] ?? null, 160) ?? ''),
+      'pass' => !empty($m['remove']) ? '' : (($m['pass'] ?? '') !== '' ? (string) $m['pass'] : $cur['pass']), 'from_name' => s($m['from_name'] ?? null, 80) ?? 'Zest Exhibitions'];
+    if ($cur['user'] && !filter_var($cur['user'], FILTER_VALIDATE_EMAIL)) fail('The mailbox login must be a full email address.');
+    set_setting('smtp', $cur); }
   if (isset($in['profile_msgs'])) { $m = (array) $in['profile_msgs']; $cur = (array) setting('profile_msgs', []);
     foreach (['wa' => 3000, 'subj' => 200, 'body' => 5000] as $k => $mx) if (array_key_exists($k, $m)) $cur[$k] = mb_substr(str_replace("\r", '', trim((string) $m[$k])), 0, $mx);
     set_setting('profile_msgs', $cur); }
@@ -1104,6 +1119,40 @@ case 'expo_save':   // admin: Holidays & lists → Expo list
   if ($same) fail('This expo is already in the list.');
   if ($id) { if (!val('SELECT id FROM ' . T('expos') . ' WHERE id = ?', [$id])) fail('Expo not found.', 404); upd('expos', $id, $data); out(['id' => $id]); }
   out(['id' => ins('expos', $data + ['created_by' => $MID, 'created_at' => now()])]);
+
+case 'profile_email':   // sends the company profile PDF as an attachment, from the company mailbox
+  require_once __DIR__ . '/lib/mailer.php';
+  $to = array_filter(array_map('trim', preg_split('/[,;\s]+/', (string) ($in['to'] ?? ''))));
+  foreach ($to as $e) if (!filter_var($e, FILTER_VALIDATE_EMAIL)) fail("Check the email address: $e");
+  if (!$to) fail('Enter the client\'s email.');
+  $subj = s($in['subject'] ?? null, 200) ?? fail('Enter the subject.'); $body = s($in['body'] ?? null, 8000) ?? fail('Write the message.');
+  [$pn, $pb] = profile_pdf();
+  $meEmail = filter_var($me['email'], FILTER_VALIDATE_EMAIL) ? $me['email'] : null;
+  try { $via = mail_send(['to' => $to, 'cc' => !empty($in['cc_me']) && $meEmail ? [$meEmail] : [], 'subject' => $subj, 'text' => $body, 'reply_to' => $meEmail, 'reply_name' => $me['name'],
+    'from_name' => $me['name'] . ' | Zest Exhibitions', 'files' => [[$pn, $pb, 'application/pdf']]]); }
+  catch (UserError $e) { fail($e->getMessage()); }
+  out(['ok' => true, 'via' => $via]);
+
+case 'profile_wa':   // company WhatsApp gateway (if set up): sends the PDF with the message straight to the client
+  require_once __DIR__ . '/lib/att.php'; $w = att_cfg()['wa'];
+  if (empty($w['token']) || !function_exists('curl_init')) fail('The company WhatsApp sender is not set up.');
+  $d = preg_replace('/\D/', '', (string) ($in['phone'] ?? '')); if (strlen($d) === 10) $d = '91' . $d; $d = ltrim($d, '0');
+  if (strlen($d) < 11) fail('Enter the client\'s WhatsApp number.');
+  $text = s($in['text'] ?? null, 3000) ?? ''; [$pn, $pb] = profile_pdf();
+  $base = preg_replace('~/messages/\w+/?$~', '', $w['url'] ?: 'https://gate.whapi.cloud/messages/text');
+  $ch = curl_init($base . '/messages/document');
+  curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 90, CURLOPT_HTTPHEADER => ['content-type: application/json', 'authorization: Bearer ' . $w['token']],
+    CURLOPT_POSTFIELDS => json_encode(['to' => $d, 'media' => 'data:application/pdf;name=' . rawurlencode($pn) . ';base64,' . base64_encode($pb), 'filename' => $pn, 'caption' => $text])]);
+  $r = curl_exec($ch); $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
+  if ($code < 200 || $code >= 300) fail('WhatsApp sender error (' . $code . '): ' . mb_substr(trim(strip_tags((string) $r)), 0, 160));
+  out(['ok' => true]);
+
+case 'smtp_test':
+  need_admin(); require_once __DIR__ . '/lib/mailer.php';
+  if (!mail_ready()) fail('Fill and save the mailbox details first.');
+  try { mail_send(['to' => [$me['email']], 'subject' => 'Zest CRM — email test', 'text' => "This test email was sent by the Zest CRM through " . mail_cfg()['user'] . ".\nEmails with the company profile will go out the same way.", 'files' => []]); }
+  catch (UserError $e) { fail($e->getMessage()); }
+  out(['ok' => true, 'to' => $me['email']]);
 
 case 'expo_merge':   // admin: two names for the same expo — keep one, move everything from the other to it
   need_admin();

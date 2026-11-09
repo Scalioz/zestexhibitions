@@ -93,29 +93,66 @@ function profileText(t, c) {
   if (!v.expo) t = t.replace(/ for \{expo\}/g, '');
   return t.replace(/\{(name|company|expo|link|me|my_phone)\}/g, (m, k) => v[k]).replace(/\n{3,}/g, '\n\n').trim();
 }
-function sendProfile(how, c) {
+let PROF_BLOB = null;
+const profFile = async () => { if (!PROF_BLOB) { const r = await fetch('profile.php', { credentials: 'same-origin' }); if (!r.ok) throw new Error('Could not load the profile PDF.'); PROF_BLOB = await r.blob(); } return new File([PROF_BLOB], profName(), { type: 'application/pdf' }); };
+const profName = () => (B.profile?.file?.orig_name || 'Zest-Exhibitions-Profile.pdf').replace(/[^\w .()-]/g, '').replace(/\.pdf$/i, '') + '.pdf';
+const waDigits = p => { let d = String(p || '').replace(/\D/g, ''); if (d.length === 10) d = '91' + d; return d.replace(/^0+/, ''); };
+function profCompose(how, src, c) {
+  const box = document.querySelector(`[data-profbox="${src}"]`); if (!box) return;
   if (!B.profile?.file) { toast(isAdmin() ? 'Upload the company profile first: Holidays & lists → Company profile' : 'Admin has not uploaded the company profile yet.', true); return; }
-  const M = B.profile.msgs;
+  if (box.dataset.open === how && !box.hidden) { box.hidden = true; box.dataset.open = ''; return; }
+  const M = B.profile.msgs, pdf = `<span class="chip">📎 <span>${esc(profName())}</span><span class="sub">· ${mb(B.profile.file.size)} · attached</span></span>`;
+  box.dataset.open = how; box.hidden = false;
   if (how === 'wa') {
-    let d = String(c.phone || '').replace(/\D/g, ''); if (d.length === 10) d = '91' + d; if (d.length > 12 && d.startsWith('0')) d = d.replace(/^0+/, '');
-    if (d.length < 11) { toast('Enter the client’s phone number first (with country code if outside India).', true); return; }
-    const text = encodeURIComponent(profileText(M.wa, c));
-    if (IS_PHONE) location.href = `https://wa.me/${d}?text=${text}`;   // phone: opens WhatsApp / WhatsApp Business straight into this client's chat
-    else window.open(`https://web.whatsapp.com/send?phone=${d}&text=${text}`, 'zestwa');   // computer: WhatsApp Web in Chrome
+    const gw = B.profile.wa_gateway, canShare = IS_PHONE && navigator.canShare && navigator.canShare({ files: [new File([''], 'x.pdf', { type: 'application/pdf' })] });
+    box.innerHTML = `<div class="grid g3"><label class="f">Client's WhatsApp number<input data-pb="phone" type="tel" value="${esc(c.phone || '')}"></label></div>
+     <label class="f" style="margin-top:8px">Message <span class="sub" style="font-weight:400">— change anything for this client</span><textarea data-pb="text" rows="9">${esc(profileText(M.wa, c))}</textarea></label>
+     <div class="row" style="margin-top:8px;align-items:center">${pdf}</div>
+     <div class="row" style="margin-top:10px;flex-wrap:wrap">${gw ? '<button type="button" class="btn wa" data-pbgo="gw">Send now — PDF + message</button>' : ''}
+      ${canShare ? `<button type="button" class="btn ${gw ? 'ghost' : 'wa'}" data-pbgo="chat">① Send the message</button><button type="button" class="btn ${gw ? 'ghost' : 'wa'}" data-pbgo="share">② Send the PDF</button>`
+        : `<button type="button" class="btn ${gw ? 'ghost' : 'wa'}" data-pbgo="web">${IS_PHONE ? 'Open WhatsApp' : 'Open WhatsApp Web'} + get the PDF</button>`}<button type="button" class="btn link" data-pbgo="close">Close</button></div>
+     <div class="sub" data-pb="hint" style="margin-top:6px">${gw ? 'Send now goes straight from the company WhatsApp number — nothing else to do.' + (canShare || !IS_PHONE ? ' Or use your own WhatsApp:' : '') + ' ' : ''}${canShare ? '① opens the client’s chat with the message — send it, come back here, then tap ② and pick the same chat (it will be at the top).' : IS_PHONE ? 'Opens the chat with the message and saves the PDF — attach it with 📎.' : 'Opens the client’s chat in WhatsApp Web with the message, and downloads the PDF — drag it into the chat (or 📎 → Document).'}</div>`;
   } else {
-    const em = String(c.email || '').trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { toast('Enter the client’s email first.', true); return; }
-    location.href = `mailto:${encodeURIComponent(em).replace(/%40/g, '@')}?subject=${encodeURIComponent(profileText(M.subj, c))}&body=${encodeURIComponent(profileText(M.body, c))}`;
+    box.innerHTML = `<div class="grid g3"><label class="f">To<input data-pb="to" type="email" value="${esc(c.email || '')}" placeholder="client@company.com"></label><label class="f" style="grid-column:span 2">Subject<input data-pb="subject" value="${esc(profileText(M.subj, c))}"></label></div>
+     <label class="f" style="margin-top:8px">Message <span class="sub" style="font-weight:400">— change anything for this client</span><textarea data-pb="body" rows="11">${esc(profileText(M.body, c))}</textarea></label>
+     <div class="row" style="margin-top:8px;align-items:center">${pdf}<label class="row" style="gap:6px;font-weight:400"><input type="checkbox" data-pb="cc_me" checked> Send me a copy</label></div>
+     <div class="row" style="margin-top:10px;flex-wrap:wrap"><button type="button" class="btn" data-pbgo="mail">Send email with PDF</button><button type="button" class="btn link" data-pbgo="mailapp">Open in my email app instead</button><button type="button" class="btn link" data-pbgo="close">Close</button></div>
+     <div class="sub" style="margin-top:6px">${B.profile.mail_ready ? 'Sent from the company mailbox with the PDF attached. Client replies come to you.' : 'Sent by the CRM server with the PDF attached. ' + (isAdmin() ? 'For best delivery, set up the company mailbox in Holidays & lists → Email sending.' : '')} “My email app” opens Outlook / Gmail with the message, but without the attachment.</div>`;
   }
-  toast(how === 'wa' ? 'Opening WhatsApp…' : 'Opening your email app…');
+  box.querySelector('textarea').focus({ preventScroll: true });
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
-const profileBtns = src => `<div class="row profbar" style="align-items:center;gap:8px;flex-wrap:wrap"><span class="sub"><b>Company profile</b></span><button type="button" class="btn wa sm" data-profsend="wa:${src}">💬 Send on WhatsApp</button><button type="button" class="btn ghost sm" data-profsend="mail:${src}">✉ Send by email</button>${B.profile?.file ? `<a class="btn link" href="profile.php" target="_blank" rel="noopener">View profile</a>` : ''}</div>`;
+async function profGo(btn) {
+  const box = btn.closest('[data-profbox]'), g = k => box.querySelector(`[data-pb="${k}"]`), go = btn.dataset.pbgo;
+  if (go === 'close') { box.hidden = true; box.dataset.open = ''; return; }
+  if (['gw', 'chat', 'web'].includes(go) && waDigits(g('phone').value).length < 11) return toast('Enter the client’s WhatsApp number.', true);
+  const text = go.startsWith('mail') ? '' : g('text').value;
+  try {
+    if (go === 'gw') { btn.disabled = true; btn.textContent = 'Sending…'; await act(() => api('profile_wa', { phone: g('phone').value, text }), 'Profile sent on WhatsApp ✅').finally(() => { btn.disabled = false; btn.textContent = 'Send now — PDF + message'; }); return; }
+    if (go === 'chat') { location.href = `https://wa.me/${waDigits(g('phone').value)}?text=${encodeURIComponent(text)}`; return; }
+    if (go === 'share') { const f = await profFile(); await navigator.share({ files: [f] }).catch(() => {}); return; }
+    if (go === 'web') {
+      const f = await profFile(); const a = document.createElement('a'); a.href = URL.createObjectURL(f); a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
+      const u = IS_PHONE ? `https://wa.me/${waDigits(g('phone').value)}?text=${encodeURIComponent(text)}` : `https://web.whatsapp.com/send?phone=${waDigits(g('phone').value)}&text=${encodeURIComponent(text)}`;
+      if (IS_PHONE) location.href = u; else window.open(u, 'zestwa'); return;
+    }
+    const to = g('to').value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.split(/[,;\s]+/)[0] || '')) return toast('Enter the client’s email.', true);
+    if (go === 'mailapp') { location.href = `mailto:${to.replace(/\s/g, '')}?subject=${encodeURIComponent(g('subject').value)}&body=${encodeURIComponent(g('body').value)}`; return; }
+    btn.disabled = true; btn.textContent = 'Sending…';
+    const r = await act(() => api('profile_email', { to, subject: g('subject').value, body: g('body').value, cc_me: g('cc_me').checked ? 1 : 0 })).catch(() => null);
+    btn.disabled = false; btn.textContent = 'Send email with PDF';
+    if (r) { toast(`Profile emailed to ${to} ✅`); box.hidden = true; box.dataset.open = ''; }
+  } catch (e) { toast(e.message, true); }
+}
+const profileBtns = src => `<div class="row profbar" style="align-items:center;gap:8px;flex-wrap:wrap"><span class="sub"><b>Company profile</b></span><button type="button" class="btn wa sm" data-profsend="wa:${src}">💬 Send on WhatsApp</button><button type="button" class="btn ghost sm" data-profsend="mail:${src}">✉ Send by email</button>${B.profile?.file ? `<a class="btn link" href="profile.php" target="_blank" rel="noopener">View PDF</a>` : ''}</div><div class="inset profbox" data-profbox="${src}" hidden style="margin-top:8px"></div>`;
 document.addEventListener('click', e => {
+  const go = e.target.closest('[data-pbgo]'); if (go) { e.preventDefault(); e.stopPropagation(); profGo(go); return; }
   const b = e.target.closest('[data-profsend]'); if (!b) return; e.preventDefault(); e.stopPropagation();
   const [how, src] = b.dataset.profsend.split(':');
   const c = src === 'new' ? { company: newClient?.company, person: newClient?.person, phone: newClient?.phone, email: newClient?.email, expo: newClient?.expo?.expo }
     : { company: C.client?.company, person: C.client?.person, phone: C.client?.phone, email: C.client?.email, expo: (C.client?.orders || [])[0]?.expo };
-  sendProfile(how, c);
+  profCompose(how, src, c);
 }, true);
 const crmLink = hash => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.php' + hash;
 const waBtn = (phone, text, label) => `<a class="btn wa sm" href="${esc(waUrl(phone, text))}" target="_blank" rel="noopener" title="${phone ? 'Opens WhatsApp to ' + esc(phone) : 'Opens WhatsApp — pick the contact'}">💬 ${esc(label)}</a>`;
@@ -1936,14 +1973,22 @@ routes.settings = async () => {
    <div class="row" style="margin-top:10px"><input id="ex-q" placeholder="Search expos" style="max-width:260px"></div>
    <div class="tw" style="margin-top:8px;max-height:420px;overflow:auto"><table id="ex-tab"><tr><th>Expo</th><th>Dates</th><th>City</th><th>Venue</th><th></th></tr>${(B.expos || []).map(e => `<tr data-exrow="${esc((e.name + ' ' + (e.city || '') + ' ' + (e.venue || '')).toLowerCase())}"><td><b>${esc(e.name)}</b></td><td class="num">${e.edate ? fd(e.edate) + (e.end_date && e.end_date !== e.edate ? ' – ' + fd(e.end_date) : '') : '—'}</td><td>${esc(e.city || '')}</td><td>${esc(e.venue || '')}</td><td class="r" style="white-space:nowrap"><button class="btn link" data-exedit="${e.id}">Edit</button> <button class="btn link" data-exmerge="${e.id}">Merge</button> <button class="btn link" data-exdel="${e.id}" aria-label="Remove ${esc(e.name)}">✕</button></td></tr>`).join('') || '<tr><td colspan="5" class="sub">No expos yet.</td></tr>'}</table></div></div>
   <form class="panel" id="profset"><div class="ph"><h2>Company profile for new clients</h2>${B.profile?.file ? `<a class="btn link" href="profile.php" target="_blank" rel="noopener">Open the profile</a>` : ''}</div>
-   <p class="sub" style="margin-top:0">Sales can send this from the New client form and each client's page — on WhatsApp or by email, with the message below. Clients open it from a link, so no attachment is needed.</p>
+   <p class="sub" style="margin-top:0">Sales send this PDF from the New client form and each client's page — on WhatsApp or by email — with the message below. They can change the message for any client before sending.</p>
    <div class="row" style="align-items:center">${B.profile?.file ? `<span class="chip">📄 <span>${esc(B.profile.file.orig_name)}</span><span class="sub">· ${mb(B.profile.file.size)} · uploaded ${fd(B.profile.file.created_at)}</span></span>` : '<span class="pill p-bad">not uploaded yet</span>'}
     <label class="up">⬆ ${B.profile?.file ? 'Replace with a new PDF' : 'Upload the profile PDF'}<input type="file" id="prof-up" accept=".pdf,application/pdf"></label></div>
-   <div class="sub" style="margin:6px 0 10px">Link clients receive: <b>${esc(profileUrl())}</b> — it always opens the latest PDF you upload.</div>
+   <div style="height:10px"></div>
    <div class="grid"><label class="f">WhatsApp message<textarea name="wa" rows="12">${esc(B.profile?.msgs.wa || '')}</textarea></label>
     <div class="grid" style="grid-template-columns:1fr;gap:10px"><label class="f">Email subject<input name="subj" value="${esc(B.profile?.msgs.subj || '')}"></label><label class="f">Email message<textarea name="body" rows="9">${esc(B.profile?.msgs.body || '')}</textarea></label></div></div>
-   <p class="sub">Filled in automatically: <b>{name}</b> contact person · <b>{company}</b> · <b>{expo}</b> · <b>{link}</b> profile link · <b>{me}</b> sender's name · <b>{my_phone}</b> sender's phone (from Team).</p>
+   <p class="sub">Filled in automatically: <b>{name}</b> contact person · <b>{company}</b> · <b>{expo}</b> · <b>{link}</b> web link to the PDF (optional) · <b>{me}</b> sender's name · <b>{my_phone}</b> sender's phone (from Team).</p>
    <div class="row"><button class="btn sm">Save messages</button><button type="button" class="btn link" id="prof-reset">Back to the standard messages</button></div></form>
+  <form class="panel" id="smtpset"><h2>Email sending</h2><p class="sub" style="margin-top:0">The company mailbox the CRM sends emails from (company profile to clients). Clients see your name and their replies come to you. Ask whoever manages your company email for these details.</p>
+   <div class="grid g3"><label class="f">Email provider<select id="smtp-pre"><option value="">Pick to fill the server</option><option value="smtp.hostinger.com|465|ssl">Hostinger email</option><option value="smtp.office365.com|587|tls">Microsoft 365 / Outlook</option><option value="smtp.gmail.com|465|ssl">Google Workspace / Gmail</option><option value="smtp.zoho.in|465|ssl">Zoho Mail (India)</option><option value="smtpout.secureserver.net|465|ssl">GoDaddy email</option></select></label>
+    <label class="f">Mail server<input name="host" value="${esc(d.smtp.host)}" placeholder="smtp.hostinger.com"></label><label class="f">Port<input name="port" type="number" value="${esc(d.smtp.port)}"></label>
+    <label class="f">Security<select name="secure">${[['ssl', 'SSL (port 465)'], ['tls', 'STARTTLS (port 587)'], ['none', 'None']].map(([k, l]) => `<option value="${k}" ${d.smtp.secure === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <label class="f">Mailbox email<input name="user" type="email" value="${esc(d.smtp.user)}" placeholder="info@zestexhibitions.com"></label>
+    <label class="f">Mailbox password ${d.smtp.has_pass ? '<span class="pill p-ok">saved</span>' : '<span class="pill p-bad">not set</span>'}<input name="pass" type="password" autocomplete="new-password" placeholder="${d.smtp.has_pass ? 'Leave blank to keep the saved one' : 'Password (or app password)'}"></label>
+    <label class="f">Sender name (fallback)<input name="from_name" value="${esc(d.smtp.from_name)}"></label></div>
+   <div class="row" style="margin-top:10px"><button class="btn sm">Save</button>${d.smtp.has_pass ? '<button type="button" class="btn ghost sm" id="smtp-test">Send a test email to me</button><button type="button" class="btn link" id="smtp-rm">Remove password</button>' : ''}</div></form>
   <div class="grid">
    <div class="panel"><h2>Rejection reasons</h2>${B.reasons.map(r => `<div class="row" style="justify-content:space-between;padding:3px 0"><span>${esc(r.label)}</span><button class="btn link" data-delreason="${r.id}">✕</button></div>`).join('')}
     <form class="row" id="rs-add" style="margin-top:8px"><input name="label" placeholder="New reason" required style="flex:1"><button class="btn ghost sm">Add</button></form></div>
@@ -1983,6 +2028,10 @@ routes.settings = async () => {
     if (ed) { const x = B.expos.find(v => +v.id === +ed.dataset.exedit); if (!x) return; ['id', 'name', 'edate', 'end_date', 'city', 'venue'].forEach(k => X(k).value = x[k] || ''); $('#ex-btn').textContent = 'Save changes'; $('#ex-cancel').hidden = false; exf.scrollIntoView({ behavior: 'smooth', block: 'center' }); X('name').focus(); }
     if (dl) { const x = B.expos.find(v => +v.id === +dl.dataset.exdel); if (!x || !confirm(`Remove "${x.name}" from the expo list? Orders already saved keep their expo name.`)) return; const ok = await act(() => api('expo_del', { id: x.id }), 'Removed').catch(() => null); if (ok) { await reboot(); refresh(); } }
   };
+  $('#smtp-pre').onchange = e => { const [h, p, x] = e.target.value.split('|'); if (!h) return; const f = $('#smtpset'), q = k => f.querySelector(`[name=${k}]`); q('host').value = h; q('port').value = p; q('secure').value = x; };
+  $('#smtpset').onsubmit = async e => { e.preventDefault(); const ok = await act(() => api('settings_save', { smtp: Object.fromEntries(new FormData(e.target)) }), 'Email settings saved').catch(() => null); if (ok) { await reboot(); refresh(); } };
+  if ($('#smtp-test')) $('#smtp-test').onclick = async () => { toast('Sending a test email…'); const r = await act(() => api('smtp_test')).catch(() => null); if (r) toast('Test email sent to ' + r.to + ' ✅'); };
+  if ($('#smtp-rm')) $('#smtp-rm').onclick = async () => { if (!confirm('Remove the saved mailbox password? Emails will then go out through the hosting server.')) return; await act(() => api('settings_save', { smtp: { ...Object.fromEntries(new FormData($('#smtpset'))), remove: 1 } }), 'Removed'); await reboot(); refresh(); };
   $('#profset').onsubmit = async e => { e.preventDefault(); const ok = await act(() => api('settings_save', { profile_msgs: Object.fromEntries(new FormData(e.target)) }), 'Messages saved').catch(() => null); if (ok) { await reboot(); refresh(); } };
   $('#prof-reset').onclick = async () => { if (!confirm('Go back to the standard WhatsApp and email messages?')) return; await act(() => api('settings_save', { profile_msgs: { wa: '', subj: '', body: '' } }), 'Standard messages restored'); await reboot(); refresh(); };
   $('#prof-up').onchange = async e => { const f = e.target.files[0]; if (!f) return; toast('Uploading the profile…'); const ok = await act(() => upload('profile', 0, f), 'Company profile uploaded').catch(() => null); if (ok) { await reboot(); refresh(); } };

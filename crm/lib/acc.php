@@ -60,7 +60,7 @@ function reverse_journal($jid, $date, $why, $user) {
   upd('journal', $j['id'], ['reversed_by' => $rid]);
   return $rid;
 }
-class UserError extends Exception {}
+if (!class_exists('UserError')) { class UserError extends Exception {} }
 
 // signed balance (debit positive) of one account up to a date (inclusive); $from = only movement from that date
 function acc_balance($id, $to = null, $from = null) {
