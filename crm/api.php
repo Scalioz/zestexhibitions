@@ -83,10 +83,21 @@ function visible_projects($where = '1=1', $p = []) {
 }
 function create_project($clientId, $ownerId, $in) {
   $st = s($in['space_type'] ?? null); if (!in_array($st, ['Bare space', 'Shell scheme'], true)) $st = null;
+  try { expo_remember($in['expo'] ?? null, $in['location'] ?? null, $in['start_date'] ?? null, $in['end_date'] ?? null); } catch (Throwable $e) {}
   return ins('projects', ['client_id' => $clientId, 'owner_id' => (int) $ownerId, 'expo' => s($in['expo'] ?? null, 200), 'location' => s($in['location'] ?? null),
     'start_date' => d($in['start_date'] ?? null), 'area_sqm' => n($in['area_sqm'] ?? null), 'space_type' => $st, 'sides_open' => in_array((int) ($in['sides_open'] ?? 0), [1, 2, 3, 4], true) ? (int) $in['sides_open'] : null, 'stall_no' => s($in['stall_no'] ?? null, 40),
     'status' => 'enquiry', 'gst_rate' => 18, 'created_at' => now()]);
 }
+// shared expo list: remember an expo typed on an order so next time it can be picked
+function expo_remember($name, $loc = null, $start = null, $end = null) {
+  global $MID;
+  $name = s($name, 200); if (!$name) return;
+  $ex = one('SELECT * FROM ' . T('expos') . ' WHERE LOWER(name) = LOWER(?) ORDER BY edate DESC', [$name]);
+  if (!$ex) { ins('expos', ['name' => $name, 'edate' => d($start), 'end_date' => d($end), 'city' => s($loc, 80), 'created_by' => $MID, 'created_at' => now()]); return; }
+  $fill = array_filter(['edate' => $ex['edate'] ? null : d($start), 'end_date' => $ex['end_date'] ? null : d($end), 'city' => $ex['city'] ? null : s($loc, 80)]);
+  if ($fill) upd('expos', $ex['id'], $fill);
+}
+function expo_list() { return all('SELECT id, name, edate, end_date, city, venue FROM ' . T('expos') . ' ORDER BY edate DESC, name LIMIT 1500'); }
 function users_map() { $m = []; foreach (all('SELECT id, name FROM ' . T('users')) as $u) $m[$u['id']] = $u['name']; return $m; }
 
 // child tables that hang off a project: kind => [table, allowed fields, required fields]
@@ -127,6 +138,7 @@ case 'boot':
     'templates' => setting('templates', []),
     'reasons' => all('SELECT id, label FROM ' . T('reasons') . ' WHERE active = 1 ORDER BY id'),
     'vendors' => all('SELECT id, name, phone, email, city FROM ' . T('vendors') . ' WHERE active = 1 ORDER BY name'),
+    'expos' => expo_list(),
     'users' => all('SELECT id, name, role, designation, department, active, phone FROM ' . T('users') . ' ORDER BY name'),
     'today' => today(),
     'records' => $RECORDS,
@@ -509,6 +521,7 @@ case 'project_save':
   if (isset($data['rejected_by']) && !in_array($data['rejected_by'], ['us', 'client'], true)) $data['rejected_by'] = null;
   if ($ADMIN && !empty($in['fields']['owner_id'])) $data['owner_id'] = (int) $in['fields']['owner_id'];
   upd('projects', $p['id'], $data);
+  if (array_intersect(['expo', 'location', 'start_date', 'end_date'], array_keys($data))) { $np = $data + $p; try { expo_remember($np['expo'], $np['location'], $np['start_date'], $np['end_date']); } catch (Throwable $e) {} }
   out(['ok' => true]);
 
 case 'child_add':
@@ -1061,6 +1074,22 @@ case 'vendor_add':
     upd('vendors', (int) $ex, array_filter($vd) + ['active' => 1]); out(['id' => (int) $ex]);
   }
   out(['id' => ins('vendors', ['name' => $nm] + $vd)]);
+
+case 'expo_save':   // admin: Holidays & lists → Expo list
+  need_admin();
+  $data = ['name' => s($in['name'] ?? null, 200), 'edate' => d($in['edate'] ?? null), 'end_date' => d($in['end_date'] ?? null), 'city' => s($in['city'] ?? null, 80), 'venue' => s($in['venue'] ?? null, 200)];
+  if (!$data['name']) fail('Enter the expo name.');
+  if ($data['edate'] && $data['end_date'] && $data['end_date'] < $data['edate']) fail('End date is before the start date.');
+  $id = (int) ($in['id'] ?? 0);
+  $same = val('SELECT id FROM ' . T('expos') . ' WHERE LOWER(name) = LOWER(?) AND id <> ?' . ($data['edate'] ? ' AND (edate = ? OR edate IS NULL)' : ''), array_merge([$data['name'], $id], $data['edate'] ? [$data['edate']] : []));
+  if ($same) fail('This expo is already in the list.');
+  if ($id) { if (!val('SELECT id FROM ' . T('expos') . ' WHERE id = ?', [$id])) fail('Expo not found.', 404); upd('expos', $id, $data); out(['id' => $id]); }
+  out(['id' => ins('expos', $data + ['created_by' => $MID, 'created_at' => now()])]);
+
+case 'expo_del':
+  need_admin(); $id = (int) ($in['id'] ?? 0);
+  if ($n = (int) val('SELECT COUNT(*) FROM ' . T('leads') . ' WHERE expo_id = ?', [$id])) fail("Can't remove — this expo has $n expo data entries. Edit it instead.");
+  q('DELETE FROM ' . T('expos') . ' WHERE id = ?', [$id]); out(['ok' => true]);
 
 case 'vendor_del':
   need_admin(); q('UPDATE ' . T('vendors') . ' SET active = 0 WHERE id = ?', [(int) ($in['id'] ?? 0)]); out(['ok' => true]);

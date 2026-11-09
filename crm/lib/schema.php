@@ -160,6 +160,17 @@ function migrate() {
       'CREATE UNIQUE INDEX zc_share_t ON ' . T('share_links') . ' (token)'] as $q) { try { db()->exec($q); } catch (PDOException $e) { if (stripos($q, 'CREATE TABLE') === 0) throw $e; } }
     set_setting('schema_v', 21);
   }
+  if ($v < 22) {   // one shared expo list: pick an expo instead of typing it every time
+    foreach (['end_date DATE', 'venue VARCHAR(200)'] as $col) { try { db()->exec('ALTER TABLE ' . T('expos') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ } }
+    // put every expo already typed on an order into the list
+    $seen = [];
+    foreach (all('SELECT name FROM ' . T('expos')) as $r) $seen[strtolower(trim($r['name']))] = 1;
+    foreach (all('SELECT expo, location, start_date, end_date, owner_id FROM ' . T('projects') . ' WHERE expo IS NOT NULL ORDER BY id DESC') as $p) {
+      $k = strtolower(trim($p['expo'])); if ($k === '' || isset($seen[$k])) continue; $seen[$k] = 1;
+      ins('expos', ['name' => trim($p['expo']), 'edate' => $p['start_date'], 'end_date' => $p['end_date'], 'city' => $p['location'] ? mb_substr($p['location'], 0, 80) : null, 'created_by' => (int) $p['owner_id'], 'created_at' => now()]);
+    }
+    set_setting('schema_v', 22);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';

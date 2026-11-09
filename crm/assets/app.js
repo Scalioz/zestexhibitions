@@ -126,6 +126,33 @@ const RECORDS_ONLY = { refs: 1, clients: 1, client: 1, project: 1, newclient: 1,
 const ACC_ROUTES = { acc: 1, entry: 1, jv: 1, invoices: 1, invnew: 1, inv: 1, invappr: 1, claims: 1, topost: 1, books: 1, coa: 1, accset: 1 };
 const MODULE_ONLY = { contacts: ['records', 'ops', 'leads', 'calls'], myinv: ['records'], myexp: ['records', 'ops'],  leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
 const handsOver = () => !isAdmin() && !B.records && (B.modules || [B.module]).some(x => ['leads', 'calls'].includes(x));   // research / telecalling add clients for sales
+// ---- shared expo list: expo name boxes suggest saved expos; picking one fills the dates & place ----
+const EXPO_INPUTS = '[data-nce="expo"],[data-pf="expo"],#np-form [name=expo],#qgenf [name=expo],[data-k="expo"],#lx-new [name=name]';
+function expoDL() {
+  let dl = document.getElementById('expoList'); if (!dl) { dl = document.createElement('datalist'); dl.id = 'expoList'; document.body.appendChild(dl); }
+  const sig = (B.expos || []).length + ':' + ((B.expos || [])[0]?.id || 0); if (dl.dataset.sig === sig) return; dl.dataset.sig = sig;
+  dl.innerHTML = (B.expos || []).map(e => `<option value="${esc(e.name)}">${esc([e.edate ? fd(e.edate) + (e.end_date && e.end_date !== e.edate ? ' – ' + fd(e.end_date) : '') : '', e.venue || e.city || ''].filter(Boolean).join(' · '))}</option>`).join('');
+}
+function expoTag() { if (!B.expos) return; expoDL(); document.querySelectorAll(EXPO_INPUTS).forEach(i => { if (!i.getAttribute('list')) { i.setAttribute('list', 'expoList'); i.setAttribute('autocomplete', 'off'); } }); }
+const expoFind = v => { const k = String(v || '').trim().toLowerCase(); return k ? (B.expos || []).find(e => e.name.trim().toLowerCase() === k) : null; };
+const expoPlace = e => e.venue ? (e.city && !e.venue.toLowerCase().includes(e.city.toLowerCase()) ? e.venue + ', ' + e.city : e.venue) : (e.city || '');
+function expoDatesTxt(e) {
+  if (!e.edate) return ''; const L = x => new Date(x + 'T00:00:00'), a = L(e.edate), b = L(e.end_date || e.edate), M = d => d.toLocaleString('en-GB', { month: 'long' });
+  if (+a === +b) return `${a.getDate()} ${M(a)} ${a.getFullYear()}`;
+  if (a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth()) return `${a.getDate()} – ${b.getDate()} ${M(b)} ${b.getFullYear()}`;
+  return `${a.getDate()} ${M(a)} – ${b.getDate()} ${M(b)} ${b.getFullYear()}`;
+}
+function expoPicked(t) {   // a saved expo was picked in a form box: fill the empty neighbours
+  const e = expoFind(t.value); if (!e) return;
+  const fill = (el, v, after) => { if (el && v && !el.value) { el.value = v; if (after) after(v); } };
+  if (t.dataset.nce !== undefined && newClient) { const f = k => document.querySelector(`[data-nce="${k}"]`);
+    fill(f('location'), expoPlace(e), v => newClient.expo.location = v); fill(f('start_date'), e.edate, v => newClient.expo.start_date = v); return; }
+  const form = t.form; if (!form) return; const g = k => form.querySelector(`[name="${k}"]`), fid = form.getAttribute('id');
+  if (fid === 'np-form') { fill(g('location'), expoPlace(e)); fill(g('start_date'), e.edate); }
+  if (fid === 'qgenf') { fill(g('venue'), expoPlace(e)); fill(g('expo_dates'), expoDatesTxt(e)); }
+  if (fid === 'lx-new') { fill(g('edate'), e.edate); fill(g('city'), e.city); }
+}
+try { new MutationObserver(() => { clearTimeout(expoTag.t); expoTag.t = setTimeout(expoTag, 30); }).observe(document.documentElement, { childList: true, subtree: true }); } catch (e) {}
 async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); attStrip(); window.scrollTo(0, y); }
 
 // phone app: bottom tab bar with the 4 things each person uses most, plus Menu
@@ -1792,6 +1819,12 @@ routes.settings = async () => {
    <div class="panel"><h2>Declared holidays</h2>${d.holidays.length ? `<div class="tw"><table>${d.holidays.map(h => `<tr><td class="num">${fd(h.hdate)}</td><td>${esc(h.reason)}</td><td class="r"><button class="btn link" data-delhol="${h.id}">✕</button></td></tr>`).join('')}</table></div>` : '<div class="sub">None yet.</div>'}
     <form class="grid g3" id="hol-add" style="margin-top:10px"><label class="f">Date<input type="date" name="hdate" required></label><label class="f">Reason<input name="reason" required placeholder="e.g. Diwali"></label><div style="align-self:end"><button class="btn ghost sm">+ Add holiday</button></div></form></div>
   </div>
+  <div class="panel" id="expolist"><div class="ph"><h2>Expo list</h2><span class="sub">${(B.expos || []).length} expos</span></div>
+   <p class="sub" style="margin-top:0">Add an expo once. Everyone can then pick it from the list when they type the expo name — dates and venue fill in by themselves. Expos typed on new orders are added here automatically.</p>
+   <form class="grid g3 inset" id="ex-form"><input type="hidden" name="id"><label class="f">Expo name *<input name="name" required></label><label class="f">Start date<input type="date" name="edate"></label><label class="f">End date<input type="date" name="end_date"></label><label class="f">City<input name="city"></label><label class="f">Venue<input name="venue" placeholder="e.g. Bharat Mandapam"></label>
+    <div class="row" style="align-self:end"><button class="btn ghost sm" id="ex-btn">+ Add expo</button><button type="button" class="btn link" id="ex-cancel" hidden>Cancel</button></div></form>
+   <div class="row" style="margin-top:10px"><input id="ex-q" placeholder="Search expos" style="max-width:260px"></div>
+   <div class="tw" style="margin-top:8px;max-height:420px;overflow:auto"><table id="ex-tab"><tr><th>Expo</th><th>Dates</th><th>City</th><th>Venue</th><th></th></tr>${(B.expos || []).map(e => `<tr data-exrow="${esc((e.name + ' ' + (e.city || '') + ' ' + (e.venue || '')).toLowerCase())}"><td><b>${esc(e.name)}</b></td><td class="num">${e.edate ? fd(e.edate) + (e.end_date && e.end_date !== e.edate ? ' – ' + fd(e.end_date) : '') : '—'}</td><td>${esc(e.city || '')}</td><td>${esc(e.venue || '')}</td><td class="r" style="white-space:nowrap"><button class="btn link" data-exedit="${e.id}">Edit</button> <button class="btn link" data-exdel="${e.id}" aria-label="Remove ${esc(e.name)}">✕</button></td></tr>`).join('') || '<tr><td colspan="5" class="sub">No expos yet.</td></tr>'}</table></div></div>
   <div class="grid">
    <div class="panel"><h2>Rejection reasons</h2>${B.reasons.map(r => `<div class="row" style="justify-content:space-between;padding:3px 0"><span>${esc(r.label)}</span><button class="btn link" data-delreason="${r.id}">✕</button></div>`).join('')}
     <form class="row" id="rs-add" style="margin-top:8px"><input name="label" placeholder="New reason" required style="flex:1"><button class="btn ghost sm">Add</button></form></div>
@@ -1817,6 +1850,15 @@ routes.settings = async () => {
    <form class="row" id="furn-add" style="margin-top:10px"><input name="item" placeholder="e.g. Podium" required style="max-width:260px"><button class="btn ghost sm">+ Add item</button></form></div>`;
   $('#furn-add').onsubmit = async e => { e.preventDefault(); const v = new FormData(e.target).get('item').trim(); if (!v) return; await act(() => api('settings_save', { furniture_items: [...B.furniture_items, v] }), 'Added'); await reboot(); refresh(); };
   const sub = (id, a, msg) => { $(id).onsubmit = async e => { e.preventDefault(); await act(() => api(a, Object.fromEntries(new FormData(e.target))), msg); await reboot(); refresh(); }; };
+  const exf = $('#ex-form'), X = k => exf.querySelector(`[name="${k}"]`), exReset = () => { exf.reset(); X('id').value = ''; $('#ex-btn').textContent = '+ Add expo'; $('#ex-cancel').hidden = true; };
+  exf.onsubmit = async e => { e.preventDefault(); const edit = !!X('id').value; const ok = await act(() => api('expo_save', Object.fromEntries(new FormData(exf))), edit ? 'Expo updated' : 'Expo added').catch(() => null); if (ok) { await reboot(); refresh(); } };
+  $('#ex-cancel').onclick = exReset;
+  $('#ex-q').oninput = e => { const q = e.target.value.trim().toLowerCase(); document.querySelectorAll('[data-exrow]').forEach(r => r.hidden = q && !r.dataset.exrow.includes(q)); };
+  $('#ex-tab').onclick = async e => {
+    const ed = e.target.closest('[data-exedit]'), dl = e.target.closest('[data-exdel]');
+    if (ed) { const x = B.expos.find(v => +v.id === +ed.dataset.exedit); if (!x) return; ['id', 'name', 'edate', 'end_date', 'city', 'venue'].forEach(k => X(k).value = x[k] || ''); $('#ex-btn').textContent = 'Save changes'; $('#ex-cancel').hidden = false; exf.scrollIntoView({ behavior: 'smooth', block: 'center' }); X('name').focus(); }
+    if (dl) { const x = B.expos.find(v => +v.id === +dl.dataset.exdel); if (!x || !confirm(`Remove "${x.name}" from the expo list? Orders already saved keep their expo name.`)) return; const ok = await act(() => api('expo_del', { id: x.id }), 'Removed').catch(() => null); if (ok) { await reboot(); refresh(); } }
+  };
   sub('#hol-add', 'holiday_add', 'Holiday added'); sub('#rs-add', 'reason_add', 'Reason added'); sub('#vd-add', 'vendor_add', 'Vendor added');
   $('#trackf-save').onclick = async () => { await act(() => api('settings_save', { track_from: $('#trackf').value }), 'Saved'); };
   $('#aiset').onsubmit = async e => { e.preventDefault(); await act(() => api('cards_ai_save', Object.fromEntries(new FormData(e.target))), 'Saved'); refresh(); };
@@ -1971,6 +2013,7 @@ document.addEventListener('input', e => {
   if (ds.nc && newClient) { newClient[ds.nc] = t.value; if (['company', 'email', 'phone'].includes(ds.nc)) dupCheck(); }
   if (ds.ncc !== undefined) newClient.contacts[+ds.ncc][ds.k] = t.value;
   if (ds.nce && newClient) newClient.expo[ds.nce] = t.value;
+  if (t.matches && t.matches(EXPO_INPUTS) && !t.matches('[data-pf]')) expoPicked(t);
   if (ds.ri !== undefined && ds.ri !== 'pv' && draft) draft.items[+ds.ri][ds.k] = t.value;
   if (ds.op && C.ops && ds.op !== 'vinyl_total') setPath(C.ops, ds.op, t.value);
   if (ds.sal !== undefined) { const f = t.form, v = k => +f.querySelector(`[name=${k}]`).value || 0; $('#sal-net').value = inr2(v('gross') - v('deductions') - v('tds')); }
@@ -1989,7 +2032,10 @@ document.addEventListener('change', async e => {
   try {
     if (ds.pf && C.project) {
       if (t.type === 'number' && t.value !== '' && isNaN(+t.value)) return;
-      await act(() => api('project_save', { id: C.project.id, fields: { [ds.pf]: t.value } }), 'Saved');
+      const fields = { [ds.pf]: t.value }, ex = ds.pf === 'expo' && expoFind(t.value), P = C.project;
+      if (ex) { if (!P.location && expoPlace(ex)) fields.location = expoPlace(ex); if (!P.start_date && ex.edate) fields.start_date = ex.edate; if (!P.end_date && ex.end_date) fields.end_date = ex.end_date; }
+      await act(() => api('project_save', { id: C.project.id, fields }), Object.keys(fields).length > 1 ? 'Saved — dates & place filled from the expo list' : 'Saved');
+      if (ds.pf === 'expo' || ds.pf === 'location' || ds.pf.endsWith('_date')) reboot().catch(() => {});
       return refresh();
     }
     if (ds.vqsel) { await act(() => api('vq_select', { id: ds.vqsel }), 'Vendor chosen'); return refresh(); }
@@ -2128,7 +2174,7 @@ document.addEventListener('submit', async e => {
     } catch { btn.disabled = false; }
     return;
   }
-  if (f.id === 'np-form') { e.preventDefault(); const r = await act(() => api('project_create', { client_id: C.client.id, ...Object.fromEntries(new FormData(f)) }), 'Order created').catch(() => null); if (r) location.hash = `#project-${r.id}-expo`; return; }
+  if (f.id === 'np-form') { e.preventDefault(); const r = await act(() => api('project_create', { client_id: C.client.id, ...Object.fromEntries(new FormData(f)) }), 'Order created').catch(() => null); if (r) { reboot().catch(() => {}); } if (r) location.hash = `#project-${r.id}-expo`; return; }
   if (f.id === 'ce-form') { e.preventDefault(); const o = Object.fromEntries(new FormData(f)); o.id = C.client.id; o.move_orders = !!o.move_orders; await act(() => api('client_save', o), 'Saved').catch(() => null); C.editClient = null; return refresh(); }
   if (f.id === 'ct-form') { e.preventDefault(); await act(() => api('contact_add', { client_id: C.client.id, ...Object.fromEntries(new FormData(f)) }), 'Added').catch(() => null); return refresh(); }
 });
