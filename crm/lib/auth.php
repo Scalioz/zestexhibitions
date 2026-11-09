@@ -20,7 +20,7 @@ function current_user() {
   $u = null;
   if (!empty($_SESSION['uid'])) {
     $u = one('SELECT * FROM ' . T('users') . ' WHERE id = ? AND active = 1', [$_SESSION['uid']]);
-    if ($u) unset($u['pass_hash']);
+    if ($u) unset($u['pass_hash'], $u['mail_pass']);
     if (!$u) { $_SESSION = []; }
   }
   return $u;

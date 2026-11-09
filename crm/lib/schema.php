@@ -182,6 +182,10 @@ function migrate() {
       ins('accounts', ['code' => '5210', 'name' => 'Bonus & incentives', 'type' => 'expense', 'sub' => 'bonus', 'opening' => 0, 'active' => 1, 'created_at' => now()]);
     set_setting('schema_v', 23);
   }
+  if ($v < 24) {   // each person's own mailbox password (encrypted) for sending the company profile from their email
+    try { db()->exec('ALTER TABLE ' . T('users') . ' ADD COLUMN mail_pass TEXT'); } catch (PDOException $e) { /* already there */ }
+    set_setting('schema_v', 24);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';

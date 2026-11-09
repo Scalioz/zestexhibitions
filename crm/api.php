@@ -105,8 +105,9 @@ function profile_msgs() {
 }
 function profile_info() {
   $f = one('SELECT id, orig_name, size, created_at FROM ' . T('files') . " WHERE entity = 'profile' ORDER BY id DESC");
+  global $MID;
   require_once __DIR__ . '/lib/mailer.php'; require_once __DIR__ . '/lib/att.php'; $w = att_cfg()['wa'];
-  return ['file' => $f ?: null, 'msgs' => profile_msgs(), 'mail_ready' => mail_ready(), 'wa_gateway' => (bool) ($w['token'] ?? '')];
+  return ['file' => $f ?: null, 'msgs' => profile_msgs(), 'mail_server' => mail_server_ready(), 'mail_ready' => mail_user_ready($MID), 'wa_gateway' => (bool) ($w['token'] ?? '')];
 }
 function profile_pdf() {
   $f = one('SELECT * FROM ' . T('files') . " WHERE entity = 'profile' ORDER BY id DESC");
@@ -1010,7 +1011,7 @@ case 'settings':
   need_admin();
   require_once __DIR__ . '/lib/quote.php';
   out(['holidays' => all('SELECT * FROM ' . T('holidays') . ' ORDER BY hdate DESC'), 'track_from' => setting('track_from'), 'quote_defaults' => quote_defaults(), 'cards_ai' => (function () { require_once __DIR__ . '/lib/cards.php'; $a = cards_ai(); return ['has_key' => $a['key'] !== '', 'hint' => $a['key'] ? substr($a['key'], 0, 7) . '••••' . substr($a['key'], -4) : '', 'model' => $a['model']]; })(),
-    'smtp' => (function () { require_once __DIR__ . '/lib/mailer.php'; $c = mail_cfg(); $c['has_pass'] = $c['pass'] !== ''; unset($c['pass']); return $c; })()]);
+    'smtp' => (function () { require_once __DIR__ . '/lib/mailer.php'; return mail_cfg() + ['people' => array_map(fn($u) => ['name' => $u['name'], 'email' => $u['email'], 'ready' => (bool) $u['mail_pass']], array_values(array_filter(all('SELECT id, name, email, role, department, extra_depts, mail_pass FROM ' . T('users') . ' WHERE active = 1 ORDER BY name'), fn($u) => $u['role'] === 'admin' || in_array('records', user_mods($u), true))))]; })()]);
 
 case 'storage':   // admin: how much space files use, and compress older files
   need_admin(); require_once __DIR__ . '/lib/shrink.php';
@@ -1046,12 +1047,9 @@ case 'settings_save':
     if (isset($q['scope'])) $cur['scope'] = s($q['scope'], 120) ?? QUOTE_DEFAULTS['scope'];
     set_setting('quote_defaults', $cur);
   }
-  if (isset($in['smtp'])) { require_once __DIR__ . '/lib/mailer.php'; $m = (array) $in['smtp']; $cur = mail_cfg();
-    $sec = in_array($m['secure'] ?? '', ['ssl', 'tls', 'none'], true) ? $m['secure'] : 'ssl';
-    $cur = ['host' => s($m['host'] ?? null, 120) ?? '', 'port' => max(1, min(65535, (int) ($m['port'] ?? 465))), 'secure' => $sec, 'user' => strtolower(s($m['user'] ?? null, 160) ?? ''),
-      'pass' => !empty($m['remove']) ? '' : (($m['pass'] ?? '') !== '' ? (string) $m['pass'] : $cur['pass']), 'from_name' => s($m['from_name'] ?? null, 80) ?? 'Zest Exhibitions'];
-    if ($cur['user'] && !filter_var($cur['user'], FILTER_VALIDATE_EMAIL)) fail('The mailbox login must be a full email address.');
-    set_setting('smtp', $cur); }
+  if (isset($in['smtp'])) { $m = (array) $in['smtp'];
+    set_setting('smtp', ['host' => s($m['host'] ?? null, 120) ?? '', 'port' => max(1, min(65535, (int) ($m['port'] ?? 465))), 'secure' => in_array($m['secure'] ?? '', ['ssl', 'tls', 'none'], true) ? $m['secure'] : 'ssl',
+      'imap_host' => s($m['imap_host'] ?? null, 120) ?? '', 'imap_port' => max(1, min(65535, (int) ($m['imap_port'] ?? 993)))]); }
   if (isset($in['profile_msgs'])) { $m = (array) $in['profile_msgs']; $cur = (array) setting('profile_msgs', []);
     foreach (['wa' => 3000, 'subj' => 200, 'body' => 5000] as $k => $mx) if (array_key_exists($k, $m)) $cur[$k] = mb_substr(str_replace("\r", '', trim((string) $m[$k])), 0, $mx);
     set_setting('profile_msgs', $cur); }
@@ -1119,20 +1117,32 @@ case 'expo_save':   // admin: Holidays & lists → Expo list
   if ($id) { if (!val('SELECT id FROM ' . T('expos') . ' WHERE id = ?', [$id])) fail('Expo not found.', 404); upd('expos', $id, $data); out(['id' => $id]); }
   out(['id' => ins('expos', $data + ['created_by' => $MID, 'created_at' => now()])]);
 
-case 'profile_email':   // sends the company profile PDF as an attachment, from the company mailbox
+case 'profile_email':   // sends the company profile PDF as an attachment, from the person's own mailbox (their login email)
+  if (!$RECORDS) fail('Only sales and admin send the company profile.', 403);
   require_once __DIR__ . '/lib/mailer.php';
   $to = array_filter(array_map('trim', preg_split('/[,;\s]+/', (string) ($in['to'] ?? ''))));
   foreach ($to as $e) if (!filter_var($e, FILTER_VALIDATE_EMAIL)) fail("Check the email address: $e");
   if (!$to) fail('Enter the client\'s email.');
   $subj = s($in['subject'] ?? null, 200) ?? fail('Enter the subject.'); $body = s($in['body'] ?? null, 8000) ?? fail('Write the message.');
   [$pn, $pb] = profile_pdf();
-  $meEmail = filter_var($me['email'], FILTER_VALIDATE_EMAIL) ? $me['email'] : null;
-  try { $via = mail_send(['to' => $to, 'cc' => !empty($in['cc_me']) && $meEmail ? [$meEmail] : [], 'subject' => $subj, 'text' => $body, 'reply_to' => $meEmail, 'reply_name' => $me['name'],
-    'from_name' => $me['name'] . ' | Zest Exhibitions', 'files' => [[$pn, $pb, 'application/pdf']]]); }
+  $newPw = (string) ($in['pass'] ?? '');   // first time: password typed right in the send box, saved once the email goes through
+  try { $r = mail_send_as($me, ['to' => $to, 'cc' => !empty($in['cc_me']) ? [$me['email']] : [], 'subject' => $subj, 'text' => $body, 'files' => [[$pn, $pb, 'application/pdf']], 'save_sent' => true], $newPw !== '' ? $newPw : null); }
   catch (UserError $e) { fail($e->getMessage()); }
-  out(['ok' => true, 'via' => $via]);
+  if ($newPw !== '') upd('users', $MID, ['mail_pass' => mail_lock($newPw)]);
+  out(['ok' => true, 'from' => $me['email']] + $r);
+
+case 'mail_me_save':   // Account: my mailbox password (stored encrypted)
+  if (!$RECORDS) fail('Only sales and admin send emails from the CRM.', 403);
+  require_once __DIR__ . '/lib/mailer.php';
+  if (!empty($in['remove'])) { upd('users', $MID, ['mail_pass' => null]); out(['ok' => true]); }
+  $pw = (string) ($in['pass'] ?? ''); if ($pw === '') fail('Enter your email password.');
+  if (!empty($in['check'])) { try { mail_send_as($me, ['to' => [$me['email']], 'subject' => 'Zest CRM — your email is connected', 'text' => "This test was sent from the Zest CRM through your mailbox {$me['email']}.\nCompany profiles you send from the CRM will go out the same way and appear in your Sent folder.", 'save_sent' => false], $pw); }
+    catch (UserError $e) { fail($e->getMessage()); } }
+  upd('users', $MID, ['mail_pass' => mail_lock($pw)]);
+  out(['ok' => true]);
 
 case 'profile_wa':   // company WhatsApp gateway (if set up): sends the PDF with the message straight to the client
+  if (!$RECORDS) fail('Only sales and admin send the company profile.', 403);
   require_once __DIR__ . '/lib/att.php'; $w = att_cfg()['wa'];
   if (empty($w['token']) || !function_exists('curl_init')) fail('The company WhatsApp sender is not set up.');
   $d = preg_replace('/\D/', '', (string) ($in['phone'] ?? '')); if (strlen($d) === 10) $d = '91' . $d; $d = ltrim($d, '0');
@@ -1145,13 +1155,6 @@ case 'profile_wa':   // company WhatsApp gateway (if set up): sends the PDF with
   $r = curl_exec($ch); $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
   if ($code < 200 || $code >= 300) fail('WhatsApp sender error (' . $code . '): ' . mb_substr(trim(strip_tags((string) $r)), 0, 160));
   out(['ok' => true]);
-
-case 'smtp_test':
-  need_admin(); require_once __DIR__ . '/lib/mailer.php';
-  if (!mail_ready()) fail('Fill and save the mailbox details first.');
-  try { mail_send(['to' => [$me['email']], 'subject' => 'Zest CRM — email test', 'text' => "This test email was sent by the Zest CRM through " . mail_cfg()['user'] . ".\nEmails with the company profile will go out the same way.", 'files' => []]); }
-  catch (UserError $e) { fail($e->getMessage()); }
-  out(['ok' => true, 'to' => $me['email']]);
 
 case 'expo_merge':   // admin: two names for the same expo — keep one, move everything from the other to it
   need_admin();
