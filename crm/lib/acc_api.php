@@ -5,6 +5,11 @@ require_once __DIR__ . '/acc.php';
 
 function need_acc() { global $ACC; if (!$ACC) fail('Only accounts can do this.', 403); }
 function need_claimer() { global $ADMIN, $MODS; if (!$ADMIN && !array_intersect(['records', 'ops'], $MODS)) fail('Expense claims are for sales and production.', 403); }
+// "Paid from": bank / cash / petty, or "partner:ID" = the business partner paid it (we owe it to him) → [account id, partner id or null]
+function pay_src($v) {
+  if (preg_match('/^partner:(\d+)$/', (string) $v, $m)) { try { return [partner_acc((int) $m[1]), (int) $m[1]]; } catch (UserError $e) { fail($e->getMessage()); } }
+  return [money_id($v), null];
+}
 function money_id($id) { $a = acc_get($id); if (!$a || !in_array($a['sub'], ['bank', 'cash', 'petty'], true)) fail('Pick bank, cash or petty cash.'); return (int) $a['id']; }
 function acc_of_type($id, $type) { $a = acc_get($id); if (!$a || $a['type'] !== $type) fail("Pick an $type account."); return (int) $a['id']; }
 function mode_of($moneyId) { $s = acc_get($moneyId)['sub']; return $s === 'bank' ? 'Bank' : 'Cash'; }
@@ -177,7 +182,7 @@ case 'acc_meta':
     'vendors' => all('SELECT id, name FROM ' . T('vendors') . ' WHERE active = 1 ORDER BY name'),
     'staff' => all('SELECT id, name, department FROM ' . T('users') . " WHERE active = 1 ORDER BY name"),
     'projects' => all('SELECT p.id, p.expo, p.status, c.company, p.client_id FROM ' . T('projects') . ' p JOIN ' . T('clients') . " c ON c.id = p.client_id WHERE p.status <> 'rejected' ORDER BY p.id DESC LIMIT 400"),
-    'company' => setting('company', []), 'claim_cats' => CLAIM_CATS,
+    'company' => setting('company', []), 'claim_cats' => CLAIM_CATS, 'partners' => all('SELECT id, name FROM ' . T('partners') . ' WHERE active = 1 ORDER BY name'),
   ]);
 
 case 'acc_home':
@@ -236,19 +241,19 @@ case 'acc_entry':
     case 'expense': {   // company overhead or order expense, paid or owed to a vendor
       $exp = acc_of_type($in['account_id'] ?? 0, 'expense'); if ($amt <= 0) fail('Enter the amount.');
       $gst = n($in['gst'] ?? 0) ?? 0; $credit = !empty($in['gst_credit']); $mode = ($in['gst_mode'] ?? '') === 'igst' ? 'igst' : 'cgst_sgst';
-      $credAcc = !empty($in['vendor_id']) ? party_account('vendor', (int) $in['vendor_id'], val('SELECT name FROM ' . T('vendors') . ' WHERE id = ?', [(int) $in['vendor_id']]) ?? 'Vendor') : money_id($in['paid_from'] ?? 0);
+      $byP = null; if (!empty($in['vendor_id'])) $credAcc = party_account('vendor', (int) $in['vendor_id'], val('SELECT name FROM ' . T('vendors') . ' WHERE id = ?', [(int) $in['vendor_id']]) ?? 'Vendor'); else [$credAcc, $byP] = pay_src($in['paid_from'] ?? 0);
       $lines = [[$exp, $amt + ($credit ? 0 : $gst), 0, $narr]]; if ($credit) $lines = array_merge($lines, gst_lines($gst, $mode, 'in'));
       $lines[] = [$credAcc, 0, $amt + $gst, $narr];
       $jid = post_journal($date, 'Expense', $narr ?: acc_get($exp)['name'], $lines, null, null, $pid, $MID);
-      if ($proj) { $eid = ins('expenses', ['project_id' => $pid, 'edate' => $date, 'category' => pexp_cat(acc_get($exp)['sub']), 'description' => mb_substr($narr ?: acc_get($exp)['name'], 0, 250), 'amount' => $amt + ($credit ? 0 : $gst)]); upd('journal', $jid, ['ref_type' => 'pexp', 'ref_id' => $eid]); }
+      if ($proj) { $eid = ins('expenses', ['project_id' => $pid, 'edate' => $date, 'category' => pexp_cat(acc_get($exp)['sub']), 'description' => mb_substr($narr ?: acc_get($exp)['name'], 0, 250), 'amount' => $amt + ($credit ? 0 : $gst), 'paid_by_partner' => $byP]); upd('journal', $jid, ['ref_type' => 'pexp', 'ref_id' => $eid]); }
       break; }
     case 'vendor_pay': {
       $vid = (int) ($in['vendor_id'] ?? 0); $vn = val('SELECT name FROM ' . T('vendors') . ' WHERE id = ?', [$vid]) ?? fail('Pick the vendor.');
       $tds = n($in['tds'] ?? 0) ?? 0; if ($amt <= 0) fail('Enter the amount paid.');
-      $money = money_id($in['paid_from'] ?? 0); $exp = !empty($in['account_id']) ? acc_of_type($in['account_id'], 'expense') : acc_sub('fab');
-      $lines = [[$exp, $amt + $tds, 0, "Paid to $vn"], [$money, 0, $amt, "Paid to $vn"]]; if ($tds > 0) $lines[] = [acc_sub('tds_out'), 0, $tds, "TDS on $vn"];
+      [$money, $byP] = pay_src($in['paid_from'] ?? 0); $exp = !empty($in['account_id']) ? acc_of_type($in['account_id'], 'expense') : acc_sub('fab');
+      $lines = [[$exp, $amt + $tds, 0, "Paid to $vn"], [$money, 0, $amt, "Paid to $vn" . ($byP ? ' (paid by partner)' : '')]]; if ($tds > 0) $lines[] = [acc_sub('tds_out'), 0, $tds, "TDS on $vn"];
       $jid = post_journal($date, 'Payment', $narr ?: "Payment to $vn" . ($proj ? " for {$proj['expo']} ({$proj['company']})" : ''), $lines, null, null, $pid, $MID);
-      if ($proj) { $vp = ins('vendor_payments', ['project_id' => $pid, 'vendor_id' => $vid, 'pdate' => $date, 'amount' => $amt + $tds, 'mode' => mode_of($money), 'reference' => s($in['reference'] ?? null, 120)]); upd('journal', $jid, ['ref_type' => 'vpay', 'ref_id' => $vp]); }
+      if ($proj) { $vp = ins('vendor_payments', ['project_id' => $pid, 'vendor_id' => $vid, 'pdate' => $date, 'amount' => $amt + $tds, 'mode' => $byP ? 'Partner' : mode_of($money), 'reference' => s($in['reference'] ?? null, 120), 'paid_by_partner' => $byP]); upd('journal', $jid, ['ref_type' => 'vpay', 'ref_id' => $vp]); }
       break; }
     case 'receipt': {
       $money = money_id($in['paid_from'] ?? 0); $tds = n($in['tds'] ?? 0) ?? 0; if ($amt <= 0) fail('Enter the amount received.');
@@ -398,8 +403,10 @@ case 'acc_post_crm':
   if (val('SELECT COUNT(*) FROM ' . T('journal') . ' WHERE ref_type = ? AND ref_id = ?', [$t, $id])) fail('Already posted.');
   if (val('SELECT COUNT(*) FROM ' . T('post_skip') . ' WHERE ref_type = ? AND ref_id = ?', [$t, $id])) fail('Already skipped.');
   if (!empty($in['skip'])) { ins('post_skip', ['ref_type' => $t, 'ref_id' => $id]); out(['ok' => true]); }
-  $money = money_id($in['money_id'] ?? 0);
+  [$money, $byP] = pay_src($in['money_id'] ?? 0);
+  if ($byP && $t === 'cpay') fail('A client payment cannot be marked as paid by a partner.');
   tx();
+  if ($byP) upd($tbl, $id, ['paid_by_partner' => $byP]);
   if ($t === 'cpay') $jid = post_journal($x['pdate'], 'Receipt', "Receipt from {$x['company']} for {$x['expo']}" . ($x['reference'] ? " ({$x['reference']})" : ''), [[$money, $x['amount'], 0, ''], [party_account('client', $x['client_id'], $x['company']), 0, $x['amount'], '']], 'cpay', $id, $x['project_id'], $MID);
   elseif ($t === 'vpay') { $vn = val('SELECT name FROM ' . T('vendors') . ' WHERE id = ?', [$x['vendor_id']]) ?? 'Vendor';
     $exp = !empty($in['account_id']) ? acc_of_type($in['account_id'], 'expense') : acc_sub('fab');
@@ -709,6 +716,74 @@ case 'acc_pay_rate_save': {
 
 case 'acc_pay_rate_del':
   need_acc(); q('DELETE FROM ' . T('pay_rates') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]); out(['ok' => true]);
+
+// ================= BUSINESS PARTNERS =================
+case 'acc_partners': {
+  need_acc(); $list = [];
+  foreach (all('SELECT * FROM ' . T('partners') . ' ORDER BY active DESC, name') as $pt) { $c = partner_calc($pt); $list[] = ['partner' => $c['partner'], 'totals' => $c['totals']]; }
+  out(['partners' => $list, 'money' => money_accounts()]);
+}
+case 'acc_partner': {
+  need_acc();
+  $pt = one('SELECT * FROM ' . T('partners') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]) ?? fail('Partner not found.', 404);
+  $c = partner_calc($pt, true);
+  $c['free_projects'] = all('SELECT p.id, p.expo, c.company, p.start_date FROM ' . T('projects') . ' p JOIN ' . T('clients') . " c ON c.id = p.client_id WHERE p.partner_id IS NULL AND p.status <> 'rejected' ORDER BY p.id DESC LIMIT 400");
+  out($c + ['money' => money_accounts()]);
+}
+case 'acc_partner_save': {   // admin: add / edit a partner and his default sharing %
+  need_admin();
+  $data = ['name' => s($in['name'] ?? null, 120) ?? fail('Enter the partner name.'), 'phone' => s($in['phone'] ?? null, 30), 'email' => s($in['email'] ?? null, 160), 'note' => s($in['note'] ?? null, 255),
+    'rev_pct' => n($in['rev_pct'] ?? 50) ?? 50, 'exp_pct' => n($in['exp_pct'] ?? 50) ?? 50, 'active' => isset($in['active']) ? (int) !!$in['active'] : 1];
+  foreach (['rev_pct', 'exp_pct'] as $k) if ($data[$k] < 0 || $data[$k] > 100) fail('Sharing % must be between 0 and 100.');
+  tx();
+  if (!empty($in['id'])) { $id = (int) $in['id']; one('SELECT id FROM ' . T('partners') . ' WHERE id = ?', [$id]) ?? fail('Partner not found.', 404); upd('partners', $id, $data);
+    q('UPDATE ' . T('accounts') . " SET name = ? WHERE party_type = 'partner' AND party_id = ?", ['Partner: ' . $data['name'], $id]); }
+  else $id = ins('partners', $data + ['created_at' => now()]);
+  party_account('partner', $id, $data['name']);
+  db()->commit(); out(['id' => $id]);
+}
+case 'acc_partner_tag': {   // mark an order as the partner's (or remove), with its own sharing % if different
+  need_acc();
+  $p = one('SELECT id, partner_id FROM ' . T('projects') . ' WHERE id = ?', [(int) ($in['project_id'] ?? 0)]) ?? fail('Order not found.', 404);
+  $ptid = (int) ($in['partner_id'] ?? 0);
+  $hasShare = (bool) val('SELECT COUNT(*) FROM ' . T('journal') . " WHERE ref_type = 'pshare' AND project_id = ? AND reversed_by IS NULL", [$p['id']]);
+  if (!$ptid) { if ($hasShare) fail('A partner share is already posted for this order. Reverse that voucher first.');
+    upd('projects', $p['id'], ['partner_id' => null, 'p_rev_pct' => null, 'p_exp_pct' => null]); out(['ok' => true]); }
+  $pt = one('SELECT * FROM ' . T('partners') . ' WHERE id = ?', [$ptid]) ?? fail('Partner not found.');
+  $rp = ($in['rev_pct'] ?? '') === '' ? (float) $pt['rev_pct'] : n($in['rev_pct']); $ep = ($in['exp_pct'] ?? '') === '' ? (float) $pt['exp_pct'] : n($in['exp_pct']);
+  if ($rp < 0 || $rp > 100 || $ep < 0 || $ep > 100) fail('Sharing % must be between 0 and 100.');
+  if ($p['partner_id'] && (int) $p['partner_id'] !== $ptid && $hasShare) fail('A share is already posted to another partner for this order. Reverse it first.');
+  upd('projects', $p['id'], ['partner_id' => $ptid, 'p_rev_pct' => $rp, 'p_exp_pct' => $ep]);
+  out(['ok' => true]);
+}
+case 'acc_partner_post': {   // post the partner's share of one order to the books (only the change since the last posting)
+  need_acc();
+  $pr = one('SELECT p.*, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . ' c ON c.id = p.client_id WHERE p.id = ?', [(int) ($in['project_id'] ?? 0)]) ?? fail('Order not found.', 404);
+  $pt = $pr['partner_id'] ? one('SELECT * FROM ' . T('partners') . ' WHERE id = ?', [$pr['partner_id']]) : null; if (!$pt) fail('This order has no partner.');
+  $date = d($in['date'] ?? null) ?? today();
+  tx();
+  $c = partner_calc($pt); $row = null; foreach ($c['projects'] as $r) if ($r['id'] === (int) $pr['id']) $row = $r;
+  $delta = round($row['to_post'] ?? 0, 2); if (abs($delta) < 0.01) fail('Nothing new to post — the share in the books is up to date.');
+  $acc = $c['partner']['account_id']; $nar = "{$pt['name']}'s share — {$pr['expo']} ({$pr['company']}): revenue {$row['rev_pct']}% − expenses {$row['exp_pct']}%" . ($row['posted'] ? ' (adjustment)' : '');
+  $lines = $delta > 0 ? [[acc_sub('pshare'), $delta, 0, $nar], [$acc, 0, $delta, $nar]] : [[$acc, -$delta, 0, $nar], [acc_sub('pshare'), 0, -$delta, $nar]];
+  $jid = post_journal($date, 'Journal', $nar, $lines, 'pshare', $pr['id'], $pr['id'], $MID);
+  db()->commit(); out(['id' => $jid, 'amount' => $delta]);
+}
+case 'acc_partner_pay': {   // advance or share settlement paid to a partner (or money the partner returns)
+  need_acc();
+  $pt = one('SELECT * FROM ' . T('partners') . ' WHERE id = ?', [(int) ($in['partner_id'] ?? 0)]) ?? fail('Pick the partner.');
+  $amt = n($in['amount'] ?? 0) ?? 0; if ($amt <= 0) fail('Enter the amount.');
+  $date = d($in['date'] ?? null) ?? fail('Enter the date.'); $money = money_id($in['paid_from'] ?? 0);
+  $kind = in_array($in['kind'] ?? '', ['advance', 'settlement', 'refund'], true) ? $in['kind'] : 'advance';
+  $pid = (int) ($in['project_id'] ?? 0) ?: null; if ($pid && !val('SELECT id FROM ' . T('projects') . ' WHERE id = ? AND partner_id = ?', [$pid, $pt['id']])) fail('That order is not marked for this partner.');
+  $note = s($in['note'] ?? null, 300); $label = ['advance' => 'Advance paid to', 'settlement' => 'Profit share paid to', 'refund' => 'Money returned by'][$kind];
+  $nar = "$label {$pt['name']}" . ($note ? " — $note" : '');
+  $acc = party_account('partner', $pt['id'], $pt['name']);
+  tx();
+  $lines = $kind === 'refund' ? [[$money, $amt, 0, $nar], [$acc, 0, $amt, $nar]] : [[$acc, $amt, 0, $nar], [$money, 0, $amt, $nar]];
+  $jid = post_journal($date, $kind === 'refund' ? 'Receipt' : 'Payment', $nar, $lines, 'ppay', null, $pid, $MID);
+  db()->commit(); out(['id' => $jid]);
+}
 
 case 'acc_report':
   need_acc();

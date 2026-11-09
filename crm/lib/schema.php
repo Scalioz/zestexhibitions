@@ -186,6 +186,16 @@ function migrate() {
     try { db()->exec('ALTER TABLE ' . T('users') . ' ADD COLUMN mail_pass TEXT'); } catch (PDOException $e) { /* already there */ }
     set_setting('schema_v', 24);
   }
+  if ($v < 25) {   // business partners: orders done by a partner, revenue / expense sharing %, advances and settlements
+    $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
+    $PK = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT UNSIGNED AUTO_INCREMENT PRIMARY KEY';
+    $E = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+    db()->exec('CREATE TABLE IF NOT EXISTS ' . T('partners') . " (id $PK, name VARCHAR(120) NOT NULL, phone VARCHAR(30), email VARCHAR(160), rev_pct DECIMAL(6,2) NOT NULL DEFAULT 50, exp_pct DECIMAL(6,2) NOT NULL DEFAULT 50, note VARCHAR(255), active TINYINT NOT NULL DEFAULT 1, created_at DATETIME NOT NULL)$E");
+    foreach ([['projects', 'partner_id INT'], ['projects', 'p_rev_pct DECIMAL(6,2)'], ['projects', 'p_exp_pct DECIMAL(6,2)'], ['expenses', 'paid_by_partner INT'], ['vendor_payments', 'paid_by_partner INT']] as [$t, $col]) { try { db()->exec('ALTER TABLE ' . T($t) . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ } }
+    if (val('SELECT COUNT(*) FROM ' . T('accounts')) && !val('SELECT id FROM ' . T('accounts') . " WHERE sub = 'pshare' AND party_type IS NULL"))
+      ins('accounts', ['code' => '5230', 'name' => 'Partner share of profit', 'type' => 'expense', 'sub' => 'pshare', 'opening' => 0, 'active' => 1, 'created_at' => now()]);
+    set_setting('schema_v', 25);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
@@ -248,7 +258,7 @@ function seed_accounts() {
     ['2300', 'TDS payable', 'liability', 'tds_out'], ['2400', 'Salary deductions payable (PF/ESI)', 'liability', 'sal_ded'], ['2500', 'Expense claims payable (staff)', 'liability', 'claims_pay'],
     ['3100', 'Capital account', 'equity', null],
     ['4100', 'Stall fabrication income', 'income', 'sales'], ['4910', 'Round off', 'income', 'roundoff'], ['4200', 'Other income', 'income', null],
-    ['5100', 'Fabrication cost (vendors)', 'expense', 'fab'], ['5200', 'Salaries & wages', 'expense', 'salary'], ['5210', 'Bonus & incentives', 'expense', 'bonus'], ['5300', 'Office rent', 'expense', null], ['5310', 'Electricity', 'expense', null],
+    ['5100', 'Fabrication cost (vendors)', 'expense', 'fab'], ['5200', 'Salaries & wages', 'expense', 'salary'], ['5210', 'Bonus & incentives', 'expense', 'bonus'], ['5230', 'Partner share of profit', 'expense', 'pshare'], ['5300', 'Office rent', 'expense', null], ['5310', 'Electricity', 'expense', null],
     ['5320', 'Internet & phone', 'expense', null], ['5400', 'Travel - flight / train', 'expense', 'exp_travel'], ['5410', 'Hotel & stay', 'expense', 'exp_hotel'], ['5420', 'Local conveyance', 'expense', 'exp_local'],
     ['5430', 'Food & meals', 'expense', 'exp_food'], ['5440', 'Courier & transport', 'expense', 'exp_courier'], ['5450', 'Printing & stationery', 'expense', 'exp_print'], ['5460', 'Site materials & labour', 'expense', 'exp_site'],
     ['5500', 'Office expenses', 'expense', null], ['5510', 'Marketing & advertising', 'expense', null], ['5520', 'Professional fees', 'expense', null], ['5530', 'Bank charges', 'expense', null],

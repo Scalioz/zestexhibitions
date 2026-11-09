@@ -13,7 +13,7 @@ function money_accounts() { return all('SELECT id, name, sub FROM ' . T('account
 function party_account($ptype, $pid, $name) {
   $id = val('SELECT id FROM ' . T('accounts') . ' WHERE party_type = ? AND party_id = ?', [$ptype, (int) $pid]);
   if ($id) return (int) $id;
-  [$type, $sub, $label] = ['client' => ['asset', 'debtor', 'Client'], 'vendor' => ['liability', 'creditor', 'Vendor'], 'employee' => ['liability', 'employee', 'Staff']][$ptype];
+  [$type, $sub, $label] = ['client' => ['asset', 'debtor', 'Client'], 'vendor' => ['liability', 'creditor', 'Vendor'], 'employee' => ['liability', 'employee', 'Staff'], 'partner' => ['liability', 'partner', 'Partner']][$ptype];
   return ins('accounts', ['code' => null, 'name' => "$label: $name", 'type' => $type, 'sub' => $sub, 'party_type' => $ptype, 'party_id' => (int) $pid, 'opening' => 0, 'active' => 1, 'created_at' => now()]);
 }
 
@@ -248,4 +248,42 @@ function amount_words($n) {
   foreach ([[10000000, 'Crore'], [100000, 'Lakh'], [1000, 'Thousand']] as [$v, $w]) if ($n >= $v) { $parts[] = $three(intdiv($n, $v)) . " $w"; $n %= $v; }
   if ($n) $parts[] = $three($n);
   return implode(' ', $parts);
+}
+
+
+// ================= BUSINESS PARTNERS =================
+// Partner orders: revenue (bill before GST) × revenue % minus costs (vendor + expenses + losses) × expense % = partner's share.
+// Books: share posted → Dr "Partner share of profit", Cr partner a/c · advance / payment → Dr partner a/c, Cr bank · expense paid by partner → Dr expense, Cr partner a/c.
+function partner_acc($pid) { $p = one('SELECT id, name FROM ' . T('partners') . ' WHERE id = ?', [(int) $pid]); if (!$p) throw new UserError('Partner not found.'); return party_account('partner', $p['id'], $p['name']); }
+function partner_calc($pt, $withLedger = false) {
+  require_once __DIR__ . '/calc.php';
+  $acc = party_account('partner', $pt['id'], $pt['name']);
+  $projects = all('SELECT p.*, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . " c ON c.id = p.client_id WHERE p.partner_id = ? AND p.status <> 'rejected' ORDER BY p.start_date DESC, p.id DESC", [$pt['id']]);
+  $bills = bills_for($projects);
+  $posted = []; foreach (all('SELECT j.project_id, SUM(l.cr - l.dr) AS v FROM ' . T('jlines') . ' l JOIN ' . T('journal') . " j ON j.id = l.journal_id WHERE l.account_id = ? AND j.ref_type = 'pshare' AND j.reversed_by IS NULL GROUP BY j.project_id", [$acc]) as $r) $posted[(int) $r['project_id']] = (float) $r['v'];
+  $byP = []; foreach (['expenses' => 'amount', 'vendor_payments' => 'amount'] as $t => $col) foreach (all('SELECT project_id, SUM(amount) AS v FROM ' . T($t) . ' WHERE paid_by_partner = ? GROUP BY project_id', [$pt['id']]) as $r) $byP[(int) $r['project_id']] = ($byP[(int) $r['project_id']] ?? 0) + (float) $r['v'];
+  $T = ['projects' => 0, 'revenue' => 0, 'costs' => 0, 'rev_share' => 0, 'exp_share' => 0, 'net' => 0, 'posted' => 0, 'paid_by_partner' => 0];
+  $rows = [];
+  foreach ($projects as $p) {
+    $b = $bills[$p['id']]; $rp = $p['p_rev_pct'] !== null ? (float) $p['p_rev_pct'] : (float) $pt['rev_pct']; $ep = $p['p_exp_pct'] !== null ? (float) $p['p_exp_pct'] : (float) $pt['exp_pct'];
+    $rev = round($b['base'] + $b['extras'], 2); $cost = round($b['vendor_paid'] + $b['expenses'] + $b['losses'], 2);
+    $rs = round($rev * $rp / 100, 2); $es = round($cost * $ep / 100, 2); $net = round($rs - $es, 2); $po = round($posted[$p['id']] ?? 0, 2);
+    $rows[] = ['id' => (int) $p['id'], 'expo' => $p['expo'], 'company' => $p['company'], 'status' => $p['status'], 'start_date' => $p['start_date'], 'rev_pct' => $rp, 'exp_pct' => $ep,
+      'revenue' => $rev, 'received' => $b['received'], 'costs' => $cost, 'rev_share' => $rs, 'exp_share' => $es, 'net' => $net, 'posted' => $po, 'to_post' => round($net - $po, 2), 'paid_by_partner' => round($byP[$p['id']] ?? 0, 2)];
+    $T['projects']++; foreach (['revenue' => $rev, 'costs' => $cost, 'rev_share' => $rs, 'exp_share' => $es, 'net' => $net, 'posted' => $po, 'paid_by_partner' => $byP[$p['id']] ?? 0] as $k => $v) $T[$k] += $v;
+  }
+  $paid = (float) val('SELECT COALESCE(SUM(l.dr - l.cr), 0) FROM ' . T('jlines') . ' l JOIN ' . T('journal') . " j ON j.id = l.journal_id WHERE l.account_id = ? AND j.ref_type = 'ppay' AND j.reversed_by IS NULL", [$acc]);
+  $bal = -acc_balance($acc); $open = -(float) val('SELECT opening FROM ' . T('accounts') . ' WHERE id = ?', [$acc]);
+  $T = array_map(fn($v) => is_float($v) ? round($v, 2) : $v, $T);
+  $T['paid'] = round($paid, 2); $T['books_balance'] = round($bal, 2); $T['unposted'] = round($T['net'] - $T['posted'], 2); $T['due'] = round($bal + $T['unposted'], 2);
+  $out = ['partner' => $pt + ['account_id' => $acc], 'totals' => $T, 'projects' => $rows];
+  if ($withLedger) {
+    $run = $open; $L = $open ? [['id' => null, 'jdate' => null, 'vno' => '', 'vtype' => '', 'narration' => 'Opening balance', 'ref_type' => '', 'project_id' => null, 'reversed_by' => null, 'dr' => $open < 0 ? -$open : 0, 'cr' => $open > 0 ? $open : 0, 'kind' => 'Opening', 'balance' => round($open, 2)]] : [];
+    foreach (all('SELECT j.id, j.jdate, j.vno, j.vtype, j.narration, j.ref_type, j.project_id, j.reversed_by, l.dr, l.cr FROM ' . T('jlines') . ' l JOIN ' . T('journal') . ' j ON j.id = l.journal_id WHERE l.account_id = ? ORDER BY j.jdate, j.id', [$acc]) as $r) {
+      $run += $r['cr'] - $r['dr'];
+      $L[] = $r + ['kind' => ['ppay' => 'Paid to partner', 'pshare' => 'Share of profit', 'pexp' => 'Expense paid by partner', 'vpay' => 'Vendor paid by partner'][$r['ref_type']] ?? ($r['vtype'] === 'Expense' ? 'Expense paid by partner' : $r['vtype']), 'balance' => round($run, 2)];
+    }
+    $out['ledger'] = $L;
+  }
+  return $out;
 }

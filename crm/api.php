@@ -158,6 +158,7 @@ case 'boot':
     'reasons' => all('SELECT id, label FROM ' . T('reasons') . ' WHERE active = 1 ORDER BY id'),
     'vendors' => all('SELECT id, name, phone, email, city FROM ' . T('vendors') . ' WHERE active = 1 ORDER BY name'),
     'expos' => expo_list(),
+    'partners' => ($ADMIN || $ACC) ? (function () { try { return all('SELECT id, name, rev_pct, exp_pct FROM ' . T('partners') . ' WHERE active = 1 ORDER BY name'); } catch (Throwable $e) { return []; } })() : [],
     'profile' => profile_info(),
     'users' => all('SELECT id, name, role, designation, department, active, phone FROM ' . T('users') . ' ORDER BY name'),
     'today' => today(),
