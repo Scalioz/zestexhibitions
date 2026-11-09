@@ -88,10 +88,15 @@ function waUrl(phone, text) { let d = String(phone || '').replace(/\D/g, ''); if
 const IS_PHONE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 const profileUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'profile.php';
 function profileText(t, c) {
-  const me = B.me || {}, first = String(c.person || '').trim();
-  const v = { name: first || 'Sir / Madam', company: c.company || '', expo: c.expo || '', link: profileUrl(), me: me.name || '', my_phone: me.phone || (B.users.find(u => +u.id === +me.id) || {}).phone || '' };
-  if (!v.expo) t = t.replace(/ for \{expo\}/g, '');
-  return t.replace(/\{(name|company|expo|link|me|my_phone)\}/g, (m, k) => v[k]).replace(/\n{3,}/g, '\n\n').trim();
+  const me = B.me || {}, U = B.users.find(u => +u.id === +me.id) || {};
+  const first = String(c.person || '').trim().replace(/^(mr|mrs|ms|miss|dr|shri|smt)\.?\s+/i, '').split(/\s+/)[0] || '';
+  const ex = c.expo ? (B.expos || []).find(e => e.name.trim().toLowerCase() === String(c.expo).trim().toLowerCase()) : null;
+  const place = ex ? expoPlace(ex) : (c.expo_place || '');
+  if (!first) t = t.replace(/\{name\}\s+(Sir|Madam|Ma'am|Ji)\b/g, '$1');
+  if (!place) t = t.replace(/,? at \{place\}/g, '');
+  if (!c.expo) t = t.replace(/ \| \{expo\}/g, '').replace(/ for \{expo\}/g, '');
+  const v = { name: first || 'Sir / Madam', company: c.company || '', expo: c.expo || 'upcoming exhibition', place, link: profileUrl(), me: me.name || '', my_phone: me.phone || U.phone || '', my_designation: me.designation || U.designation || 'Team' };
+  return t.replace(/\{(name|company|expo|place|link|me|my_phone|my_designation)\}/g, (m, k) => v[k]).replace(/\n{3,}/g, '\n\n').trim();
 }
 let PROF_BLOB = null;
 const profFile = async () => { if (!PROF_BLOB) { const r = await fetch('profile.php', { credentials: 'same-origin' }); if (!r.ok) throw new Error('Could not load the profile PDF.'); PROF_BLOB = await r.blob(); } return new File([PROF_BLOB], profName(), { type: 'application/pdf' }); };
@@ -150,8 +155,8 @@ document.addEventListener('click', e => {
   const go = e.target.closest('[data-pbgo]'); if (go) { e.preventDefault(); e.stopPropagation(); profGo(go); return; }
   const b = e.target.closest('[data-profsend]'); if (!b) return; e.preventDefault(); e.stopPropagation();
   const [how, src] = b.dataset.profsend.split(':');
-  const c = src === 'new' ? { company: newClient?.company, person: newClient?.person, phone: newClient?.phone, email: newClient?.email, expo: newClient?.expo?.expo }
-    : { company: C.client?.company, person: C.client?.person, phone: C.client?.phone, email: C.client?.email, expo: (C.client?.orders || [])[0]?.expo };
+  const c = src === 'new' ? { company: newClient?.company, person: newClient?.person, phone: newClient?.phone, email: newClient?.email, expo: newClient?.expo?.expo, expo_place: newClient?.expo?.location }
+    : { company: C.client?.company, person: C.client?.person, phone: C.client?.phone, email: C.client?.email, expo: (C.client?.orders || [])[0]?.expo, expo_place: (C.client?.orders || [])[0]?.location };
   profCompose(how, src, c);
 }, true);
 const crmLink = hash => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.php' + hash;
@@ -1979,7 +1984,7 @@ routes.settings = async () => {
    <div style="height:10px"></div>
    <div class="grid"><label class="f">WhatsApp message<textarea name="wa" rows="12">${esc(B.profile?.msgs.wa || '')}</textarea></label>
     <div class="grid" style="grid-template-columns:1fr;gap:10px"><label class="f">Email subject<input name="subj" value="${esc(B.profile?.msgs.subj || '')}"></label><label class="f">Email message<textarea name="body" rows="9">${esc(B.profile?.msgs.body || '')}</textarea></label></div></div>
-   <p class="sub">Filled in automatically: <b>{name}</b> contact person · <b>{company}</b> · <b>{expo}</b> · <b>{link}</b> web link to the PDF (optional) · <b>{me}</b> sender's name · <b>{my_phone}</b> sender's phone (from Team).</p>
+   <p class="sub">Filled in automatically: <b>{name}</b> contact person's first name · <b>{expo}</b> expo name · <b>{place}</b> expo venue / city (from the Expo list) · <b>{company}</b> · <b>{me}</b> sender's name · <b>{my_designation}</b> sender's designation · <b>{my_phone}</b> sender's phone (from Team) · <b>{link}</b> web link to the PDF (optional).</p>
    <div class="row"><button class="btn sm">Save messages</button><button type="button" class="btn link" id="prof-reset">Back to the standard messages</button></div></form>
   <form class="panel" id="smtpset"><h2>Email sending</h2><p class="sub" style="margin-top:0">The company mailbox the CRM sends emails from (company profile to clients). Clients see your name and their replies come to you. Ask whoever manages your company email for these details.</p>
    <div class="grid g3"><label class="f">Email provider<select id="smtp-pre"><option value="">Pick to fill the server</option><option value="smtp.hostinger.com|465|ssl">Hostinger email</option><option value="smtp.office365.com|587|tls">Microsoft 365 / Outlook</option><option value="smtp.gmail.com|465|ssl">Google Workspace / Gmail</option><option value="smtp.zoho.in|465|ssl">Zoho Mail (India)</option><option value="smtpout.secureserver.net|465|ssl">GoDaddy email</option></select></label>
