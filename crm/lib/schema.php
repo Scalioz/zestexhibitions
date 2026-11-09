@@ -171,6 +171,17 @@ function migrate() {
     }
     set_setting('schema_v', 22);
   }
+  if ($v < 23) {   // payroll: salary & increments per employee, bonus / incentive, monthly salary sheet
+    $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
+    $PK = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT UNSIGNED AUTO_INCREMENT PRIMARY KEY';
+    $E = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'; $M = 'DECIMAL(14,2)';
+    foreach (['CREATE TABLE IF NOT EXISTS ' . T('pay_rates') . " (id $PK, user_id INT NOT NULL, eff_month VARCHAR(7) NOT NULL, monthly $M NOT NULL, kind VARCHAR(20) NOT NULL, note VARCHAR(255), created_by INT, created_at DATETIME NOT NULL)$E",
+      'CREATE INDEX zc_payr_u ON ' . T('pay_rates') . ' (user_id, eff_month)'] as $q) { try { db()->exec($q); } catch (PDOException $e) { if (stripos($q, 'CREATE TABLE') === 0) throw $e; } }
+    foreach (["kind VARCHAR(12) NOT NULL DEFAULT 'salary'", "fixed $M", 'lop_days DECIMAL(6,2)', "lop_amt $M", "bonus $M", "incentive $M", "tds $M"] as $col) { try { db()->exec('ALTER TABLE ' . T('salaries') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ } }
+    if (val('SELECT COUNT(*) FROM ' . T('accounts')) && !val('SELECT id FROM ' . T('accounts') . " WHERE sub = 'bonus' AND party_type IS NULL"))
+      ins('accounts', ['code' => '5210', 'name' => 'Bonus & incentives', 'type' => 'expense', 'sub' => 'bonus', 'opening' => 0, 'active' => 1, 'created_at' => now()]);
+    set_setting('schema_v', 23);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
@@ -233,7 +244,7 @@ function seed_accounts() {
     ['2300', 'TDS payable', 'liability', 'tds_out'], ['2400', 'Salary deductions payable (PF/ESI)', 'liability', 'sal_ded'], ['2500', 'Expense claims payable (staff)', 'liability', 'claims_pay'],
     ['3100', 'Capital account', 'equity', null],
     ['4100', 'Stall fabrication income', 'income', 'sales'], ['4910', 'Round off', 'income', 'roundoff'], ['4200', 'Other income', 'income', null],
-    ['5100', 'Fabrication cost (vendors)', 'expense', 'fab'], ['5200', 'Salaries & wages', 'expense', 'salary'], ['5300', 'Office rent', 'expense', null], ['5310', 'Electricity', 'expense', null],
+    ['5100', 'Fabrication cost (vendors)', 'expense', 'fab'], ['5200', 'Salaries & wages', 'expense', 'salary'], ['5210', 'Bonus & incentives', 'expense', 'bonus'], ['5300', 'Office rent', 'expense', null], ['5310', 'Electricity', 'expense', null],
     ['5320', 'Internet & phone', 'expense', null], ['5400', 'Travel - flight / train', 'expense', 'exp_travel'], ['5410', 'Hotel & stay', 'expense', 'exp_hotel'], ['5420', 'Local conveyance', 'expense', 'exp_local'],
     ['5430', 'Food & meals', 'expense', 'exp_food'], ['5440', 'Courier & transport', 'expense', 'exp_courier'], ['5450', 'Printing & stationery', 'expense', 'exp_print'], ['5460', 'Site materials & labour', 'expense', 'exp_site'],
     ['5500', 'Office expenses', 'expense', null], ['5510', 'Marketing & advertising', 'expense', null], ['5520', 'Professional fees', 'expense', null], ['5530', 'Bank charges', 'expense', null],

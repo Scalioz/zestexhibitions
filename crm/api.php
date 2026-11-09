@@ -766,6 +766,7 @@ case 'user_save':
   $id = (int) $in['id'];
   if ($id === $MID && ($role !== 'admin' || isset($in['active']) && !$in['active'])) fail('You cannot remove your own admin access.');
   $data['role'] = $role;
+  if ($jo = d($in['joined_on'] ?? null)) $data['joined_on'] = $jo;
   if (isset($in['active'])) $data['active'] = $in['active'] ? 1 : 0;
   if (!empty($in['password'])) { if (strlen($in['password']) < 8) fail('Password must be at least 8 characters.'); $data['pass_hash'] = password_hash($in['password'], PASSWORD_DEFAULT); }
   upd('users', $id, $data);

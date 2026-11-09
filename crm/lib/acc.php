@@ -192,11 +192,15 @@ function r_expenses($from, $to) {
 }
 function r_salary($from, $to) {
   $rows = []; $T = [0, 0, 0];
-  foreach (all('SELECT s.*, u.name, u.department FROM ' . T('salaries') . ' s LEFT JOIN ' . T('users') . ' u ON u.id = s.user_id WHERE s.paid_on BETWEEN ? AND ? ORDER BY s.month, u.name', [$from, $to]) as $s) {
-    $rows[] = R([$s['month'], $s['name'], $s['department'], (float) $s['gross'], (float) $s['deductions'] ?: '', $s['deduction_note'], (float) $s['net'], $s['paid_on']]); $T[0] += $s['gross']; $T[1] += $s['deductions']; $T[2] += $s['net'];
+  $T = [0, 0, 0, 0, 0, 0];
+  foreach (all('SELECT s.*, u.name, u.department FROM ' . T('salaries') . ' s LEFT JOIN ' . T('users') . ' u ON u.id = s.user_id LEFT JOIN ' . T('journal') . ' j ON j.id = s.journal_id WHERE s.paid_on BETWEEN ? AND ? AND j.reversed_by IS NULL ORDER BY s.month, u.name', [$from, $to]) as $s) {
+    $old = $s['fixed'] === null; $sal = $old ? (float) $s['gross'] : (float) $s['fixed'] - (float) $s['lop_amt']; $bi = $old ? 0 : (float) $s['bonus'] + (float) $s['incentive'];
+    $what = ['salary' => 'Salary', 'bonus' => 'Bonus', 'incentive' => 'Incentive'][$s['kind'] ?? 'salary'] ?? 'Salary';
+    $rows[] = R([$s['month'], $s['name'], $s['department'], $what, $sal ?: '', (float) $s['lop_amt'] ?: '', $bi ?: '', (float) $s['gross'], (float) $s['deductions'] ?: '', trim(($s['lop_days'] > 0 ? (0 + $s['lop_days']) . ' day(s) unpaid leave. ' : '') . ($s['deduction_note'] ?? '')), (float) $s['net'], $s['paid_on']]);
+    $T[0] += $sal; $T[1] += (float) $s['lop_amt']; $T[2] += $bi; $T[3] += $s['gross']; $T[4] += $s['deductions']; $T[5] += $s['net'];
   }
-  $rows[] = R(['Total', '', '', $T[0], $T[1], '', $T[2], ''], 't');
-  return ['title' => "Salary register $from to $to", 'cols' => ['Month', 'Employee', 'Department', 'Gross (₹)', 'Deductions (₹)', 'Deduction details', 'Net paid (₹)', 'Paid on'], 'num' => [3, 4, 6], 'rows' => $rows];
+  $rows[] = R(['Total', '', '', '', $T[0], $T[1], $T[2], $T[3], $T[4], '', $T[5], ''], 't');
+  return ['title' => "Salary register $from to $to", 'cols' => ['Month', 'Employee', 'Department', 'Type', 'Salary (₹)', 'Leave deduction (₹)', 'Bonus & incentive (₹)', 'Gross (₹)', 'Deductions (₹)', 'Details', 'Net paid (₹)', 'Paid on'], 'num' => [4, 5, 6, 7, 8, 10], 'rows' => $rows];
 }
 function r_parties($to) {
   $b = balances_to($to); $rows = [];

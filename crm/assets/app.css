@@ -190,3 +190,7 @@ table.rep tr.rk-good td{color:var(--ok);font-weight:700}
 }
 @keyframes pagein{from{opacity:.4;transform:translateY(6px)}to{opacity:1;transform:none}}
 @media (display-mode:standalone){.top{padding-top:env(safe-area-inset-top,0px)}}
+
+/* payroll */
+tr.tot td{border-top:2px solid var(--line);background:var(--bg,transparent)}
+.paytab td{vertical-align:top}.paytab input[type=number]{text-align:right}

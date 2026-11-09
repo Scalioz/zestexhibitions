@@ -341,6 +341,7 @@ case 'acc_edit':   // admin: correct a book entry (old one is reversed on its ow
   tx();
   $new = post_journal($date, $j['vtype'], $narr, $lines, $j['ref_type'], $j['ref_id'], $j['project_id'], $MID);
   reverse_journal($j['id'], $j['jdate'], 'Edited by admin — replaced by ' . val('SELECT vno FROM ' . T('journal') . ' WHERE id = ?', [$new]), $MID);
+  if ($j['ref_type'] === 'salary' && $j['ref_id']) upd('salaries', (int) $j['ref_id'], ['journal_id' => $new]);
   if ($j['ref_type']) upd('journal', $j['id'], ['ref_type' => mb_substr($j['ref_type'] . '_x', 0, 20)]);
   upd('journal', $new, ['replaces' => $j['id']]);
   q('UPDATE ' . T('files') . " SET entity_id = ? WHERE entity = 'voucher' AND entity_id = ?", [$new, $j['id']]);
@@ -614,6 +615,101 @@ case 'claim_decide':
   db()->commit(); out(['ok' => true]);
 
 // ================= REPORTS =================
+// ================= PAYROLL: salary & increments, bonus / incentive, monthly salary sheet =================
+case 'acc_pay_sheet': {
+  need_acc();
+  $ym = preg_match('/^\d{4}-\d{2}$/', $in['month'] ?? '') ? $in['month'] : date('Y-m');
+  $first = "$ym-01"; $last = date('Y-m-t', strtotime($first)); $dim = (int) date('t', strtotime($first));
+  $att = is_file(__DIR__ . '/att.php'); if ($att) require_once __DIR__ . '/att.php';
+  $posted = []; foreach (all('SELECT s.*, j.vno, j.reversed_by FROM ' . T('salaries') . ' s LEFT JOIN ' . T('journal') . " j ON j.id = s.journal_id WHERE s.month = ? AND s.kind = 'salary'", [$ym]) as $r) if (!$r['reversed_by']) $posted[$r['user_id']] = $r;
+  $extras = []; foreach (all('SELECT s.user_id, s.bonus, s.incentive FROM ' . T('salaries') . ' s LEFT JOIN ' . T('journal') . " j ON j.id = s.journal_id WHERE s.month = ? AND s.kind <> 'salary' AND j.reversed_by IS NULL", [$ym]) as $r) { $e = &$extras[$r['user_id']]; $e = ($e ?? 0) + (float) $r['bonus'] + (float) $r['incentive']; unset($e); }
+  $rows = [];
+  foreach (all('SELECT * FROM ' . T('users') . ' WHERE (active = 1 AND joined_on <= ?) OR id IN (SELECT user_id FROM ' . T('salaries') . ' WHERE month = ?) ORDER BY name', [$last, $ym]) as $u) {
+    $rate = one('SELECT * FROM ' . T('pay_rates') . ' WHERE user_id = ? AND eff_month <= ? ORDER BY eff_month DESC, id DESC', [$u['id'], $ym]);
+    $monthly = $rate ? (float) $rate['monthly'] : 0; $fixed = $monthly; $note = [];
+    if ($monthly && $u['joined_on'] > $first) { $days = $dim - (int) substr($u['joined_on'], 8, 2) + 1; $fixed = round($monthly * $days / $dim); $note[] = 'Joined ' . date('d M', strtotime($u['joined_on'])) . " — $days of $dim days"; }
+    $unpaid = 0; $absent = 0;
+    if ($att && $u['role'] === 'employee') { try { $m = att_month($u, $ym); $unpaid = (float) $m['unpaid']; $absent = (int) $m['absent']; } catch (Throwable $e) {} }
+    $rows[] = ['id' => (int) $u['id'], 'name' => $u['name'], 'department' => $u['department'], 'designation' => $u['designation'], 'joined_on' => $u['joined_on'], 'active' => (int) $u['active'],
+      'monthly' => $monthly, 'fixed' => $fixed, 'per_day' => $monthly ? round($monthly / $dim, 2) : 0, 'unpaid' => $unpaid, 'absent' => $absent, 'note' => implode(' · ', $note),
+      'paid_extra' => round($extras[$u['id']] ?? 0, 2), 'posted' => $posted[$u['id']] ?? null];
+  }
+  out(['month' => $ym, 'days' => $dim, 'rows' => $rows, 'money' => money_accounts()]);
+}
+
+case 'acc_pay_post': {   // one click: every ticked row becomes a Salary voucher
+  need_acc();
+  $ym = preg_match('/^\d{4}-\d{2}$/', $in['month'] ?? '') ? $in['month'] : fail('Pick the salary month.');
+  $date = d($in['date'] ?? null) ?? fail('Enter the date paid.'); $money = money_id($in['paid_from'] ?? 0);
+  $label = date('M Y', strtotime("$ym-01")); $done = 0; $total = 0; $skipped = [];
+  tx();
+  foreach (array_slice((array) ($in['rows'] ?? []), 0, 300) as $r) {
+    $r = (array) $r; $u = one('SELECT id, name FROM ' . T('users') . ' WHERE id = ?', [(int) ($r['user_id'] ?? 0)]); if (!$u) continue;
+    if (val('SELECT s.id FROM ' . T('salaries') . ' s LEFT JOIN ' . T('journal') . " j ON j.id = s.journal_id WHERE s.user_id = ? AND s.month = ? AND s.kind = 'salary' AND j.reversed_by IS NULL", [$u['id'], $ym])) { $skipped[] = "{$u['name']} (already posted)"; continue; }
+    $fixed = n($r['fixed'] ?? 0) ?? 0; $lopd = n($r['lop_days'] ?? 0) ?? 0; $lop = n($r['lop_amt'] ?? 0) ?? 0; $bonus = n($r['bonus'] ?? 0) ?? 0; $inc = n($r['incentive'] ?? 0) ?? 0;
+    $ded = n($r['deductions'] ?? 0) ?? 0; $tds = n($r['tds'] ?? 0) ?? 0; $dnote = s($r['deduction_note'] ?? null, 200);
+    if (min($fixed, $lop, $bonus, $inc, $ded, $tds, $lopd) < 0) fail("{$u['name']}: amounts cannot be negative.");
+    if ($lop > $fixed) fail("{$u['name']}: leave deduction is more than the salary.");
+    $sal = round($fixed - $lop, 2); $extra = round($bonus + $inc, 2); $gross = round($sal + $extra, 2); $net = round($gross - $ded - $tds, 2);
+    if ($gross <= 0) continue; if ($net < 0) fail("{$u['name']}: deductions are more than the pay.");
+    $nar = "Salary for $label — {$u['name']}";
+    $lines = [[acc_sub('salary'), $sal, 0, $nar . ($lop > 0 ? " (less $lopd day(s) unpaid leave ₹" . inr_txt($lop) . ')' : '')], [acc_sub('bonus'), $extra, 0, trim(($bonus > 0 ? 'Bonus ₹' . inr_txt($bonus) . ' ' : '') . ($inc > 0 ? 'Incentive ₹' . inr_txt($inc) : ''))], [$money, 0, $net, $nar]];
+    if ($ded > 0) $lines[] = [acc_sub('sal_ded'), 0, $ded, $dnote ?? 'Deductions'];
+    if ($tds > 0) $lines[] = [acc_sub('tds_out'), 0, $tds, 'TDS on salary'];
+    $jid = post_journal($date, 'Salary', $nar, $lines, null, null, null, $MID);
+    $sid = ins('salaries', ['user_id' => $u['id'], 'month' => $ym, 'kind' => 'salary', 'fixed' => $fixed, 'lop_days' => $lopd, 'lop_amt' => $lop, 'bonus' => $bonus, 'incentive' => $inc, 'tds' => $tds,
+      'gross' => $gross, 'deductions' => $ded + $tds, 'deduction_note' => trim(($dnote ?? '') . ($tds > 0 ? ' TDS ₹' . inr_txt($tds) : '')) ?: null, 'net' => $net, 'paid_on' => $date, 'journal_id' => $jid, 'created_at' => now()]);
+    upd('journal', $jid, ['ref_type' => 'salary', 'ref_id' => $sid]);
+    $done++; $total += $net;
+  }
+  if (!$done) fail($skipped ? 'Nothing posted — ' . implode(', ', $skipped) . '.' : 'Nothing to post. Fill the salary for at least one person.');
+  db()->commit(); out(['posted' => $done, 'total' => round($total, 2), 'skipped' => $skipped]);
+}
+
+case 'acc_pay_extra': {   // a bonus or incentive paid on its own (outside the monthly salary)
+  need_acc();
+  $u = one('SELECT id, name FROM ' . T('users') . ' WHERE id = ?', [(int) ($in['user_id'] ?? 0)]) ?? fail('Pick the employee.');
+  $kind = in_array($in['kind'] ?? '', ['bonus', 'incentive'], true) ? $in['kind'] : fail('Pick bonus or incentive.');
+  $amt = n($in['amount'] ?? 0) ?? 0; if ($amt <= 0) fail('Enter the amount.');
+  $tds = n($in['tds'] ?? 0) ?? 0; if ($tds < 0 || $tds >= $amt) fail('Check the TDS amount.');
+  $date = d($in['date'] ?? null) ?? fail('Enter the date paid.'); $money = money_id($in['paid_from'] ?? 0);
+  $ym = preg_match('/^\d{4}-\d{2}$/', $in['month'] ?? '') ? $in['month'] : substr($date, 0, 7);
+  $note = s($in['note'] ?? null, 200); $nar = ucfirst($kind) . " — {$u['name']}" . ($note ? " ($note)" : '');
+  $lines = [[acc_sub('bonus'), $amt, 0, $nar], [$money, 0, $amt - $tds, $nar]]; if ($tds > 0) $lines[] = [acc_sub('tds_out'), 0, $tds, 'TDS on ' . $kind];
+  tx();
+  $jid = post_journal($date, 'Salary', $nar, $lines, null, null, null, $MID);
+  $sid = ins('salaries', ['user_id' => $u['id'], 'month' => $ym, 'kind' => $kind, 'fixed' => 0, 'lop_days' => 0, 'lop_amt' => 0, 'bonus' => $kind === 'bonus' ? $amt : 0, 'incentive' => $kind === 'incentive' ? $amt : 0, 'tds' => $tds,
+    'gross' => $amt, 'deductions' => $tds, 'deduction_note' => $note, 'net' => $amt - $tds, 'paid_on' => $date, 'journal_id' => $jid, 'created_at' => now()]);
+  upd('journal', $jid, ['ref_type' => 'salary', 'ref_id' => $sid]);
+  db()->commit(); out(['id' => $jid]);
+}
+
+case 'acc_pay_emp': {   // one employee: joining date, salary history with increments, bonuses / incentives, salary paid
+  need_acc();
+  $u = one('SELECT id, name, email, designation, department, phone, active, joined_on, role FROM ' . T('users') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]) ?? fail('Employee not found.', 404);
+  $um = users_map();
+  $rates = all('SELECT * FROM ' . T('pay_rates') . ' WHERE user_id = ? ORDER BY eff_month, id', [$u['id']]);
+  $prev = null; foreach ($rates as &$r) { $r['by'] = $um[$r['created_by']] ?? ''; $r['change'] = $prev === null ? null : round($r['monthly'] - $prev, 2); $r['pct'] = $prev ? round(($r['monthly'] - $prev) * 100 / $prev, 1) : null; $prev = (float) $r['monthly']; } unset($r);
+  $paid = all('SELECT s.*, j.vno, j.reversed_by FROM ' . T('salaries') . ' s LEFT JOIN ' . T('journal') . ' j ON j.id = s.journal_id WHERE s.user_id = ? ORDER BY s.month DESC, s.id DESC', [$u['id']]);
+  $cur = one('SELECT * FROM ' . T('pay_rates') . ' WHERE user_id = ? AND eff_month <= ? ORDER BY eff_month DESC, id DESC', [$u['id'], date('Y-m')]);
+  out(['user' => $u, 'rates' => array_reverse($rates), 'paid' => $paid, 'current' => $cur ? (float) $cur['monthly'] : null, 'money' => money_accounts(), 'fy_from' => (date('n') >= 4 ? date('Y') : date('Y') - 1) . '-04']);
+}
+
+case 'acc_pay_rate_save': {
+  need_acc();
+  $u = one('SELECT id FROM ' . T('users') . ' WHERE id = ?', [(int) ($in['user_id'] ?? 0)]) ?? fail('Employee not found.', 404);
+  $ym = preg_match('/^\d{4}-\d{2}$/', $in['eff_month'] ?? '') ? $in['eff_month'] : fail('Pick the month it applies from.');
+  $amt = n($in['monthly'] ?? 0) ?? 0; if ($amt <= 0) fail('Enter the monthly salary.');
+  $kind = in_array($in['kind'] ?? '', ['joining', 'increment', 'revision', 'promotion'], true) ? $in['kind'] : 'revision';
+  $data = ['eff_month' => $ym, 'monthly' => $amt, 'kind' => $kind, 'note' => s($in['note'] ?? null, 255)];
+  if (!empty($in['id'])) { $r = one('SELECT id FROM ' . T('pay_rates') . ' WHERE id = ? AND user_id = ?', [(int) $in['id'], $u['id']]) ?? fail('Not found.', 404); upd('pay_rates', $r['id'], $data); out(['id' => (int) $r['id']]); }
+  if (val('SELECT id FROM ' . T('pay_rates') . ' WHERE user_id = ? AND eff_month = ?', [$u['id'], $ym])) fail('There is already a salary from this month. Edit that one instead.');
+  out(['id' => ins('pay_rates', $data + ['user_id' => $u['id'], 'created_by' => $MID, 'created_at' => now()])]);
+}
+
+case 'acc_pay_rate_del':
+  need_acc(); q('DELETE FROM ' . T('pay_rates') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]); out(['ok' => true]);
+
 case 'acc_report':
   need_acc();
   out(['report' => run_report($in['r'] ?? '', $in)]);
