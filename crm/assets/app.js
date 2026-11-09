@@ -84,6 +84,39 @@ const phoneOf = uid => (B.users.find(u => +u.id === +uid) || {}).phone || '';
 const firstName = uid => ((B.users.find(u => +u.id === +uid) || {}).name || '').split(' ')[0];
 const adminPhone = () => (B.users.find(u => u.role === 'admin' && +u.active && u.phone && +u.id !== +B.me.id) || B.users.find(u => u.role === 'admin' && u.phone) || {}).phone || '';
 function waUrl(phone, text) { let d = String(phone || '').replace(/\D/g, ''); if (d.length === 10) d = '91' + d; if (d.length > 12 && d.startsWith('0')) d = d.replace(/^0+/, ''); return 'https://wa.me/' + (d.length >= 11 ? d : '') + '?text=' + encodeURIComponent(text); }
+// company profile → new client: WhatsApp (phone app / WhatsApp Web on computer) and email (phone's mail app / Outlook)
+const IS_PHONE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+const profileUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'profile.php';
+function profileText(t, c) {
+  const me = B.me || {}, first = String(c.person || '').trim();
+  const v = { name: first || 'Sir / Madam', company: c.company || '', expo: c.expo || '', link: profileUrl(), me: me.name || '', my_phone: me.phone || (B.users.find(u => +u.id === +me.id) || {}).phone || '' };
+  if (!v.expo) t = t.replace(/ for \{expo\}/g, '');
+  return t.replace(/\{(name|company|expo|link|me|my_phone)\}/g, (m, k) => v[k]).replace(/\n{3,}/g, '\n\n').trim();
+}
+function sendProfile(how, c) {
+  if (!B.profile?.file) { toast(isAdmin() ? 'Upload the company profile first: Holidays & lists → Company profile' : 'Admin has not uploaded the company profile yet.', true); return; }
+  const M = B.profile.msgs;
+  if (how === 'wa') {
+    let d = String(c.phone || '').replace(/\D/g, ''); if (d.length === 10) d = '91' + d; if (d.length > 12 && d.startsWith('0')) d = d.replace(/^0+/, '');
+    if (d.length < 11) { toast('Enter the client’s phone number first (with country code if outside India).', true); return; }
+    const text = encodeURIComponent(profileText(M.wa, c));
+    if (IS_PHONE) location.href = `https://wa.me/${d}?text=${text}`;   // phone: opens WhatsApp / WhatsApp Business straight into this client's chat
+    else window.open(`https://web.whatsapp.com/send?phone=${d}&text=${text}`, 'zestwa');   // computer: WhatsApp Web in Chrome
+  } else {
+    const em = String(c.email || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { toast('Enter the client’s email first.', true); return; }
+    location.href = `mailto:${encodeURIComponent(em).replace(/%40/g, '@')}?subject=${encodeURIComponent(profileText(M.subj, c))}&body=${encodeURIComponent(profileText(M.body, c))}`;
+  }
+  toast(how === 'wa' ? 'Opening WhatsApp…' : 'Opening your email app…');
+}
+const profileBtns = src => `<div class="row profbar" style="align-items:center;gap:8px;flex-wrap:wrap"><span class="sub"><b>Company profile</b></span><button type="button" class="btn wa sm" data-profsend="wa:${src}">💬 Send on WhatsApp</button><button type="button" class="btn ghost sm" data-profsend="mail:${src}">✉ Send by email</button>${B.profile?.file ? `<a class="btn link" href="profile.php" target="_blank" rel="noopener">View profile</a>` : ''}</div>`;
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-profsend]'); if (!b) return; e.preventDefault(); e.stopPropagation();
+  const [how, src] = b.dataset.profsend.split(':');
+  const c = src === 'new' ? { company: newClient?.company, person: newClient?.person, phone: newClient?.phone, email: newClient?.email, expo: newClient?.expo?.expo }
+    : { company: C.client?.company, person: C.client?.person, phone: C.client?.phone, email: C.client?.email, expo: (C.client?.orders || [])[0]?.expo };
+  sendProfile(how, c);
+}, true);
 const crmLink = hash => location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.php' + hash;
 const waBtn = (phone, text, label) => `<a class="btn wa sm" href="${esc(waUrl(phone, text))}" target="_blank" rel="noopener" title="${phone ? 'Opens WhatsApp to ' + esc(phone) : 'Opens WhatsApp — pick the contact'}">💬 ${esc(label)}</a>`;
 async function shareFile(id, name) {
@@ -319,6 +352,7 @@ routes.newclient = async () => {
    ${isAdmin() ? `<label class="f">Handled by<select data-nc="owner_id"><option value="">Me</option>${B.users.filter(u => +u.active).map(u => `<option value="${u.id}" ${+n.owner_id === +u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>` : ''}</div>
    <div class="grid" style="margin-top:12px"><label class="f">Company location / address<textarea data-nc="location">${esc(n.location)}</textarea></label><label class="f">Notes<textarea data-nc="notes">${esc(n.notes)}</textarea></label></div>
    ${handsOver() ? '' : `<div class="row" style="margin-top:12px"><span class="sub"><b>GST certificate</b></span><label class="up">⬆ Upload GST certificate (PDF / image)<input type="file" id="nc-gst" accept=".pdf,.jpg,.jpeg,.png,.webp"></label>${n.gstcert.map(f => `<span class="chip">📎 <span>${esc(f.name)}</span></span>`).join('')}</div>`}
+   <div style="margin-top:12px">${profileBtns('new')}<div class="sub" style="margin-top:4px">Fill the phone / email above, then send. WhatsApp opens the client's chat (WhatsApp Web on a computer); email opens your mail app.</div></div>
    <div id="dup" style="margin-top:12px"></div>
   </div>
   <div class="panel"><h2>Expo enquiry</h2><p class="sub" style="margin-top:0">The expo this client is talking to us about. This creates their first expo order.</p>
@@ -370,7 +404,7 @@ routes.client = async ({ id }) => {
       <div class="grid" style="margin-top:10px"><label class="f">Location / address<textarea name="location">${esc(c.location)}</textarea></label><label class="f">Notes<textarea name="notes">${esc(c.notes)}</textarea></label></div>
       ${isAdmin() ? `<div class="grid g3" style="margin-top:10px"><label class="f">Handled by<select name="owner_id">${B.users.filter(u => +u.active).map(u => `<option value="${u.id}" ${+u.id === +c.owner_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label><label class="row sub" style="align-self:end"><input type="checkbox" name="move_orders" checked> Move their orders too</label></div>` : ''}
       <div class="row" style="margin-top:10px"><button class="btn">Save</button><button type="button" class="btn ghost" id="ce-cancel">Cancel</button></div></form>`
-    : `<div>${esc(c.person || '—')}${c.designation ? ' · ' + esc(c.designation) : ''}</div><div class="sub">${esc(c.email || '')}${c.email && c.phone ? ' · ' : ''}${esc(c.phone || '')}</div>${c.phone ? `<div style="margin:6px 0">${waBtn(c.phone, `Dear ${c.person || 'Sir / Madam'}, greetings from Zest Exhibitions. `, 'WhatsApp ' + (c.person ? c.person.split(' ')[0] : 'client'))}</div>` : ''}<div class="sub">${esc(c.location || '')}</div>${c.gst_no ? `<div class="sub">GSTIN ${esc(c.gst_no)}</div>` : ''}${c.notes ? `<p class="sub">${esc(c.notes)}</p>` : ''}`}
+    : `<div>${esc(c.person || '—')}${c.designation ? ' · ' + esc(c.designation) : ''}</div><div class="sub">${esc(c.email || '')}${c.email && c.phone ? ' · ' : ''}${esc(c.phone || '')}</div>${c.phone ? `<div style="margin:6px 0">${waBtn(c.phone, `Dear ${c.person || 'Sir / Madam'}, greetings from Zest Exhibitions. `, 'WhatsApp ' + (c.person ? c.person.split(' ')[0] : 'client'))}</div>` : ''}${c.phone || c.email ? `<div style="margin:6px 0">${profileBtns('client')}</div>` : ''}<div class="sub">${esc(c.location || '')}</div>${c.gst_no ? `<div class="sub">GSTIN ${esc(c.gst_no)}</div>` : ''}${c.notes ? `<p class="sub">${esc(c.notes)}</p>` : ''}`}
    </div>
    <div class="panel"><h3>Others in the deal</h3>
     ${c.contacts.length ? `<div class="tw"><table>${c.contacts.map(o => `<tr><td><b>${esc(o.name)}</b><div class="sub">${esc(o.designation || '')}</div></td><td class="sub">${esc(o.phone || '')}<br>${esc(o.email || '')}</td><td class="r"><button class="btn link" data-delcontact="${o.id}" aria-label="Remove">✕</button></td></tr>`).join('')}</table></div>` : '<div class="sub">Nobody added.</div>'}
@@ -1901,6 +1935,15 @@ routes.settings = async () => {
     <div class="row" style="align-items:flex-end"><label class="f" style="min-width:260px">Keep this expo<select name="into" required><option value="">Select</option>${B.expos.filter(x => +x.id !== +m.id).map(x => `<option value="${x.id}">${esc(x.name)}${x.edate ? ' · ' + fd(x.edate) : ''}</option>`).join('')}</select></label><button class="btn sm">Merge</button><button type="button" class="btn link" id="ex-mg-x">Cancel</button></div></form>` : ''; })()}
    <div class="row" style="margin-top:10px"><input id="ex-q" placeholder="Search expos" style="max-width:260px"></div>
    <div class="tw" style="margin-top:8px;max-height:420px;overflow:auto"><table id="ex-tab"><tr><th>Expo</th><th>Dates</th><th>City</th><th>Venue</th><th></th></tr>${(B.expos || []).map(e => `<tr data-exrow="${esc((e.name + ' ' + (e.city || '') + ' ' + (e.venue || '')).toLowerCase())}"><td><b>${esc(e.name)}</b></td><td class="num">${e.edate ? fd(e.edate) + (e.end_date && e.end_date !== e.edate ? ' – ' + fd(e.end_date) : '') : '—'}</td><td>${esc(e.city || '')}</td><td>${esc(e.venue || '')}</td><td class="r" style="white-space:nowrap"><button class="btn link" data-exedit="${e.id}">Edit</button> <button class="btn link" data-exmerge="${e.id}">Merge</button> <button class="btn link" data-exdel="${e.id}" aria-label="Remove ${esc(e.name)}">✕</button></td></tr>`).join('') || '<tr><td colspan="5" class="sub">No expos yet.</td></tr>'}</table></div></div>
+  <form class="panel" id="profset"><div class="ph"><h2>Company profile for new clients</h2>${B.profile?.file ? `<a class="btn link" href="profile.php" target="_blank" rel="noopener">Open the profile</a>` : ''}</div>
+   <p class="sub" style="margin-top:0">Sales can send this from the New client form and each client's page — on WhatsApp or by email, with the message below. Clients open it from a link, so no attachment is needed.</p>
+   <div class="row" style="align-items:center">${B.profile?.file ? `<span class="chip">📄 <span>${esc(B.profile.file.orig_name)}</span><span class="sub">· ${mb(B.profile.file.size)} · uploaded ${fd(B.profile.file.created_at)}</span></span>` : '<span class="pill p-bad">not uploaded yet</span>'}
+    <label class="up">⬆ ${B.profile?.file ? 'Replace with a new PDF' : 'Upload the profile PDF'}<input type="file" id="prof-up" accept=".pdf,application/pdf"></label></div>
+   <div class="sub" style="margin:6px 0 10px">Link clients receive: <b>${esc(profileUrl())}</b> — it always opens the latest PDF you upload.</div>
+   <div class="grid"><label class="f">WhatsApp message<textarea name="wa" rows="12">${esc(B.profile?.msgs.wa || '')}</textarea></label>
+    <div class="grid" style="grid-template-columns:1fr;gap:10px"><label class="f">Email subject<input name="subj" value="${esc(B.profile?.msgs.subj || '')}"></label><label class="f">Email message<textarea name="body" rows="9">${esc(B.profile?.msgs.body || '')}</textarea></label></div></div>
+   <p class="sub">Filled in automatically: <b>{name}</b> contact person · <b>{company}</b> · <b>{expo}</b> · <b>{link}</b> profile link · <b>{me}</b> sender's name · <b>{my_phone}</b> sender's phone (from Team).</p>
+   <div class="row"><button class="btn sm">Save messages</button><button type="button" class="btn link" id="prof-reset">Back to the standard messages</button></div></form>
   <div class="grid">
    <div class="panel"><h2>Rejection reasons</h2>${B.reasons.map(r => `<div class="row" style="justify-content:space-between;padding:3px 0"><span>${esc(r.label)}</span><button class="btn link" data-delreason="${r.id}">✕</button></div>`).join('')}
     <form class="row" id="rs-add" style="margin-top:8px"><input name="label" placeholder="New reason" required style="flex:1"><button class="btn ghost sm">Add</button></form></div>
@@ -1940,6 +1983,9 @@ routes.settings = async () => {
     if (ed) { const x = B.expos.find(v => +v.id === +ed.dataset.exedit); if (!x) return; ['id', 'name', 'edate', 'end_date', 'city', 'venue'].forEach(k => X(k).value = x[k] || ''); $('#ex-btn').textContent = 'Save changes'; $('#ex-cancel').hidden = false; exf.scrollIntoView({ behavior: 'smooth', block: 'center' }); X('name').focus(); }
     if (dl) { const x = B.expos.find(v => +v.id === +dl.dataset.exdel); if (!x || !confirm(`Remove "${x.name}" from the expo list? Orders already saved keep their expo name.`)) return; const ok = await act(() => api('expo_del', { id: x.id }), 'Removed').catch(() => null); if (ok) { await reboot(); refresh(); } }
   };
+  $('#profset').onsubmit = async e => { e.preventDefault(); const ok = await act(() => api('settings_save', { profile_msgs: Object.fromEntries(new FormData(e.target)) }), 'Messages saved').catch(() => null); if (ok) { await reboot(); refresh(); } };
+  $('#prof-reset').onclick = async () => { if (!confirm('Go back to the standard WhatsApp and email messages?')) return; await act(() => api('settings_save', { profile_msgs: { wa: '', subj: '', body: '' } }), 'Standard messages restored'); await reboot(); refresh(); };
+  $('#prof-up').onchange = async e => { const f = e.target.files[0]; if (!f) return; toast('Uploading the profile…'); const ok = await act(() => upload('profile', 0, f), 'Company profile uploaded').catch(() => null); if (ok) { await reboot(); refresh(); } };
   sub('#hol-add', 'holiday_add', 'Holiday added'); sub('#rs-add', 'reason_add', 'Reason added'); sub('#vd-add', 'vendor_add', 'Vendor added');
   $('#trackf-save').onclick = async () => { await act(() => api('settings_save', { track_from: $('#trackf').value }), 'Saved'); };
   $('#aiset').onsubmit = async e => { e.preventDefault(); await act(() => api('cards_ai_save', Object.fromEntries(new FormData(e.target))), 'Saved'); refresh(); };

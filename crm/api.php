@@ -97,6 +97,17 @@ function expo_remember($name, $loc = null, $start = null, $end = null) {
   $fill = array_filter(['edate' => $ex['edate'] ? null : d($start), 'end_date' => $ex['end_date'] ? null : d($end), 'city' => $ex['city'] ? null : s($loc, 80)]);
   if ($fill) upd('expos', $ex['id'], $fill);
 }
+// company profile sent to new clients (WhatsApp / email) — PDF uploaded by admin, messages editable
+function profile_msgs() {
+  $d = ['wa' => "Dear {name},\n\nGreetings from Zest Exhibitions!\n\nThank you for your time. Here is our company profile:\n{link}\n\nWe design and build exhibition stalls and turnkey commercial interiors — concept, 3D design, fabrication and on-site installation, all in-house.\n\nHappy to discuss your requirement for {expo}.\n\nWarm regards,\n{me}\nZest Exhibitions\n{my_phone}",
+    'subj' => 'Zest Exhibitions — Company Profile',
+    'body' => "Dear {name},\n\nGreetings from Zest Exhibitions!\n\nThank you for your time. Please find our company profile at the link below:\n{link}\n\nWe design and build exhibition stalls and turnkey commercial interiors for brands across India — concept, 3D design, fabrication and on-site installation, all handled in-house.\n\nWe would be happy to discuss your requirement for {expo} and share a design and quote.\n\nWarm regards,\n{me}\nZest Exhibitions\n{my_phone}\nwww.zestexhibitions.com"];
+  return array_merge($d, array_filter((array) setting('profile_msgs', []), 'strlen'));
+}
+function profile_info() {
+  $f = one('SELECT id, orig_name, size, created_at FROM ' . T('files') . " WHERE entity = 'profile' ORDER BY id DESC");
+  return ['file' => $f ?: null, 'msgs' => profile_msgs()];
+}
 function expo_list() { return all('SELECT id, name, edate, end_date, city, venue FROM ' . T('expos') . ' ORDER BY edate DESC, name LIMIT 1500'); }
 function users_map() { $m = []; foreach (all('SELECT id, name FROM ' . T('users')) as $u) $m[$u['id']] = $u['name']; return $m; }
 
@@ -139,6 +150,7 @@ case 'boot':
     'reasons' => all('SELECT id, label FROM ' . T('reasons') . ' WHERE active = 1 ORDER BY id'),
     'vendors' => all('SELECT id, name, phone, email, city FROM ' . T('vendors') . ' WHERE active = 1 ORDER BY name'),
     'expos' => expo_list(),
+    'profile' => profile_info(),
     'users' => all('SELECT id, name, role, designation, department, active, phone FROM ' . T('users') . ' ORDER BY name'),
     'today' => today(),
     'records' => $RECORDS,
@@ -601,6 +613,9 @@ case 'upload':
     case 'quote': case 'vquote': case 'revision':
       $tbl = ['quote' => 'quotes', 'vquote' => 'vendor_quotes', 'revision' => 'revisions'][$ent];
       $r = one('SELECT project_id FROM ' . T($tbl) . ' WHERE id = ?', [$eid]); if (!$r) fail('Not found', 404); project_row($r['project_id']); break;
+    case 'profile':   // admin: company profile PDF sent to new clients
+      need_admin(); $eid = 0;
+      if (strtolower(pathinfo($_FILES['file']['name'] ?? '', PATHINFO_EXTENSION)) !== 'pdf') fail('Please upload the company profile as a PDF.'); break;
     case 'ritem':
       $r = one('SELECT r.user_id, r.submitted_at FROM ' . T('report_items') . ' i JOIN ' . T('reports') . ' r ON r.id = i.report_id WHERE i.id = ?', [$eid]);
       if (!$r || (int) $r['user_id'] !== $MID || strtotime($r['submitted_at']) < time() - 900) fail('This report is locked.', 403); break;
@@ -619,7 +634,7 @@ case 'upload':
   // automatic compression (photos, pictures inside PDF / Word / Excel / PowerPoint) — the original is kept if anything is unusual
   require_once __DIR__ . '/lib/shrink.php';
   $origSize = (int) ($_POST['orig_size'] ?? 0) ?: (int) $f['size']; $origName = mb_substr(basename($f['name']), 0, 250);
-  $sr = shrink_file(__DIR__ . '/uploads/' . $stored, $ext, $ent);
+  $sr = $ent === 'profile' ? ['ext' => $ext, 'size' => filesize(__DIR__ . '/uploads/' . $stored)] : shrink_file(__DIR__ . '/uploads/' . $stored, $ext, $ent);   // the profile is sent to clients — keep full quality
   if ($sr['ext'] !== $ext) {   // e.g. a PNG screenshot saved as JPEG
     $ns = preg_replace('~\.\w+$~', '.' . $sr['ext'], $stored); rename(__DIR__ . '/uploads/' . $stored, __DIR__ . '/uploads/' . $ns); $stored = $ns;
     $origName = preg_replace('~\.\w+$~', '', $origName) . '.' . $sr['ext'];
@@ -1023,6 +1038,9 @@ case 'settings_save':
     if (isset($q['scope'])) $cur['scope'] = s($q['scope'], 120) ?? QUOTE_DEFAULTS['scope'];
     set_setting('quote_defaults', $cur);
   }
+  if (isset($in['profile_msgs'])) { $m = (array) $in['profile_msgs']; $cur = (array) setting('profile_msgs', []);
+    foreach (['wa' => 3000, 'subj' => 200, 'body' => 5000] as $k => $mx) if (array_key_exists($k, $m)) $cur[$k] = mb_substr(str_replace("\r", '', trim((string) $m[$k])), 0, $mx);
+    set_setting('profile_msgs', $cur); }
   if (isset($in['file_quality'])) { require_once __DIR__ . '/lib/shrink.php'; if (!isset(SHRINK_LEVELS[$in['file_quality']])) fail('Pick a quality level.'); set_setting('file_quality', $in['file_quality']); }
   if (isset($in['weekly_off'])) set_setting('weekly_off', array_values(array_unique(array_map('intval', array_filter((array) $in['weekly_off'], fn($x) => $x >= 0 && $x <= 6)))));
   if (isset($in['departments'])) { $dp = array_values(array_unique(array_filter(array_map(fn($x) => s($x, 60), (array) $in['departments'])))); if (!$dp) fail('Keep at least one department.'); set_setting('departments', $dp); }
