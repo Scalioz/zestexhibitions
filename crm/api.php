@@ -1087,9 +1087,22 @@ case 'expo_save':   // admin: Holidays & lists → Expo list
   if ($id) { if (!val('SELECT id FROM ' . T('expos') . ' WHERE id = ?', [$id])) fail('Expo not found.', 404); upd('expos', $id, $data); out(['id' => $id]); }
   out(['id' => ins('expos', $data + ['created_by' => $MID, 'created_at' => now()])]);
 
+case 'expo_merge':   // admin: two names for the same expo — keep one, move everything from the other to it
+  need_admin();
+  $a = one('SELECT * FROM ' . T('expos') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]) ?? fail('Expo not found.', 404);
+  $b = one('SELECT * FROM ' . T('expos') . ' WHERE id = ?', [(int) ($in['into'] ?? 0)]) ?? fail('Pick the expo to keep.');
+  if ($a['id'] === $b['id']) fail('Pick a different expo to keep.');
+  tx();
+  q('UPDATE ' . T('projects') . ' SET expo = ? WHERE LOWER(TRIM(expo)) = LOWER(TRIM(?))', [$b['name'], $a['name']]);
+  q('UPDATE ' . T('leads') . ' SET expo_id = ? WHERE expo_id = ?', [$b['id'], $a['id']]);
+  $fill = array_filter(['edate' => $b['edate'] ? null : $a['edate'], 'end_date' => $b['end_date'] ? null : $a['end_date'], 'city' => $b['city'] ? null : $a['city'], 'venue' => $b['venue'] ? null : $a['venue'], 'website' => $b['website'] ? null : $a['website']]);
+  if ($fill) upd('expos', $b['id'], $fill);
+  q('DELETE FROM ' . T('expos') . ' WHERE id = ?', [$a['id']]);
+  db()->commit(); out(['ok' => true]);
+
 case 'expo_del':
   need_admin(); $id = (int) ($in['id'] ?? 0);
-  if ($n = (int) val('SELECT COUNT(*) FROM ' . T('leads') . ' WHERE expo_id = ?', [$id])) fail("Can't remove — this expo has $n expo data entries. Edit it instead.");
+  if ($n = (int) val('SELECT COUNT(*) FROM ' . T('leads') . ' WHERE expo_id = ?', [$id])) fail("Can't remove — this expo has $n expo data entries. Use Merge to move them to the right expo.");
   q('DELETE FROM ' . T('expos') . ' WHERE id = ?', [$id]); out(['ok' => true]);
 
 case 'vendor_del':
