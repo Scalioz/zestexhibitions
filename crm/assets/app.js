@@ -404,7 +404,7 @@ function cimpPanel(I) {
   let body;
   if (I.step === 'done') {
     const R = I.res;
-    body = `<div class="alert ${R.added ? '' : 'warn'}"><b>${R.added} client${R.added === 1 ? '' : 's'} added${R.orders ? ` · ${R.orders} expo order${R.orders === 1 ? '' : 's'} created` : ''}</b><span class="m">${R.skipped.length ? `${R.skipped.length} row${R.skipped.length === 1 ? '' : 's'} skipped.` : 'Nothing skipped.'}</span></div>
+    body = `<div class="alert ${R.added ? '' : 'warn'}"><b>${R.added} new client${R.added === 1 ? '' : 's'} added${R.orders ? ` · ${R.orders} expo order${R.orders === 1 ? '' : 's'} created` : ''}</b><span class="m">${R.skipped.length ? `${R.skipped.length} row${R.skipped.length === 1 ? '' : 's'} skipped.` : 'Nothing skipped.'}</span></div>
      ${R.skipped.length ? `<div class="tw" style="margin-top:8px;max-height:240px;overflow:auto"><table><tr><th>Sheet row</th><th>Why skipped</th></tr>${R.skipped.slice(0, 300).map(x => `<tr><td class="num">${x.row}</td><td>${esc(x.why)}</td></tr>`).join('')}</table></div>` : ''}
      <div class="row" style="margin-top:10px"><a class="btn sm" href="#clients">Open All clients</a><button class="btn ghost sm" data-cimpx="again">Import another file</button><button class="btn link" data-cimpx="close">Close</button></div>`;
   } else if (I.step === 'map') {
@@ -414,7 +414,7 @@ function cimpPanel(I) {
      ${owner ? `<div class="grid g3">${owner}</div>` : ''}
      <div class="grid g3" style="margin-top:10px">${CIMP_F.map(([k, l]) => `<label class="f">${l}<select data-cimpmap="${k}">${opt(k)}</select></label>`).join('')}</div>
      <h3 style="margin-top:12px">Preview — first ${prev.length} rows</h3>${F.length ? `<div class="tw"><table><tr>${F.map(([, l]) => `<th>${l.replace(' *', '')}</th>`).join('')}</tr>${prev.map(o => `<tr>${F.map(([k]) => `<td>${esc(o[k] || '')}</td>`).join('')}</tr>`).join('')}</table></div>` : ''}
-     <p class="sub">Clients already in the CRM (same company name, phone or email) are skipped. Rows with an expo name also get their first expo order.</p>
+     <p class="sub">Rows with an expo name create an expo order. More than one expo for a client: one row per expo with the same company name. A client already in the CRM is not added again — only the new expo orders on its rows are added.</p>
      <div class="row" style="margin-top:10px"><button class="btn" data-cimpx="go">Import ${I.rows.length} client${I.rows.length === 1 ? '' : 's'}</button><button class="btn ghost sm" data-cimpx="again">Choose another file</button><button class="btn link" data-cimpx="close">Cancel</button><span class="sub" id="cimp-prog"></span></div>`;
   } else {
     body = `<p class="sub" style="margin-top:0">Add many clients at once from an Excel (.xlsx) or CSV file — one client per row, column names in the first row. Easiest: download the template, fill it, and upload it here.</p>

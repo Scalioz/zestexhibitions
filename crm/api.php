@@ -448,14 +448,22 @@ case 'client_import':   // sales / admin: many clients from an Excel / CSV sheet
       array_merge([$co], $em ? [$em] : [], strlen($p10) === 10 ? ['%' . substr($p10, -6)] : []));
     if ($dup && strlen($p10) === 10 && strcasecmp(trim($dup['company']), $co) !== 0 && (!$em || strtolower((string) val('SELECT email FROM ' . T('clients') . ' WHERE id = ?', [$dup['id']])) !== $em)
         && substr(preg_replace('/\D/', '', (string) val('SELECT phone FROM ' . T('clients') . ' WHERE id = ?', [$dup['id']])), -10) !== $p10) $dup = null;   // last-6-digit hit but not the same number
-    if ($dup) { $skipped[] = ['row' => $n, 'why' => "$co — already a client" . ($dup['company'] !== $co ? " ({$dup['company']})" : '') . ', handled by ' . ($um[$dup['owner_id']] ?? '—')]; continue; }
+    $ex = s($x['expo'] ?? null, 200);
+    if ($dup && !$ex) { $skipped[] = ['row' => $n, 'why' => "$co — already a client" . ($dup['company'] !== $co ? " ({$dup['company']})" : '') . ', handled by ' . ($um[$dup['owner_id']] ?? '—')]; continue; }
+    if ($dup) {   // same client again with an expo: add that expo as another order for the client (one row per expo)
+      if (!$ADMIN && (int) $dup['owner_id'] !== $MID) { $skipped[] = ['row' => $n, 'why' => "$co — client of " . ($um[$dup['owner_id']] ?? '—') . ', expo not added']; continue; }
+      if (val('SELECT id FROM ' . T('projects') . ' WHERE client_id = ? AND LOWER(TRIM(expo)) = LOWER(?)', [$dup['id'], $ex])) { $skipped[] = ['row' => $n, 'why' => "$co — already has an order for $ex"]; continue; }
+      $id = (int) $dup['id']; $ownerHere = (int) $dup['owner_id'];
+    } else {
+    $ownerHere = $owner;
     $id = ins('clients', ['company' => $co, 'person' => s($x['person'] ?? null, 120), 'designation' => s($x['designation'] ?? null, 120), 'phone' => $ph, 'email' => $em ?: null,
       'city' => s($x['city'] ?? null, 80), 'location' => s($x['location'] ?? null, 1000), 'gst_no' => strtoupper(preg_replace('/\s/', '', s($x['gst_no'] ?? null, 20) ?? '')) ?: null, 'notes' => $note ?: null,
       'owner_id' => $owner, 'created_by' => $MID, 'created_at' => now()]);
     $added++;
-    if ($ex = s($x['expo'] ?? null, 200)) {
+    }
+    if ($ex) {
       $st = strtolower(trim((string) ($x['space_type'] ?? ''))); $st = str_contains($st, 'shell') ? 'Shell scheme' : (str_contains($st, 'bare') || str_contains($st, 'raw') ? 'Bare space' : null);
-      create_project($id, $owner, ['expo' => $ex, 'location' => s($x['expo_city'] ?? null, 200), 'start_date' => $date($x['start_date'] ?? ''), 'area_sqm' => preg_replace('/[^\d.]/', '', (string) ($x['area_sqm'] ?? '')), 'stall_no' => $x['stall_no'] ?? null, 'space_type' => $st, 'sides_open' => (int) preg_replace('/\D/', '', (string) ($x['sides_open'] ?? ''))]);
+      create_project($id, $ownerHere, ['expo' => $ex, 'location' => s($x['expo_city'] ?? null, 200), 'start_date' => $date($x['start_date'] ?? ''), 'area_sqm' => preg_replace('/[^\d.]/', '', (string) ($x['area_sqm'] ?? '')), 'stall_no' => $x['stall_no'] ?? null, 'space_type' => $st, 'sides_open' => (int) preg_replace('/\D/', '', (string) ($x['sides_open'] ?? ''))]);
       $orders++;
     }
   }

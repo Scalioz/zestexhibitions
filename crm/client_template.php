@@ -8,12 +8,14 @@ $S = [
   'Clients' => [
     ['Company name', 'Contact person', 'Designation', 'Phone', 'Email', 'City', 'Address', 'GSTIN', 'Notes', 'Expo name', 'Expo city', 'Expo start date', 'Area (sqm)', 'Stall no', 'Space type', 'Sides open'],
     ['Example Glass Pvt Ltd', 'Rahul Mehta', 'Marketing Manager', '9876543210', 'rahul@exampleglass.com', 'Delhi', 'Plot 12, Okhla Phase 2, New Delhi', '07ABCDE1234F1Z5', 'Met at Zak Expo', 'Zak Glass Technology Expo 2026', 'Dwarka, Delhi', '10-12-2026', '36', 'H2-B14', 'Bare space', '2'],
+    ['Example Glass Pvt Ltd', '', '', '', '', '', '', '', '', 'Acetech Bengaluru 2027', 'Bengaluru', '18-02-2027', '54', '', 'Shell scheme', '3'],
   ],
   'How to fill' => [
     ['Column', 'Required?', 'How to fill'],
-    ['Company name', 'Yes', 'One client per row. Delete the example row before importing.'],
+    ['Company name', 'Yes', 'One client per row. Delete the example rows before importing.'],
     ['Contact person, Designation, Phone, Email, City, Address, GSTIN, Notes', 'No', 'Phone: 10-digit mobile (country code if outside India). Email: one address.'],
-    ['Expo name', 'No', 'Fill only if the client is enquiring for an expo — this also creates their first expo order.'],
+    ['Expo name', 'No', 'Fill if the client is enquiring for an expo — this creates an expo order for them.'],
+    ['More than one expo', '', 'Add one row per expo with the same company name (see the 2nd example row). Each row becomes a separate order for that client. The client details are needed only on the first row.'],
     ['Expo city, Expo start date, Area (sqm), Stall no', 'No', 'Date as DD-MM-YYYY (e.g. 10-12-2026). Area as a number.'],
     ['Space type', 'No', 'Bare space  or  Shell scheme'],
     ['Sides open', 'No', '1, 2, 3 or 4'],
