@@ -386,12 +386,75 @@ routes.dnq = async () => {
   <div class="panel">${d.clients.length ? `<div class="tw"><table><tr><th>Company</th><th>Since</th><th>Reason</th><th>Note</th><th>Flagged by</th><th>Handled by</th></tr>${d.clients.map(c => `<tr class="click" data-go="client-${c.id}"><td><b>${esc(c.company)}</b></td><td class="num">${fd(c.dnq_on)}</td><td>${esc(c.dnq_reason)}</td><td>${esc(c.dnq_note || '')}</td><td>${esc(c.dnq_by || '')}</td><td>${esc(c.owner)}</td></tr>`).join('')}</table></div>` : blank('No client is flagged.')}</div>`;
 };
 
+// ---------- sales / admin: import many clients (and their first expo order) from an Excel / CSV sheet ----------
+const CIMP_F = [['company', 'Company name *', 'companyname|company|organisation|organization|firm|exhibitor|brand|clientname|client'], ['person', 'Contact person', 'contactperson|person|contactname|contact|name|fullname'], ['designation', 'Designation', 'designation|title|jobtitle|position'],
+  ['phone', 'Phone', 'phone|mobile|mobileno|mobilenumber|phoneno|phonenumber|contactno|contactnumber|cell|whatsapp|tel|telephone|mob'], ['email', 'Email', 'email|emailid|emailaddress|mail|mailid'], ['city', 'City', 'city|town'],
+  ['location', 'Address', 'address|companyaddress|location|companylocation|officeaddress'], ['gst_no', 'GSTIN', 'gstin|gst|gstno|gstnumber'], ['notes', 'Notes', 'notes|note|remarks|remark|comments|comment'],
+  ['expo', 'Expo name', 'exponame|expo|exhibition|event|show'], ['expo_city', 'Expo city', 'expocity|expolocation|venue|expovenue'], ['start_date', 'Expo start date', 'expostartdate|startdate|expodate|eventdate|date'],
+  ['area_sqm', 'Area (sqm)', 'areasqm|area|sqm|size|stallsize'], ['stall_no', 'Stall no', 'stallno|stall|boothno|booth|standno|hall'], ['space_type', 'Space type', 'spacetype|type|bareorshell'], ['sides_open', 'Sides open', 'sidesopen|sides|opensides']];
+function cimpGuess(headers) {
+  const map = {}, used = new Set(), H = headers.map(impNorm);
+  for (const pass of [0, 1]) for (const [k, , syn] of CIMP_F) { if (map[k] !== undefined) continue; const S = syn.split('|');
+    const i = H.findIndex((h, j) => !used.has(j) && h && (pass ? S.some(x => x.length > 3 && h.includes(x)) : S.includes(h))); if (i >= 0) { map[k] = i; used.add(i); } }
+  return map;
+}
+const cimpRow = (I, r) => { const o = { _row: r.n }; CIMP_F.forEach(([k]) => { const j = I.map[k]; if (j !== undefined && j !== '') o[k] = r.c[j] || ''; }); return o; };
+function cimpPanel(I) {
+  const owner = isAdmin() ? `<label class="f">Handled by<select data-cimp="owner_id">${B.users.filter(u => +u.active).map(u => `<option value="${u.id}" ${+u.id === +(I.owner_id || B.me.id) ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>` : '';
+  let body;
+  if (I.step === 'done') {
+    const R = I.res;
+    body = `<div class="alert ${R.added ? '' : 'warn'}"><b>${R.added} client${R.added === 1 ? '' : 's'} added${R.orders ? ` · ${R.orders} expo order${R.orders === 1 ? '' : 's'} created` : ''}</b><span class="m">${R.skipped.length ? `${R.skipped.length} row${R.skipped.length === 1 ? '' : 's'} skipped.` : 'Nothing skipped.'}</span></div>
+     ${R.skipped.length ? `<div class="tw" style="margin-top:8px;max-height:240px;overflow:auto"><table><tr><th>Sheet row</th><th>Why skipped</th></tr>${R.skipped.slice(0, 300).map(x => `<tr><td class="num">${x.row}</td><td>${esc(x.why)}</td></tr>`).join('')}</table></div>` : ''}
+     <div class="row" style="margin-top:10px"><a class="btn sm" href="#clients">Open All clients</a><button class="btn ghost sm" data-cimpx="again">Import another file</button><button class="btn link" data-cimpx="close">Close</button></div>`;
+  } else if (I.step === 'map') {
+    const prev = I.rows.slice(0, 5).map(r => cimpRow(I, r)), F = CIMP_F.filter(([k]) => I.map[k] !== undefined && I.map[k] !== '');
+    const opt = k => `<option value="">— not in sheet —</option>${I.headers.map((h, j) => `<option value="${j}" ${I.map[k] !== undefined && I.map[k] !== '' && +I.map[k] === j ? 'selected' : ''}>${impCol(j)}: ${esc(h || '(no heading)')}</option>`).join('')}`;
+    body = `<div class="sub" style="margin-bottom:8px"><b>${esc(I.name)}</b> · ${I.rows.length} row${I.rows.length === 1 ? '' : 's'} found. Check which column goes where — the CRM has guessed from the headings.</div>
+     ${owner ? `<div class="grid g3">${owner}</div>` : ''}
+     <div class="grid g3" style="margin-top:10px">${CIMP_F.map(([k, l]) => `<label class="f">${l}<select data-cimpmap="${k}">${opt(k)}</select></label>`).join('')}</div>
+     <h3 style="margin-top:12px">Preview — first ${prev.length} rows</h3>${F.length ? `<div class="tw"><table><tr>${F.map(([, l]) => `<th>${l.replace(' *', '')}</th>`).join('')}</tr>${prev.map(o => `<tr>${F.map(([k]) => `<td>${esc(o[k] || '')}</td>`).join('')}</tr>`).join('')}</table></div>` : ''}
+     <p class="sub">Clients already in the CRM (same company name, phone or email) are skipped. Rows with an expo name also get their first expo order.</p>
+     <div class="row" style="margin-top:10px"><button class="btn" data-cimpx="go">Import ${I.rows.length} client${I.rows.length === 1 ? '' : 's'}</button><button class="btn ghost sm" data-cimpx="again">Choose another file</button><button class="btn link" data-cimpx="close">Cancel</button><span class="sub" id="cimp-prog"></span></div>`;
+  } else {
+    body = `<p class="sub" style="margin-top:0">Add many clients at once from an Excel (.xlsx) or CSV file — one client per row, column names in the first row. Easiest: download the template, fill it, and upload it here.</p>
+     <div class="grid g3">${owner}<label class="f">Excel / CSV file *<input type="file" id="cimp-file" accept=".xlsx,.xlsm,.xls,.csv"></label></div><span class="sub" id="cimp-prog"></span>
+     <div class="row" style="margin-top:10px"><a class="btn ghost sm" href="client_template.php">⬇ Download the Excel template</a><button class="btn link" data-cimpx="close">Cancel</button></div>`;
+  }
+  return `<div class="panel" id="cimppanel"><h2>Import clients from Excel</h2>${body}</div>`;
+}
+function cimpWire() {
+  const P = $('#cimppanel'); if (!P) return; const I = C.cimp;
+  P.querySelectorAll('[data-cimp]').forEach(el => el.addEventListener('change', () => { I[el.dataset.cimp] = el.value; }));
+  P.querySelectorAll('[data-cimpmap]').forEach(el => el.addEventListener('change', () => { I.map[el.dataset.cimpmap] = el.value === '' ? '' : +el.value; refresh(); }));
+  const fi = $('#cimp-file'); if (fi) fi.onchange = async () => {
+    const file = fi.files[0]; if (!file) return; $('#cimp-prog').textContent = 'Reading the file…';
+    try { const r = await impRead(file); if (!r.rows.length) throw new Error('No rows found under the headings.'); Object.assign(I, r, { step: 'map', map: cimpGuess(r.headers) }); refresh(); }
+    catch (e) { $('#cimp-prog').textContent = ''; toast(e.message || 'Could not read this file', true); }
+  };
+  P.querySelectorAll('[data-cimpx]').forEach(b => b.onclick = async () => {
+    const x = b.dataset.cimpx;
+    if (x === 'close') { C.cimp = null; return refresh(); }
+    if (x === 'again') { C.cimp = { step: 'file', owner_id: I.owner_id }; return refresh(); }
+    if (I.map.company === undefined || I.map.company === '') return toast('Pick the Company name column', true);
+    b.disabled = true; const all = I.rows.map(r => cimpRow(I, r)), R = { added: 0, orders: 0, skipped: [] };
+    try {
+      for (let i = 0; i < all.length; i += 250) {
+        $('#cimp-prog').textContent = `Saving ${Math.min(i + 250, all.length)} of ${all.length}…`;
+        const r = await api('client_import', { owner_id: I.owner_id || '', rows: all.slice(i, i + 250) });
+        R.added += r.added; R.orders += r.orders; R.skipped.push(...r.skipped);
+      }
+      Object.assign(I, { step: 'done', res: R }); toast(`${R.added} clients imported`); reboot().catch(() => {}); refresh();
+    } catch (e) { b.disabled = false; $('#cimp-prog').textContent = `Stopped: ${e.message}. ${R.added} were saved before this.`; }
+  });
+}
 routes.newclient = async () => {
   const n = newClient || (newClient = { company: '', email: '', phone: '', person: '', designation: '', city: '', location: '', gst_no: '', notes: '', owner_id: '', contacts: [], cards: [], briefs: [], gstcert: [], expo: { expo: '', location: '', start_date: '', area_sqm: '', space_type: '', sides_open: '', stall_no: '' } });
   const F = (k, l, t = 'text') => `<label class="f">${l}<input data-nc="${k}" type="${t}" value="${esc(n[k])}"></label>`;
   view().innerHTML = `
   ${n.ref_id ? '<div class="alert"><b>From a referral lead</b><span class="m">Saving this client marks the referral as “added as client”. Add the expo details if you have them.</span></div>' : ''}
-  <div class="head"><div><h1>New client</h1><p>${handsOver() ? 'Add a client you found and hand it to a sales person. They see it on their dashboard straight away.' : ''} As you type the company, email or phone, the CRM checks every past record, including other employees' clients.</p></div></div>
+  <div class="head"><div><h1>New client</h1><p>${handsOver() ? 'Add a client you found and hand it to a sales person. They see it on their dashboard straight away.' : ''} As you type the company, email or phone, the CRM checks every past record, including other employees' clients.</p></div>${B.records ? '<button class="btn ghost" id="cimp-open">⬆ Import clients from Excel</button>' : ''}</div>
+  ${C.cimp ? cimpPanel(C.cimp) : ''}
   <div class="panel"><h2>Client details</h2>
    <div class="grid">${F('company', 'Company name *')}${F('email', 'Email', 'email')}${F('phone', 'Phone', 'tel')}${F('person', 'Contact person')}${F('designation', 'Designation')}${F('city', 'City')}${gstF(`<input data-nc="gst_no" value="${esc(n.gst_no)}" maxlength="15" style="text-transform:uppercase">`)}
    ${handsOver() ? `<label class="f">Hand to sales person *<select data-nc="owner_id"><option value="">Pick who takes this client</option>${(B.handover || []).map(u => `<option value="${u.id}" ${+n.owner_id === +u.id ? 'selected' : ''}>${esc(u.name)}${u.role === 'admin' ? ' (admin)' : u.designation ? ' · ' + esc(u.designation) : ''}</option>`).join('')}</select></label>` : ''}
@@ -412,6 +475,8 @@ routes.newclient = async () => {
   <div class="panel"><h2>Business cards</h2><div class="row"><label class="up">⬆ Add business card (photo / PDF)<input type="file" multiple id="nc-cards" accept=".jpg,.jpeg,.png,.webp,.heic,.pdf"></label>${n.cards.map(f => `<span class="chip">📎 <span>${esc(f.name)}</span></span>`).join('')}</div></div>`}
   <div class="row"><button class="btn" id="nc-save">${handsOver() ? 'Save & hand over' : 'Save client'}</button><a class="btn ghost" href="${handsOver() ? '#home' : '#clients'}">Cancel</a></div>
   ${handsOver() ? '<div class="panel" id="myhand" style="margin-top:16px"><h2>Clients you added</h2><div class="sub">Loading…</div></div>' : ''}`;
+  if ($('#cimp-open')) $('#cimp-open').onclick = () => { C.cimp = C.cimp ? null : { step: 'file' }; refresh(); };
+  cimpWire();
   dupCheck();
   if (handsOver()) api('my_handovers').then(d => { const el = $('#myhand'); if (el) el.innerHTML = `<h2>Clients you added</h2>${d.rows.length ? `<div class="tw"><table><tr><th>Added</th><th>Company</th><th>Contact</th><th>City</th><th>Handed to</th></tr>${d.rows.map(r => `<tr><td class="num">${fd(r.created_at)}</td><td><b>${esc(r.company)}</b></td><td>${esc(r.person || '')}<div class="sub">${esc(r.phone || '')}</div></td><td>${esc(r.city || '')}</td><td>${esc(r.owner)} ${waBtn(phoneOf(r.owner_id), `Hi ${(r.owner || '').split(' ')[0]}, I have added a new client for you in the CRM: ${r.company}${r.person ? ', ' + r.person : ''}${r.phone ? ' — ' + r.phone : ''}${r.city ? ' (' + r.city + ')' : ''}.\n${crmLink('#refs')}`, 'Notify')}</td></tr>`).join('')}</table></div>` : '<div class="sub">None yet.</div>'}`; }).catch(() => {});
 };

@@ -425,6 +425,43 @@ case 'client_save':
   upd('clients', $c['id'], $data);
   out(['ok' => true]);
 
+case 'client_import':   // sales / admin: many clients from an Excel / CSV sheet (sent in batches by the browser); duplicates are skipped
+  if (!$RECORDS) fail('Only sales and admin can import clients.', 403);
+  $owner = $ADMIN && !empty($in['owner_id']) ? (int) $in['owner_id'] : $MID;
+  if (!val('SELECT id FROM ' . T('users') . ' WHERE id = ? AND active = 1', [$owner])) fail('Pick who handles these clients.');
+  $um = users_map(); $added = 0; $orders = 0; $skipped = [];
+  $date = function ($v) {   // 10-12-2026 · 10/12/2026 · 2026-12-10 · 10 Dec 2026 · Excel date number
+    $v = trim((string) $v); if ($v === '') return null;
+    if (preg_match('/^\d{5}(\.\d+)?$/', $v)) return date('Y-m-d', ((int) $v - 25569) * 86400);
+    if (preg_match('/^(\d{4})-(\d{1,2})-(\d{1,2})/', $v, $m)) return checkdate($m[2], $m[3], $m[1]) ? sprintf('%04d-%02d-%02d', $m[1], $m[2], $m[3]) : null;
+    if (preg_match('/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})$/', $v, $m)) { $y = strlen($m[3]) === 2 ? 2000 + $m[3] : (int) $m[3]; return checkdate($m[2], $m[1], $y) ? sprintf('%04d-%02d-%02d', $y, $m[2], $m[1]) : null; }
+    $t = strtotime($v); return $t ? date('Y-m-d', $t) : null;
+  };
+  tx();
+  foreach (array_slice((array) ($in['rows'] ?? []), 0, 300) as $x) {
+    $x = (array) $x; $n = (int) ($x['_row'] ?? 0);
+    $co = s($x['company'] ?? null, 200); if (!$co) { $skipped[] = ['row' => $n, 'why' => 'no company name']; continue; }
+    $em = strtolower(s($x['email'] ?? null, 160) ?? ''); $note = s($x['notes'] ?? null, 3000);
+    if ($em && !filter_var($em, FILTER_VALIDATE_EMAIL)) { $note = trim(($note ?? '') . " Email in sheet: $em"); $em = ''; }
+    $ph = s($x['phone'] ?? null, 60); $p10 = substr(preg_replace('/\D/', '', (string) $ph), -10);
+    $dup = one('SELECT id, company, owner_id FROM ' . T('clients') . ' WHERE LOWER(TRIM(company)) = LOWER(?)' . ($em ? ' OR LOWER(email) = ?' : '') . (strlen($p10) === 10 ? ' OR phone LIKE ?' : ''),
+      array_merge([$co], $em ? [$em] : [], strlen($p10) === 10 ? ['%' . substr($p10, -6)] : []));
+    if ($dup && strlen($p10) === 10 && strcasecmp(trim($dup['company']), $co) !== 0 && (!$em || strtolower((string) val('SELECT email FROM ' . T('clients') . ' WHERE id = ?', [$dup['id']])) !== $em)
+        && substr(preg_replace('/\D/', '', (string) val('SELECT phone FROM ' . T('clients') . ' WHERE id = ?', [$dup['id']])), -10) !== $p10) $dup = null;   // last-6-digit hit but not the same number
+    if ($dup) { $skipped[] = ['row' => $n, 'why' => "$co — already a client" . ($dup['company'] !== $co ? " ({$dup['company']})" : '') . ', handled by ' . ($um[$dup['owner_id']] ?? '—')]; continue; }
+    $id = ins('clients', ['company' => $co, 'person' => s($x['person'] ?? null, 120), 'designation' => s($x['designation'] ?? null, 120), 'phone' => $ph, 'email' => $em ?: null,
+      'city' => s($x['city'] ?? null, 80), 'location' => s($x['location'] ?? null, 1000), 'gst_no' => strtoupper(preg_replace('/\s/', '', s($x['gst_no'] ?? null, 20) ?? '')) ?: null, 'notes' => $note ?: null,
+      'owner_id' => $owner, 'created_by' => $MID, 'created_at' => now()]);
+    $added++;
+    if ($ex = s($x['expo'] ?? null, 200)) {
+      $st = strtolower(trim((string) ($x['space_type'] ?? ''))); $st = str_contains($st, 'shell') ? 'Shell scheme' : (str_contains($st, 'bare') || str_contains($st, 'raw') ? 'Bare space' : null);
+      create_project($id, $owner, ['expo' => $ex, 'location' => s($x['expo_city'] ?? null, 200), 'start_date' => $date($x['start_date'] ?? ''), 'area_sqm' => preg_replace('/[^\d.]/', '', (string) ($x['area_sqm'] ?? '')), 'stall_no' => $x['stall_no'] ?? null, 'space_type' => $st, 'sides_open' => (int) preg_replace('/\D/', '', (string) ($x['sides_open'] ?? ''))]);
+      $orders++;
+    }
+  }
+  db()->commit();
+  out(['added' => $added, 'orders' => $orders, 'skipped' => $skipped]);
+
 case 'dup':
   $name = s($in['company'] ?? null, 200); $email = strtolower(s($in['email'] ?? null, 160) ?? ''); $ph = substr(preg_replace('/\D/', '', $in['phone'] ?? ''), -10);
   $w = []; $p = [];
