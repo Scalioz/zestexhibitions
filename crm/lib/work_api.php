@@ -135,15 +135,15 @@ case 'lead_bulk':   // rows pasted from Excel: company, contact, phone, email, n
   if ($added) touch_activity();
   out(['added' => $added, 'skipped' => $skipped]);
 
-case 'lead_import':   // admin: exhibitor list from an Excel / CSV file into an expo, credited to a person — sent in batches by the browser
-  need_admin();
+case 'lead_import':   // exhibitor list from an Excel / CSV file into an expo — research, telecalling and admin (admin can credit it to anyone); sent in batches by the browser
+  lead_dept_ok();
   if (!empty($in['expo_id'])) $e = expo_row($in['expo_id']);
   else {
     $nm = s($in['expo_name'] ?? null, 200) ?? fail('Pick the expo or type a new expo name.');
     $e = one('SELECT * FROM ' . T('expos') . ' WHERE LOWER(name) = LOWER(?) ORDER BY edate DESC', [$nm]);
     if (!$e) { $id = ins('expos', ['name' => $nm, 'edate' => d($in['edate'] ?? null), 'city' => s($in['city'] ?? null, 80), 'created_by' => $MID, 'created_at' => now()]); $e = expo_row($id); }
   }
-  $u = one('SELECT id, department FROM ' . T('users') . ' WHERE id = ?', [(int) ($in['user_id'] ?? $MID)]) ?? fail('Pick who the entries belong to.');
+  $u = one('SELECT id, department FROM ' . T('users') . ' WHERE id = ?', [$ADMIN ? (int) ($in['user_id'] ?? $MID) : $MID]) ?? fail('Pick who the entries belong to.');
   $rows = array_slice((array) ($in['rows'] ?? []), 0, 500); $added = 0; $skipped = []; $seen = [];
   tx();
   foreach ($rows as $x) {
@@ -160,6 +160,7 @@ case 'lead_import':   // admin: exhibitor list from an Excel / CSV file into an 
     $seen[$k] = 1; $added++;
   }
   db()->commit();
+  if ($added) touch_activity();
   out(['added' => $added, 'skipped' => $skipped, 'expo_id' => (int) $e['id']]);
 
 case 'lead_update':

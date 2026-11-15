@@ -730,7 +730,8 @@ routes.leads = async () => {
   const d = await api('lexpos', { q: C.lq || '' });
   const calls = (B.modules || [B.module]).includes('calls');
   view().innerHTML = `
-  <div class="head"><div><h1>Expo data</h1><p>${calls ? 'Expos you are calling exhibitors for.' : 'Expos you are collecting exhibitor data for.'} Open an expo to add or correct entries.</p></div></div>
+  <div class="head"><div><h1>Expo data</h1><p>${calls ? 'Expos you are calling exhibitors for.' : 'Expos you are collecting exhibitor data for.'} Open an expo to add or correct entries.</p></div><button class="btn" id="limp-open">⬆ Import from Excel</button></div>
+  ${C.limp ? limpPanel(C.limp, d) : ''}
   <form class="panel" id="lx-new"><h2>Add an expo</h2><p class="sub" style="margin-top:0">If a colleague already added the same expo, pick it from the suggestions — your entries will sit under the same expo.</p>
    <div class="grid g3"><label class="f">Expo name *<input name="name" required list="expo-list" autocomplete="off"></label><label class="f">Expo date<input type="date" name="edate"></label><label class="f">Expo location / city<input name="city"></label><label class="f">Expo website<input name="website" placeholder="www.example.com"></label></div>
    <datalist id="expo-list">${d.all_expos.map(e => `<option value="${esc(e.name)}">${esc([e.city, e.edate ? fd(e.edate) : ''].filter(Boolean).join(' · '))}</option>`).join('')}</datalist>
@@ -739,6 +740,8 @@ routes.leads = async () => {
    ${d.expos.length ? `<div class="tw"><table><tr><th>Expo</th><th>Date</th><th>City</th><th>Website</th><th class="r">My entries</th><th>Last entry</th></tr>
    ${d.expos.map(e => `<tr class="click" data-go="lexpo-${e.id}"><td><b>${esc(e.name)}</b></td><td class="num">${fd(e.edate)}</td><td>${esc(e.city || '—')}</td><td>${link(e.website)}</td><td class="r num">${e.entries}</td><td class="num">${fd(e.last)}</td></tr>`).join('')}</table></div>`
    : blank('No expos yet. Add the expo you are working on above.')}</div>`;
+  $('#limp-open').onclick = () => { C.limp = C.limp ? null : { step: 'file', user_id: String(B.me.id) }; refresh(); };
+  limpWire(d);
   $('#lx-new').onsubmit = async e => { e.preventDefault(); const r = await act(() => api('lexpo_save', Object.fromEntries(new FormData(e.target))), 'Expo ready').catch(() => null); if (r) location.hash = '#lexpo-' + r.id; };
   let tq; $('#lq').oninput = e => { clearTimeout(tq); tq = setTimeout(() => { C.lq = e.target.value.trim(); refresh().then(() => { const i = $('#lq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 350); };
 };
@@ -793,7 +796,7 @@ function limpPanel(I, d) {
   const top = `<div class="grid g3"><label class="f">Expo *<input data-limp="expo" list="limp-expos" value="${esc(I.expo || '')}" placeholder="Pick an expo or type a new one"></label>
     <datalist id="limp-expos">${d.all_expos.map(e => `<option value="${esc(e.name)}">${esc([e.city, e.edate ? fd(e.edate) : ''].filter(Boolean).join(' · '))}</option>`).join('')}</datalist>
     <label class="f">Expo date <span class="sub" style="font-weight:400">(new expo only)</span><input type="date" data-limp="edate" value="${esc(I.edate || '')}"></label>
-    <label class="f">Entries belong to<select data-limp="user_id">${who.map(u => `<option value="${u.id}" ${+u.id === +I.user_id ? 'selected' : ''}>${esc(u.name)} · ${esc(u.department)}</option>`).join('')}</select></label></div>`;
+    ${isAdmin() ? `<label class="f">Entries belong to<select data-limp="user_id">${who.map(u => `<option value="${u.id}" ${+u.id === +I.user_id ? 'selected' : ''}>${esc(u.name)} · ${esc(u.department)}</option>`).join('')}</select></label>` : ''}</div>`;
   let body;
   if (I.step === 'done') {
     const R = I.res;
