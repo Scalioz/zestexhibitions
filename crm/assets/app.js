@@ -777,6 +777,72 @@ routes.lexpo = async ({ id }) => {
   </div>`;
 };
 
+// ---------- admin: import an exhibitor list (Excel / CSV) into the expo data log ----------
+const LIMP_F = [['company', 'Company *', 'company|companyname|exhibitor|exhibitorname|organisation|organization|firm|brand|name'], ['person', 'Contact person', 'contactperson|person|contactname|contact|personname|name|fullname'],
+  ['designation', 'Designation', 'designation|title|jobtitle|position'], ['phone', 'Phone', 'phone|mobile|mobileno|mobilenumber|phoneno|phonenumber|contactno|contactnumber|cell|whatsapp|tel|telephone|mob'],
+  ['email', 'Email', 'email|emailid|emailaddress|mail|mailid'], ['city', 'City', 'city|location|town|state'], ['website', 'Website', 'website|web|url|site'], ['stall', 'Stall / hall', 'stall|stallno|booth|boothno|hall|hallno|standno|stand'], ['notes', 'Notes / comments', 'note|notes|remarks|remark|comment|comments|products|category']];
+function limpGuess(headers) {
+  const map = {}, used = new Set(), H = headers.map(impNorm);
+  for (const pass of [0, 1]) for (const [k, , syn] of LIMP_F) { if (map[k] !== undefined) continue; const S = syn.split('|');
+    const i = H.findIndex((h, j) => !used.has(j) && h && (pass ? S.some(x => x.length > 3 && h.includes(x)) : S.includes(h))); if (i >= 0) { map[k] = i; used.add(i); } }
+  return map;
+}
+const limpRow = (I, r) => { const o = { _row: r.n }; LIMP_F.forEach(([k]) => { const j = I.map[k]; if (j !== undefined && j !== '') o[k] = r.c[j] || ''; }); return o; };
+function limpPanel(I, d) {
+  const who = B.users.filter(u => +u.active);
+  const top = `<div class="grid g3"><label class="f">Expo *<input data-limp="expo" list="limp-expos" value="${esc(I.expo || '')}" placeholder="Pick an expo or type a new one"></label>
+    <datalist id="limp-expos">${d.all_expos.map(e => `<option value="${esc(e.name)}">${esc([e.city, e.edate ? fd(e.edate) : ''].filter(Boolean).join(' · '))}</option>`).join('')}</datalist>
+    <label class="f">Expo date <span class="sub" style="font-weight:400">(new expo only)</span><input type="date" data-limp="edate" value="${esc(I.edate || '')}"></label>
+    <label class="f">Entries belong to<select data-limp="user_id">${who.map(u => `<option value="${u.id}" ${+u.id === +I.user_id ? 'selected' : ''}>${esc(u.name)} · ${esc(u.department)}</option>`).join('')}</select></label></div>`;
+  let body;
+  if (I.step === 'done') {
+    const R = I.res;
+    body = `<div class="alert ${R.added ? '' : 'warn'}"><b>${R.added} entr${R.added === 1 ? 'y' : 'ies'} added to ${esc(I.expo)}</b><span class="m">${R.skipped.length ? `${R.skipped.length} row${R.skipped.length === 1 ? '' : 's'} skipped.` : 'Nothing skipped.'}</span></div>
+     ${R.skipped.length ? `<div class="tw" style="margin-top:8px;max-height:220px;overflow:auto"><table><tr><th>Sheet row</th><th>Why skipped</th></tr>${R.skipped.slice(0, 300).map(x => `<tr><td class="num">${x.row}</td><td>${esc(x.why)}</td></tr>`).join('')}</table></div>` : ''}
+     <div class="row" style="margin-top:10px">${R.expo_id ? `<a class="btn sm" href="#lexpo-${R.expo_id}">Open this expo</a>` : ''}<button class="btn ghost sm" data-limpx="again">Import another file</button><button class="btn link" data-limpx="close">Close</button></div>`;
+  } else if (I.step === 'map') {
+    const prev = I.rows.slice(0, 5).map(r => limpRow(I, r)), F = LIMP_F.filter(([k]) => I.map[k] !== undefined && I.map[k] !== '');
+    const opt = k => `<option value="">— not in sheet —</option>${I.headers.map((h, j) => `<option value="${j}" ${I.map[k] !== undefined && I.map[k] !== '' && +I.map[k] === j ? 'selected' : ''}>${impCol(j)}: ${esc(h || '(no heading)')}</option>`).join('')}`;
+    body = `<div class="sub" style="margin-bottom:8px"><b>${esc(I.name)}</b> · ${I.rows.length} row${I.rows.length === 1 ? '' : 's'} found. Check which column goes where — the CRM has guessed from the headings.</div>${top}
+     <div class="grid g3" style="margin-top:10px">${LIMP_F.map(([k, l]) => `<label class="f">${l}<select data-limpmap="${k}">${opt(k)}</select></label>`).join('')}</div>
+     <p class="sub">Designation, city, website and stall go into the notes of each entry. Companies already in this expo are skipped.</p>
+     <h3 style="margin-top:10px">Preview — first ${prev.length} rows</h3>${F.length ? `<div class="tw"><table><tr>${F.map(([, l]) => `<th>${l.replace(' *', '')}</th>`).join('')}</tr>${prev.map(o => `<tr>${F.map(([k]) => `<td>${esc(o[k] || '')}</td>`).join('')}</tr>`).join('')}</table></div>` : ''}
+     <div class="row" style="margin-top:10px"><button class="btn" data-limpx="go">Import ${I.rows.length} row${I.rows.length === 1 ? '' : 's'}</button><button class="btn ghost sm" data-limpx="again">Choose another file</button><button class="btn link" data-limpx="close">Cancel</button><span class="sub" id="limp-prog"></span></div>`;
+  } else {
+    body = `<p class="sub" style="margin-top:0">Bring an exhibitor list (Excel .xlsx or CSV) into an expo. The first row should have the column names — e.g. Company, Contact person, Phone, Email.</p>${top}
+     <div class="grid g3" style="margin-top:10px"><label class="f">Excel / CSV file *<input type="file" id="limp-file" accept=".xlsx,.xlsm,.xls,.csv"></label></div><span class="sub" id="limp-prog"></span>
+     <div class="row" style="margin-top:10px"><button class="btn link" data-limpx="close">Cancel</button></div>`;
+  }
+  return `<div class="panel" id="limppanel"><h2>Import expo data from Excel</h2>${body}</div>`;
+}
+function limpWire(d) {
+  const P = $('#limppanel'); if (!P) return; const I = C.limp;
+  P.querySelectorAll('[data-limp]').forEach(el => el.addEventListener('input', () => { I[el.dataset.limp] = el.value; }));
+  P.querySelectorAll('[data-limp]').forEach(el => el.addEventListener('change', () => { I[el.dataset.limp] = el.value; }));
+  P.querySelectorAll('[data-limpmap]').forEach(el => el.addEventListener('change', () => { I.map[el.dataset.limpmap] = el.value === '' ? '' : +el.value; refresh(); }));
+  const fi = $('#limp-file'); if (fi) fi.onchange = async () => {
+    const file = fi.files[0]; if (!file) return; $('#limp-prog').textContent = 'Reading the file…';
+    try { const r = await impRead(file); if (!r.rows.length) throw new Error('No rows found under the headings.'); Object.assign(I, r, { step: 'map', map: limpGuess(r.headers) }); refresh(); }
+    catch (e) { $('#limp-prog').textContent = ''; toast(e.message || 'Could not read this file', true); }
+  };
+  P.querySelectorAll('[data-limpx]').forEach(b => b.onclick = async () => {
+    const x = b.dataset.limpx;
+    if (x === 'close') { C.limp = null; return refresh(); }
+    if (x === 'again') { C.limp = { step: 'file', expo: I.expo, edate: I.edate, user_id: I.user_id }; return refresh(); }
+    const nm = (I.expo || '').trim(); if (!nm) return toast('Pick the expo, or type a new expo name', true);
+    if (I.map.company === undefined || I.map.company === '') return toast('Pick the Company column', true);
+    const ex = d.all_expos.find(e => e.name.trim().toLowerCase() === nm.toLowerCase());
+    b.disabled = true; const all = I.rows.map(r => limpRow(I, r)), R = { added: 0, skipped: [], expo_id: ex ? ex.id : 0 };
+    try {
+      for (let i = 0; i < all.length; i += 400) {
+        $('#limp-prog').textContent = `Saving ${Math.min(i + 400, all.length)} of ${all.length}…`;
+        const r = await api('lead_import', { expo_id: R.expo_id || '', expo_name: nm, edate: I.edate || '', user_id: I.user_id, rows: all.slice(i, i + 400) });
+        R.added += r.added; R.skipped.push(...r.skipped); R.expo_id = r.expo_id;
+      }
+      Object.assign(I, { step: 'done', res: R }); toast(`${R.added} entries imported`); refresh();
+    } catch (e) { b.disabled = false; $('#limp-prog').textContent = `Stopped: ${e.message}. ${R.added} were saved before this.`; }
+  });
+}
 routes.leadlog = async () => {
   const f = C.llog || (C.llog = { q: '', user_id: '', dept: '', from: '', to: '' });
   const d = await api('lexpos', f);
@@ -784,7 +850,9 @@ routes.leadlog = async () => {
   const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
   const total = d.expos.reduce((s, e) => s + e.entries, 0), today = d.people.reduce((s, p) => s + p.today, 0);
   view().innerHTML = `
-  <div class="head"><div><h1>Expo data log</h1><p>Exhibitor data collected by research and telecalling. Open an expo to see every entry.</p></div><a class="btn" href="export_leads.php${qs ? '?' + qs : ''}">⬇ Export to Excel</a></div>
+  <div class="head"><div><h1>Expo data log</h1><p>Exhibitor data collected by research and telecalling. Open an expo to see every entry.</p></div><div class="row"><button class="btn ghost" id="limp-open">⬆ Import from Excel</button><a class="btn" href="export_leads.php${qs ? '?' + qs : ''}">⬇ Export to Excel</a></div></div>
+  ${C.limp ? limpPanel(C.limp, d) : ''}
+  ${!d.expos.some(e => e.entries) && !C.limp ? `<div class="alert"><b>Where the entries come from</b><span class="m">Data Research and Telecalling staff add exhibitors from their login: <b>Expo data → open an expo → + Add entry</b> (or paste rows from Excel). You can also bring a whole exhibitor list in with <b>⬆ Import from Excel</b> above.</span></div>` : ''}
   <form class="panel row" id="llogf" style="align-items:flex-end">
    <label class="f" style="flex:1;min-width:180px">Search expo / city<input name="q" value="${esc(f.q)}"></label>
    <label class="f">Employee<select name="user_id"><option value="">Everyone</option>${d.people.map(p => `<option value="${p.id}" ${+f.user_id === +p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
@@ -796,6 +864,8 @@ routes.leadlog = async () => {
   <div class="log">${d.expos.length ? d.expos.map(e => `<details data-lx="${e.id}"><summary><b>${esc(e.name)}</b><span class="sub">${fd(e.edate)} · ${esc(e.city || '—')}</span><span class="sub">${esc(e.by.map(b => `${b.name} (${b.n})`).join(', ') || 'no entries yet')}</span>
      <span style="margin-left:auto" class="row"><span class="num">${e.entries} entr${e.entries === 1 ? 'y' : 'ies'}</span><span class="sub">last ${fd(e.last)}</span></span></summary>
      <div class="in"><div class="row" style="margin-bottom:8px"><span class="sub">${link(e.website)}</span><a class="btn ghost sm" href="#lexpo-${e.id}">Open & edit</a><a class="btn ghost sm" href="export_leads.php?expo_id=${e.id}${f.user_id ? '&user_id=' + f.user_id : ''}">⬇ Export this expo</a></div><div data-lxbody="${e.id}"><div class="loading">Loading entries…</div></div></div></details>`).join('') : blank('No expo data in this view.')}</div>`;
+  $('#limp-open').onclick = () => { C.limp = C.limp ? null : { step: 'file', user_id: String(B.me.id) }; refresh(); };
+  limpWire(d);
   $('#llogf').onsubmit = e => { e.preventDefault(); C.llog = Object.fromEntries(new FormData(e.target)); refresh(); };
   if ($('#llogclear')) $('#llogclear').onclick = () => { C.llog = null; refresh(); };
   document.querySelectorAll('details[data-lx]').forEach(el => el.addEventListener('toggle', async () => {

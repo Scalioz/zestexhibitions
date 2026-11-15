@@ -135,6 +135,33 @@ case 'lead_bulk':   // rows pasted from Excel: company, contact, phone, email, n
   if ($added) touch_activity();
   out(['added' => $added, 'skipped' => $skipped]);
 
+case 'lead_import':   // admin: exhibitor list from an Excel / CSV file into an expo, credited to a person — sent in batches by the browser
+  need_admin();
+  if (!empty($in['expo_id'])) $e = expo_row($in['expo_id']);
+  else {
+    $nm = s($in['expo_name'] ?? null, 200) ?? fail('Pick the expo or type a new expo name.');
+    $e = one('SELECT * FROM ' . T('expos') . ' WHERE LOWER(name) = LOWER(?) ORDER BY edate DESC', [$nm]);
+    if (!$e) { $id = ins('expos', ['name' => $nm, 'edate' => d($in['edate'] ?? null), 'city' => s($in['city'] ?? null, 80), 'created_by' => $MID, 'created_at' => now()]); $e = expo_row($id); }
+  }
+  $u = one('SELECT id, department FROM ' . T('users') . ' WHERE id = ?', [(int) ($in['user_id'] ?? $MID)]) ?? fail('Pick who the entries belong to.');
+  $rows = array_slice((array) ($in['rows'] ?? []), 0, 500); $added = 0; $skipped = []; $seen = [];
+  tx();
+  foreach ($rows as $x) {
+    $x = (array) $x; $n = (int) ($x['_row'] ?? 0); $co = s($x['company'] ?? null, 200);
+    if (!$co) { $skipped[] = ['row' => $n, 'why' => 'no company name']; continue; }
+    $k = mb_strtolower($co);
+    if (isset($seen[$k])) { $skipped[] = ['row' => $n, 'why' => "$co is twice in the file"]; continue; }
+    if ($dup = lead_dup($e['id'], $u['department'], $co)) { $skipped[] = ['row' => $n, 'why' => "$co already in this expo (added by {$dup['name']})"]; continue; }
+    $em = strtolower(s($x['email'] ?? null, 160) ?? ''); $extra = [];
+    if ($em && !filter_var($em, FILTER_VALIDATE_EMAIL)) { $extra[] = "Email in sheet: $em"; $em = ''; }
+    foreach (['designation' => 'Designation', 'city' => 'City', 'website' => 'Website', 'stall' => 'Stall / hall'] as $f => $lbl) if ($v = s($x[$f] ?? null, 300)) $extra[] = "$lbl: $v";
+    $notes = trim(implode(' · ', array_filter([s($x['notes'] ?? null, 3000), implode(' · ', $extra)])));
+    ins('leads', ['expo_id' => $e['id'], 'user_id' => $u['id'], 'dept' => $u['department'], 'company' => $co, 'person' => s($x['person'] ?? null, 120), 'phone' => s($x['phone'] ?? null, 60), 'email' => $em ?: null, 'notes' => $notes ?: null, 'created_at' => now()]);
+    $seen[$k] = 1; $added++;
+  }
+  db()->commit();
+  out(['added' => $added, 'skipped' => $skipped, 'expo_id' => (int) $e['id']]);
+
 case 'lead_update':
   lead_dept_ok();
   $l = one('SELECT * FROM ' . T('leads') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]); if (!$l) fail('Entry not found.', 404);
