@@ -477,7 +477,8 @@ case 'inv_save':   // accounts prepares / corrects; optional send to admin in th
   $dIn = str_replace([',', ' ', '₹'], '', (string) ($in['discount'] ?? '')); if ($dIn !== '' && !is_numeric($dIn)) fail('Enter the discount as a number.');
   [$lines, $taxable, $gst, $total, , $disc, $ro] = inv_totals($in['lines'] ?? [], $rate, (float) $dIn, $rmode); if (!$lines) fail('Add at least one line.');
   $state = s($in['place_state'] ?? null, 60) ?? (setting('company', [])['state'] ?? '');
-  $mode = mb_strtolower(trim($state)) === mb_strtolower(trim(setting('company', [])['state'] ?? '')) ? 'cgst_sgst' : 'igst';
+  $mode = in_array($in['gst_mode'] ?? '', ['igst', 'cgst_sgst'], true) ? $in['gst_mode']   // chosen on the form (auto-set from place of supply, can be changed)
+    : (mb_strtolower(trim($state)) === mb_strtolower(trim(setting('company', [])['state'] ?? '')) ? 'cgst_sgst' : 'igst');
   $data = ['inv_date' => d($in['inv_date'] ?? null) ?? today(), 'client_id' => $cid, 'project_id' => (int) ($in['project_id'] ?? 0) ?: null, 'place_state' => $state, 'gst_mode' => $mode, 'gst_rate' => $rate,
     'lines_json' => json_encode($lines, JSON_UNESCAPED_UNICODE), 'discount' => $disc, 'round_off' => $ro, 'round_mode' => $rmode, 'taxable' => $taxable, 'gst' => $gst, 'total' => $total, 'notes' => s($in['notes'] ?? null, 2000)];
   tx();
