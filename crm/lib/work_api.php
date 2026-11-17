@@ -9,6 +9,7 @@ function lead_dept_ok() { global $ADMIN, $MODS; if (!$ADMIN && !array_intersect(
 function expo_row($id) { $e = one('SELECT * FROM ' . T('expos') . ' WHERE id = ?', [(int) $id]); if (!$e) fail('Expo not found.', 404); return $e; }
 function clean_web($v) { $v = s($v, 255); if ($v && !preg_match('#^https?://#i', $v)) $v = 'https://' . $v; return $v; }
 function clean_email($v) { $v = strtolower(s($v, 160) ?? ''); if ($v && !filter_var($v, FILTER_VALIDATE_EMAIL)) fail("Email looks wrong: $v"); return $v ?: null; }
+function lead_heat($v) { $v = strtolower(trim((string) $v)); $map = ['hot' => 'hot', 'warm' => 'warm', 'prospective' => 'warm', 'try' => 'try', 'can try' => 'try', 'cold' => 'cold', 'not now' => 'cold', 'no' => 'no', 'not interested' => 'no']; return $map[$v] ?? null; }
 function lead_dup($expoId, $dept, $company, $skipId = 0) {
   return one('SELECT l.id, l.created_at, u.name FROM ' . T('leads') . ' l LEFT JOIN ' . T('users') . ' u ON u.id = l.user_id WHERE l.expo_id = ? AND l.dept = ? AND LOWER(l.company) = LOWER(?) AND l.id <> ?',
     [(int) $expoId, $dept, $company, (int) $skipId]);
@@ -103,14 +104,15 @@ case 'lexpo':
   $w = 'l.expo_id = ?'; $p = [$e['id']];
   if (!$ADMIN) { $w .= ' AND l.user_id = ?'; $p[] = $MID; }
   elseif (!empty($in['user_id'])) { $w .= ' AND l.user_id = ?'; $p[] = (int) $in['user_id']; }
-  $rows = all('SELECT l.*, u.name AS entered_by FROM ' . T('leads') . ' l LEFT JOIN ' . T('users') . " u ON u.id = l.user_id WHERE $w ORDER BY l.id", $p);
+  if (!empty($in['heat'])) { $w .= $in['heat'] === 'none' ? ' AND (l.heat IS NULL OR l.heat = \'\')' : ' AND l.heat = ?'; if ($in['heat'] !== 'none') $p[] = (string) $in['heat']; }
+  $rows = all('SELECT l.*, u.name AS entered_by, a.name AS assigned_name FROM ' . T('leads') . ' l LEFT JOIN ' . T('users') . ' u ON u.id = l.user_id LEFT JOIN ' . T('users') . " a ON a.id = l.assigned_to WHERE $w ORDER BY l.id", $p);
   $e['created_by_name'] = users_map()[$e['created_by']] ?? '—';
   out(['expo' => $e, 'entries' => $rows, 'can_edit_expo' => $ADMIN || (int) $e['created_by'] === $MID]);
 
 case 'lead_add':
   lead_dept_ok();
   $e = expo_row($in['expo_id'] ?? 0);
-  $row = ['company' => s($in['company'] ?? null, 200), 'person' => s($in['person'] ?? null, 120), 'phone' => s($in['phone'] ?? null, 60), 'email' => clean_email($in['email'] ?? null), 'notes' => s($in['notes'] ?? null, 4000)];
+  $row = ['company' => s($in['company'] ?? null, 200), 'person' => s($in['person'] ?? null, 120), 'phone' => s($in['phone'] ?? null, 60), 'email' => clean_email($in['email'] ?? null), 'notes' => s($in['notes'] ?? null, 4000), 'heat' => lead_heat($in['heat'] ?? null)];
   if (!$row['company']) fail('Enter the company name.');
   if ($dup = lead_dup($e['id'], $me['department'], $row['company'])) fail("{$row['company']} is already in this expo list (added by {$dup['name']} on " . date('d M', strtotime($dup['created_at'])) . ').');
   $id = ins('leads', $row + ['expo_id' => $e['id'], 'user_id' => $MID, 'dept' => $me['department'], 'created_at' => now()]);
@@ -156,18 +158,48 @@ case 'lead_import':   // exhibitor list from an Excel / CSV file into an expo �
     if ($em && !filter_var($em, FILTER_VALIDATE_EMAIL)) { $extra[] = "Email in sheet: $em"; $em = ''; }
     foreach (['designation' => 'Designation', 'city' => 'City', 'website' => 'Website', 'stall' => 'Stall / hall'] as $f => $lbl) if ($v = s($x[$f] ?? null, 300)) $extra[] = "$lbl: $v";
     $notes = trim(implode(' · ', array_filter([s($x['notes'] ?? null, 3000), implode(' · ', $extra)])));
-    ins('leads', ['expo_id' => $e['id'], 'user_id' => $u['id'], 'dept' => $u['department'], 'company' => $co, 'person' => s($x['person'] ?? null, 120), 'phone' => s($x['phone'] ?? null, 60), 'email' => $em ?: null, 'notes' => $notes ?: null, 'created_at' => now()]);
+    ins('leads', ['expo_id' => $e['id'], 'user_id' => $u['id'], 'dept' => $u['department'], 'company' => $co, 'person' => s($x['person'] ?? null, 120), 'phone' => s($x['phone'] ?? null, 60), 'email' => $em ?: null, 'notes' => $notes ?: null, 'heat' => lead_heat($x['heat'] ?? null), 'created_at' => now()]);
     $seen[$k] = 1; $added++;
   }
   db()->commit();
   if ($added) touch_activity();
   out(['added' => $added, 'skipped' => $skipped, 'expo_id' => (int) $e['id']]);
 
+case 'lead_heat':   // how hot a lead is — whoever entered it, whoever it is assigned to, or admin
+  $l = one('SELECT * FROM ' . T('leads') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]) ?? fail('Entry not found.', 404);
+  if (!$ADMIN && (int) $l['user_id'] !== $MID && (int) $l['assigned_to'] !== $MID) fail('You can only mark your own or assigned entries.', 403);
+  upd('leads', $l['id'], ['heat' => lead_heat($in['heat'] ?? null)]);
+  touch_activity(); out(['ok' => true]);
+
+case 'lead_assign':   // admin: give leads to someone to work on (0 = take back)
+  need_admin();
+  $ids = array_slice(array_values(array_filter(array_map('intval', (array) ($in['ids'] ?? [])))), 0, 3000); if (!$ids) fail('Tick the entries to assign.');
+  $to = (int) ($in['user_id'] ?? 0);
+  if ($to && !val('SELECT id FROM ' . T('users') . ' WHERE id = ? AND active = 1', [$to])) fail('Pick who should work on these leads.');
+  $ph = implode(',', array_fill(0, count($ids), '?'));
+  q('UPDATE ' . T('leads') . " SET assigned_to = ?, assigned_by = ?, assigned_at = ? WHERE id IN ($ph)", array_merge([$to ?: null, $to ? $MID : null, $to ? now() : null], $ids));
+  out(['ok' => true, 'n' => count($ids)]);
+
+case 'my_leads':   // leads assigned to me (any department)
+  $w = 'l.assigned_to = ?'; $p = [$MID];
+  if (!empty($in['heat'])) { $w .= $in['heat'] === 'none' ? " AND (l.heat IS NULL OR l.heat = '')" : ' AND l.heat = ?'; if ($in['heat'] !== 'none') $p[] = (string) $in['heat']; }
+  if ($qs = s($in['q'] ?? null, 100)) { $w .= ' AND (l.company LIKE ? OR l.person LIKE ? OR e.name LIKE ?)'; array_push($p, "%$qs%", "%$qs%", "%$qs%"); }
+  $rows = all('SELECT l.*, e.name AS expo, e.edate, e.city AS expo_city, u.name AS entered_by, b.name AS assigned_by_name FROM ' . T('leads') . ' l JOIN ' . T('expos') . ' e ON e.id = l.expo_id LEFT JOIN ' . T('users') . ' u ON u.id = l.user_id LEFT JOIN ' . T('users') . " b ON b.id = l.assigned_by WHERE $w ORDER BY CASE l.heat WHEN 'hot' THEN 1 WHEN 'warm' THEN 2 WHEN 'try' THEN 3 WHEN 'cold' THEN 5 WHEN 'no' THEN 6 ELSE 4 END, l.assigned_at DESC, l.id LIMIT 2000", $p);
+  $counts = []; foreach (all('SELECT COALESCE(heat, \'\') AS h, COUNT(*) AS n FROM ' . T('leads') . ' WHERE assigned_to = ? GROUP BY COALESCE(heat, \'\')', [$MID]) as $r) $counts[$r['h'] ?: 'none'] = (int) $r['n'];
+  out(['rows' => $rows, 'counts' => $counts]);
+
+case 'lead_follow':   // the assigned person writes what happened (call notes, next step)
+  $l = one('SELECT * FROM ' . T('leads') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]) ?? fail('Entry not found.', 404);
+  if (!$ADMIN && (int) $l['assigned_to'] !== $MID) fail('This lead is not assigned to you.', 403);
+  upd('leads', $l['id'], ['follow' => s($in['follow'] ?? null, 4000), 'follow_at' => now()] + (array_key_exists('heat', $in) ? ['heat' => lead_heat($in['heat'])] : []));
+  touch_activity(); out(['ok' => true]);
+
 case 'lead_update':
   lead_dept_ok();
   $l = one('SELECT * FROM ' . T('leads') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]); if (!$l) fail('Entry not found.', 404);
   if (!$ADMIN && (int) $l['user_id'] !== $MID) fail('You can only change your own entries.', 403);
   $row = ['company' => s($in['company'] ?? null, 200), 'person' => s($in['person'] ?? null, 120), 'phone' => s($in['phone'] ?? null, 60), 'email' => clean_email($in['email'] ?? null), 'notes' => s($in['notes'] ?? null, 4000), 'updated_at' => now()];
+  if (array_key_exists('heat', $in)) $row['heat'] = lead_heat($in['heat']);
   if (!$row['company']) fail('Company name cannot be empty.');
   if ($dup = lead_dup($l['expo_id'], $l['dept'], $row['company'], $l['id'])) fail("{$row['company']} is already in this expo list (added by {$dup['name']}).");
   upd('leads', $l['id'], $row);

@@ -263,6 +263,7 @@ function renderNav(cur) {
     : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('vendors', 'Vendors')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('payroll', 'Payroll & salaries')}${L('partners', 'Business partners')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
     : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('vendors', 'Vendors')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
     : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') + L('newclient', '+ New client') + L('contacts', 'Contacts') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('vendors', 'Vendors') + L('contacts', 'Contacts') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`;
+  if (B.my_leads_all && !$('#nav a[href="#myleads"]')) { const first = $('#nav a'); const h = L('myleads', 'Assigned leads', B.my_leads_n || ''); if (first) first.insertAdjacentHTML('afterend', h); else $('#nav').insertAdjacentHTML('afterbegin', h); }
   $('#nav').insertAdjacentHTML('beforeend', `<div class="nav-acc"><div class="sec">${esc(B.me.name)}</div><a href="#account">Account</a><a href="logout.php">Sign out</a></div>`);
   tabBar(cur);
 }
@@ -813,20 +814,21 @@ routes.leads = async () => {
 };
 
 routes.lexpo = async ({ id }) => {
-  const d = await api('lexpo', { id, user_id: isAdmin() ? (C.lxu || '') : '' });
+  const d = await api('lexpo', { id, user_id: isAdmin() ? (C.lxu || '') : '', heat: C.lxh || '' });
   C.lexpo = d; const x = d.expo;
   const admin = isAdmin();
   const showNotes = admin ? true : (B.modules || [B.module]).includes('calls');
   const canDel = e => admin || (+e.user_id === +B.me.id && String(e.created_at).slice(0, 10) === B.today);
-  const cols = 6 + (showNotes ? 1 : 0) + (admin ? 1 : 0);
+  const cols = 7 + (showNotes ? 1 : 0) + (admin ? 3 : 0);
   const people = admin ? [...new Map(d.entries.map(e => [e.user_id, e.entered_by])).entries()] : [];
   const row = (e, i) => C.leditId === +e.id
     ? `<tr><td colspan="${cols + 1}" style="background:var(--gold-soft)"><form data-ledit="${e.id}"><div class="grid g3">
         <label class="f">Company name *<input name="company" required value="${esc(e.company)}"></label><label class="f">Contact person<input name="person" value="${esc(e.person || '')}"></label>
         <label class="f">Phone<input name="phone" value="${esc(e.phone || '')}"></label><label class="f">Email<input name="email" type="email" value="${esc(e.email || '')}"></label>
+        <label class="f">How hot is this lead?<select name="heat">${heatOpts(e.heat)}</select></label>
         ${showNotes ? `<label class="f wide">Comments / notes<textarea name="notes">${esc(e.notes || '')}</textarea></label>` : ''}</div>
         <div class="row" style="margin-top:8px"><button class="btn sm">Save changes</button><button type="button" class="btn ghost sm" data-lcancel="1">Cancel</button></div></form></td></tr>`
-    : `<tr><td class="num">${i + 1}</td><td><b>${esc(e.company)}</b></td><td>${esc(e.person || '')}</td><td class="num">${esc(e.phone || '')}</td><td>${esc(e.email || '')}</td>${showNotes ? `<td>${esc(e.notes || '')}</td>` : ''}${admin ? `<td>${esc(e.entered_by || '—')}<div class="sub">${esc(e.dept)}</div></td>` : ''}<td class="num">${fd(e.created_at)}${e.updated_at ? '<div class="sub">edited</div>' : ''}</td>
+    : `<tr>${admin ? `<td><input type="checkbox" data-lsel="${e.id}" aria-label="Select ${esc(e.company)}"></td>` : ''}<td class="num">${i + 1}</td><td><b>${esc(e.company)}</b></td><td>${esc(e.person || '')}</td><td class="num">${esc(e.phone || '')}</td><td>${esc(e.email || '')}</td>${showNotes ? `<td>${esc(e.notes || '')}</td>` : ''}<td>${admin || +e.user_id === +B.me.id || +e.assigned_to === +B.me.id ? `<select data-lheat="${e.id}" class="heatsel" style="${heatStyle(e.heat)}">${heatOpts(e.heat)}</select>` : heatPill(e.heat)}</td>${admin ? `<td>${e.assigned_name ? `<b>${esc(e.assigned_name)}</b>${e.follow ? `<div class="sub" title="${esc(e.follow)}">✎ ${esc(String(e.follow).slice(0, 60))}${e.follow.length > 60 ? '…' : ''}</div>` : '<div class="sub">not followed up yet</div>'}` : '<span class="sub">—</span>'}</td><td>${esc(e.entered_by || '—')}<div class="sub">${esc(e.dept)}</div></td>` : ''}<td class="num">${fd(e.created_at)}${e.updated_at ? '<div class="sub">edited</div>' : ''}</td>
        <td class="r" style="white-space:nowrap">${admin || +e.user_id === +B.me.id ? `<button class="btn link" data-ledit-open="${e.id}">✎ Edit</button>` : ''}${canDel(e) ? `<button class="btn link" data-ldel="${e.id}" aria-label="Delete">✕</button>` : ''}</td></tr>`;
   view().innerHTML = `
   <div class="head"><div><div class="crumb"><a href="#${admin ? 'leadlog' : 'leads'}">← ${admin ? 'Expo data log' : 'Expo data'}</a></div><h1>${esc(x.name)}</h1>
@@ -836,20 +838,71 @@ routes.lexpo = async ({ id }) => {
    <div class="row" style="margin-top:10px"><button class="btn">Save</button><button type="button" class="btn ghost" id="lx-edit-cancel">Cancel</button></div></form>
   <div class="panel"><div class="ph"><h2>${admin ? 'All entries' : 'My entries'} <span class="sub">(${d.entries.length})</span></h2>
    ${admin && people.length > 1 || C.lxu ? `<label class="f" style="min-width:200px">Entered by<select id="lxu"><option value="">Everyone</option>${(people.length ? people : []).map(([uid, nm]) => `<option value="${uid}" ${+C.lxu === +uid ? 'selected' : ''}>${esc(nm)}</option>`).join('')}${C.lxu && !people.some(([u]) => +u === +C.lxu) ? `<option value="${C.lxu}" selected>${esc(userName(C.lxu))}</option>` : ''}</select></label>` : ''}</div>
-   ${d.entries.length ? `<div class="tw"><table><tr><th>Sl</th><th>Company</th><th>Contact person</th><th>Phone</th><th>Email</th>${showNotes ? '<th>Comments / notes</th>' : ''}${admin ? '<th>Entered by</th>' : ''}<th>Added</th><th></th></tr>${d.entries.map(row).join('')}</table></div>` : '<div class="empty">No entries yet. Add the first one below.</div>'}
-   <form class="inset" id="lead-add" style="margin-top:12px"><div class="grid g3"><label class="f">Company name *<input name="company" required></label><label class="f">Contact person<input name="person"></label><label class="f">Phone number<input name="phone" type="tel"></label><label class="f">Email<input name="email" type="email"></label>
+   <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:8px"><label class="f" style="min-width:180px">Show<select id="lxh"><option value="">All leads</option>${HEAT.map(([k, l]) => `<option value="${k}" ${C.lxh === k ? 'selected' : ''}>${l}</option>`).join('')}<option value="none" ${C.lxh === 'none' ? 'selected' : ''}>Not marked yet</option></select></label>
+    ${admin && d.entries.length ? `<div class="row inset" style="gap:8px;align-items:flex-end;flex-wrap:wrap;padding:8px 10px"><label class="row" style="gap:6px;align-self:center"><input type="checkbox" id="lsel-all"> Select all</label><label class="f" style="min-width:200px">Assign ticked leads to<select id="lasg-to"><option value="">Pick a person</option>${B.users.filter(u => +u.active).map(u => `<option value="${u.id}">${esc(u.name)} · ${esc(u.department)}</option>`).join('')}</select></label><button class="btn sm" id="lasg-go">Assign</button><button class="btn link" id="lasg-back">Take back ticked</button><span class="sub" id="lsel-n">0 ticked</span></div>` : ''}</div>
+   ${d.entries.length ? `<div class="tw"><table><tr>${admin ? '<th></th>' : ''}<th>Sl</th><th>Company</th><th>Contact person</th><th>Phone</th><th>Email</th>${showNotes ? '<th>Comments / notes</th>' : ''}<th>How hot</th>${admin ? '<th>Assigned to</th><th>Entered by</th>' : ''}<th>Added</th><th></th></tr>${d.entries.map(row).join('')}</table></div>` : `<div class="empty">${C.lxh ? 'No entries with this mark.' : 'No entries yet. Add the first one below.'}</div>`}
+   <form class="inset" id="lead-add" style="margin-top:12px"><div class="grid g3"><label class="f">Company name *<input name="company" required></label><label class="f">Contact person<input name="person"></label><label class="f">Phone number<input name="phone" type="tel"></label><label class="f">Email<input name="email" type="email"></label><label class="f">How hot is this lead?<select name="heat">${heatOpts('')}</select></label>
     ${showNotes ? '<label class="f wide">Comments / notes <span class="sub" style="font-weight:400">(after speaking to the person)</span><textarea name="notes"></textarea></label>' : ''}</div>
     <div class="row" style="margin-top:8px"><button class="btn">+ Add entry</button><span class="sub">Tip: press Enter to add and start the next one.</span></div></form>
    <details class="inset" style="margin-top:12px"><summary><b>Paste many rows from Excel</b> <span class="sub">— copy the rows in Excel and paste here</span></summary>
     <p class="sub">Column order: <b>Company | Contact person | Phone | Email${showNotes ? ' | Comments' : ''}</b>. A header row is skipped. Companies already in this expo are skipped.</p>
     <textarea id="lx-paste" style="min-height:120px" placeholder="Paste here"></textarea><div class="row" style="margin-top:8px"><button class="btn ghost sm" id="lx-paste-go">Add pasted rows</button><span class="sub" id="lx-paste-n"></span></div></details>
   </div>`;
+  lxWire(d);
 };
 
+// ---------- how hot is a lead · assigning leads ----------
+const HEAT = [['hot', '🔥 Hot', '#c0392b', '#fdecea'], ['warm', 'Prospective', '#b45309', '#fef3e2'], ['try', 'Can try', '#8a6d00', '#fdf8dc'], ['cold', 'Not now', '#5b6b7a', '#eef1f5'], ['no', 'Not interested', '#6b6b6b', '#f1f1f1']];
+const heatOf = h => HEAT.find(x => x[0] === h);
+const heatOpts = cur => `<option value="">— mark —</option>${HEAT.map(([k, l]) => `<option value="${k}" ${cur === k ? 'selected' : ''}>${l}</option>`).join('')}`;
+const heatStyle = h => { const x = heatOf(h); return x ? `color:${x[2]};background:${x[3]};font-weight:600;border-color:${x[2]}55` : ''; };
+const heatPill = h => { const x = heatOf(h); return x ? `<span class="pill" style="color:${x[2]};background:${x[3]}">${x[1]}</span>` : '<span class="sub">—</span>'; };
+function heatWire(root) {
+  root.querySelectorAll('[data-lheat]').forEach(sel => sel.onchange = async () => {
+    sel.setAttribute('style', heatStyle(sel.value));
+    await act(() => api('lead_heat', { id: sel.dataset.lheat, heat: sel.value }), sel.value ? 'Marked ' + heatOf(sel.value)[1].replace('🔥 ', '') : 'Mark removed').catch(() => {});
+  });
+}
+function lxWire(d) {
+  heatWire(view());
+  const h = $('#lxh'); if (h) h.onchange = () => { C.lxh = h.value; refresh(); };
+  const all = $('#lsel-all'); if (!all) return;
+  const ticked = () => [...document.querySelectorAll('[data-lsel]:checked')].map(c => +c.dataset.lsel);
+  const cnt = () => { $('#lsel-n').textContent = ticked().length + ' ticked'; };
+  all.onchange = () => { document.querySelectorAll('[data-lsel]').forEach(c => c.checked = all.checked); cnt(); };
+  document.querySelectorAll('[data-lsel]').forEach(c => c.onchange = cnt);
+  $('#lasg-go').onclick = async () => { const ids = ticked(), to = $('#lasg-to').value; if (!ids.length) return toast('Tick the leads to assign', true); if (!to) return toast('Pick who should work on them', true);
+    const ok = await act(() => api('lead_assign', { ids, user_id: to }), `${ids.length} lead${ids.length > 1 ? 's' : ''} assigned to ${userName(to)}`).catch(() => null); if (ok) refresh(); };
+  $('#lasg-back').onclick = async () => { const ids = ticked(); if (!ids.length) return toast('Tick the leads to take back', true);
+    const ok = await act(() => api('lead_assign', { ids, user_id: 0 }), 'Taken back').catch(() => null); if (ok) refresh(); };
+}
+
+// leads assigned to me: follow up, mark how hot, turn into a client
+routes.myleads = async () => {
+  const f = C.mlf || (C.mlf = { heat: '', q: '' });
+  const d = await api('my_leads', f); const n = k => d.counts[k] || 0, total = Object.values(d.counts).reduce((a, b) => a + b, 0);
+  view().innerHTML = `<div class="head"><div><h1>Assigned leads</h1><p>Leads given to you to follow up. Call or message them, write what happened, and mark how hot each one is — hot leads stay on top.</p></div></div>
+  <div class="kpis">${[['', 'All', total], ...HEAT.map(([k, l]) => [k, l, n(k)]), ['none', 'Not marked yet', n('none')]].map(([k, l, v]) => `<a class="kpi ${f.heat === k ? 'hl' : ''}" href="#myleads" data-mlh="${k}" style="text-decoration:none;${f.heat === k ? '' : 'color:inherit'}"><span>${l}</span><b>${v}</b></a>`).join('')}</div>
+  <div class="panel"><div class="ph"><h2>${f.heat ? (heatOf(f.heat)?.[1] || 'Not marked yet') : 'All assigned leads'} <span class="sub">(${d.rows.length})</span></h2><input id="mlq" placeholder="Search company, person or expo" value="${esc(f.q)}" style="max-width:280px"></div>
+   ${d.rows.length ? `<div class="tw"><table><tr><th>Company</th><th>Contact</th><th>Expo</th><th>From the caller / researcher</th><th>How hot</th><th>My follow-up notes</th><th></th></tr>
+   ${d.rows.map(l => `<tr><td><b>${esc(l.company)}</b><div class="sub">assigned ${fd(l.assigned_at)}${l.assigned_by_name ? ' by ' + esc(l.assigned_by_name) : ''}</div></td>
+    <td>${esc(l.person || '')}${l.phone ? `<div class="num">${esc(l.phone)} ${waBtn(l.phone, `Hello ${l.person ? l.person.split(' ')[0] : ''}, this is ${B.me.name} from Zest Exhibitions. `, 'WhatsApp')}</div>` : ''}${l.email ? `<div class="sub">${esc(l.email)}</div>` : ''}</td>
+    <td>${esc(l.expo)}<div class="sub">${fd(l.edate)}${l.expo_city ? ' · ' + esc(l.expo_city) : ''}</div></td><td class="sub" style="max-width:240px">${esc(l.notes || '')}<div>— ${esc(l.entered_by || '')}</div></td>
+    <td><select data-lheat="${l.id}" style="${heatStyle(l.heat)}">${heatOpts(l.heat)}</select></td>
+    <td style="min-width:220px"><textarea data-lfollow="${l.id}" rows="2" placeholder="What happened? Next step?">${esc(l.follow || '')}</textarea>${l.follow_at ? `<div class="sub">updated ${fd(l.follow_at)}</div>` : ''}</td>
+    <td class="r">${B.records ? `<button class="btn ghost sm" data-l2c="${l.id}">Make client →</button>` : ''}</td></tr>`).join('')}</table></div>` : blank(f.heat || f.q ? 'Nothing here with this filter.' : 'No leads assigned to you yet.')}</div>`;
+  heatWire(view());
+  view().querySelectorAll('[data-mlh]').forEach(a => a.onclick = e => { e.preventDefault(); f.heat = a.dataset.mlh; refresh(); });
+  $('#mlq').oninput = e => { f.q = e.target.value; clearTimeout(C.mlT); C.mlT = setTimeout(() => refresh().then(() => { const i = $('#mlq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }), 350); };
+  view().querySelectorAll('[data-lfollow]').forEach(t => t.onchange = () => act(() => api('lead_follow', { id: t.dataset.lfollow, follow: t.value }), 'Notes saved').then(() => reboot().then(() => renderNav('myleads'))).catch(() => {}));
+  view().querySelectorAll('[data-l2c]').forEach(b => b.onclick = () => { const l = d.rows.find(x => +x.id === +b.dataset.l2c);
+    newClient = { company: l.company, email: l.email || '', phone: l.phone || '', person: l.person || '', designation: '', city: '', location: '', gst_no: '', notes: [`Lead from ${l.expo} data (${l.entered_by || ''})`, l.notes, l.follow].filter(Boolean).join('\n'), owner_id: '', contacts: [], cards: [], briefs: [], gstcert: [],
+      expo: { expo: l.expo, location: l.expo_city || '', start_date: l.edate || '', area_sqm: '', space_type: '', sides_open: '', stall_no: '' } }; location.hash = '#newclient'; });
+};
 // ---------- admin: import an exhibitor list (Excel / CSV) into the expo data log ----------
 const LIMP_F = [['company', 'Company *', 'company|companyname|exhibitor|exhibitorname|organisation|organization|firm|brand|name'], ['person', 'Contact person', 'contactperson|person|contactname|contact|personname|name|fullname'],
   ['designation', 'Designation', 'designation|title|jobtitle|position'], ['phone', 'Phone', 'phone|mobile|mobileno|mobilenumber|phoneno|phonenumber|contactno|contactnumber|cell|whatsapp|tel|telephone|mob'],
-  ['email', 'Email', 'email|emailid|emailaddress|mail|mailid'], ['city', 'City', 'city|location|town|state'], ['website', 'Website', 'website|web|url|site'], ['stall', 'Stall / hall', 'stall|stallno|booth|boothno|hall|hallno|standno|stand'], ['notes', 'Notes / comments', 'note|notes|remarks|remark|comment|comments|products|category']];
+  ['email', 'Email', 'email|emailid|emailaddress|mail|mailid'], ['city', 'City', 'city|location|town|state'], ['website', 'Website', 'website|web|url|site'], ['stall', 'Stall / hall', 'stall|stallno|booth|boothno|hall|hallno|standno|stand'], ['notes', 'Notes / comments', 'note|notes|remarks|remark|comment|comments|products|category'], ['heat', 'How hot (Hot / Prospective / Can try / Not now / Not interested)', 'hot|heat|leadstatus|priority|temperature|status']];
 function limpGuess(headers) {
   const map = {}, used = new Set(), H = headers.map(impNorm);
   for (const pass of [0, 1]) for (const [k, , syn] of LIMP_F) { if (map[k] !== undefined) continue; const S = syn.split('|');
@@ -943,7 +996,8 @@ routes.leadlog = async () => {
     const box = el.querySelector('[data-lxbody]');
     try {
       const r = await api('lexpo', { id: el.dataset.lx, user_id: f.user_id || '' });
-      box.innerHTML = r.entries.length ? `<div class="tw"><table><tr><th>Sl</th><th>Company</th><th>Contact person</th><th>Phone</th><th>Email</th><th>Comments / notes</th><th>Entered by</th><th>Added</th></tr>${r.entries.map((x, i) => `<tr><td class="num">${i + 1}</td><td><b>${esc(x.company)}</b></td><td>${esc(x.person || '')}</td><td class="num">${esc(x.phone || '')}</td><td>${esc(x.email || '')}</td><td>${esc(x.notes || '')}</td><td>${esc(x.entered_by || '—')}<div class="sub">${esc(x.dept)}</div></td><td class="num">${fd(x.created_at)}</td></tr>`).join('')}</table></div>` : '<div class="sub">No entries.</div>';
+      box.innerHTML = r.entries.length ? `<div class="tw"><table><tr><th>Sl</th><th>Company</th><th>Contact person</th><th>Phone</th><th>Email</th><th>Comments / notes</th><th>How hot</th><th>Assigned to</th><th>Entered by</th><th>Added</th></tr>${r.entries.map((x, i) => `<tr><td class="num">${i + 1}</td><td><b>${esc(x.company)}</b></td><td>${esc(x.person || '')}</td><td class="num">${esc(x.phone || '')}</td><td>${esc(x.email || '')}</td><td>${esc(x.notes || '')}</td><td><select data-lheat="${x.id}" style="${heatStyle(x.heat)}">${heatOpts(x.heat)}</select></td><td>${esc(x.assigned_name || '—')}</td><td>${esc(x.entered_by || '—')}<div class="sub">${esc(x.dept)}</div></td><td class="num">${fd(x.created_at)}</td></tr>`).join('')}</table></div><div class="sub" style="margin-top:6px">To assign leads, use <a href="#lexpo-${el.dataset.lx}">Open & edit</a> → tick the entries → Assign.</div>` : '<div class="sub">No entries.</div>';
+      heatWire(box);
     } catch (err) { box.innerHTML = `<div class="alert bad"><span class="m">${esc(err.message)}</span></div>`; }
   }));
 };

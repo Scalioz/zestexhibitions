@@ -194,3 +194,6 @@ table.rep tr.rk-good td{color:var(--ok);font-weight:700}
 /* payroll */
 tr.tot td{border-top:2px solid var(--line);background:var(--bg,transparent)}
 .paytab td{vertical-align:top}.paytab input[type=number]{text-align:right}
+
+/* lead heat */
+select[data-lheat]{min-width:140px}

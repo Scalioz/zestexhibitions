@@ -138,7 +138,7 @@ $CLIENT_FIELDS = ['company', 'email', 'phone', 'person', 'designation', 'locatio
 function clean($type, $v) { return match ($type) { 'd' => d($v), 'n' => n($v), 'i' => ($v === null || $v === '') ? null : (int) $v, default => s($v) }; }
 
 define('ZEST_API', 1);
-if (in_array($A, ['lexpos', 'lexpo', 'lexpo_save', 'lead_add', 'lead_bulk', 'lead_import', 'lead_update', 'lead_del', 'design_jobs', 'design_save', 'assign_designer', 'assign_ops',
+if (in_array($A, ['lexpos', 'lexpo', 'lexpo_save', 'lead_add', 'lead_bulk', 'lead_import', 'lead_heat', 'lead_assign', 'my_leads', 'lead_follow', 'lead_update', 'lead_del', 'design_jobs', 'design_save', 'assign_designer', 'assign_ops',
   'ops_jobs', 'ops_job', 'ops_save', 'jobs_board'], true)) require __DIR__ . '/lib/work_api.php';
 if (str_starts_with($A, 'acc_') || str_starts_with($A, 'inv_') || str_starts_with($A, 'claim_')) require __DIR__ . '/lib/acc_api.php';
 if (str_starts_with($A, 'att_')) require __DIR__ . '/lib/att_api.php';
@@ -158,6 +158,8 @@ case 'boot':
     'reasons' => all('SELECT id, label FROM ' . T('reasons') . ' WHERE active = 1 ORDER BY id'),
     'vendors' => all('SELECT id, name, phone, email, city, notes FROM ' . T('vendors') . ' WHERE active = 1 ORDER BY name'),
     'expos' => expo_list(),
+    'my_leads_n' => (function () use ($MID) { try { return (int) val('SELECT COUNT(*) FROM ' . T('leads') . " WHERE assigned_to = ? AND (heat IS NULL OR heat NOT IN ('no', 'cold')) AND follow IS NULL", [$MID]); } catch (Throwable $e) { return 0; } })(),
+    'my_leads_all' => (function () use ($MID) { try { return (int) val('SELECT COUNT(*) FROM ' . T('leads') . ' WHERE assigned_to = ?', [$MID]); } catch (Throwable $e) { return 0; } })(),
     'partners' => ($ADMIN || $ACC) ? (function () { try { return all('SELECT id, name, rev_pct, exp_pct FROM ' . T('partners') . ' WHERE active = 1 ORDER BY name'); } catch (Throwable $e) { return []; } })() : [],
     'profile' => profile_info(),
     'users' => all('SELECT id, name, role, designation, department, active, phone FROM ' . T('users') . ' ORDER BY name'),

@@ -196,6 +196,11 @@ function migrate() {
       ins('accounts', ['code' => '5230', 'name' => 'Partner share of profit', 'type' => 'expense', 'sub' => 'pshare', 'opening' => 0, 'active' => 1, 'created_at' => now()]);
     set_setting('schema_v', 25);
   }
+  if ($v < 26) {   // expo data: how hot each lead is, and who it is assigned to for follow-up
+    foreach (['heat VARCHAR(20)', 'assigned_to INT', 'assigned_by INT', 'assigned_at DATETIME', 'follow TEXT', 'follow_at DATETIME'] as $col) { try { db()->exec('ALTER TABLE ' . T('leads') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ } }
+    try { db()->exec('CREATE INDEX zc_leads_asg ON ' . T('leads') . ' (assigned_to)'); } catch (PDOException $e) {}
+    set_setting('schema_v', 26);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';

@@ -14,10 +14,11 @@ if (!empty($_GET['dept'])) { $w .= ' AND l.dept = ?'; $p[] = (string) $_GET['dep
 if ($f = $d('from')) { $w .= ' AND l.created_at >= ?'; $p[] = "$f 00:00:00"; }
 if ($t = $d('to')) { $w .= ' AND l.created_at <= ?'; $p[] = "$t 23:59:59"; }
 if ($q = trim($_GET['q'] ?? '')) { $w .= ' AND (e.name LIKE ? OR e.city LIKE ?)'; $p[] = "%$q%"; $p[] = "%$q%"; }
-$rows = all('SELECT l.*, e.name AS expo, e.edate, e.city, e.website, u.name AS by_name FROM ' . T('leads') . ' l JOIN ' . T('expos') . ' e ON e.id = l.expo_id LEFT JOIN ' . T('users') . " u ON u.id = l.user_id WHERE $w ORDER BY e.name, l.id", $p);
-$S = ['Expo data' => [['Sl No', 'Expo name', 'Expo date', 'Expo location / city', 'Expo website', 'Company name', 'Contact person', 'Phone number', 'Email', 'Comments / notes', 'Entered by', 'Department', 'Entered on', 'Last edited']]];
+$rows = all('SELECT l.*, e.name AS expo, e.edate, e.city, e.website, u.name AS by_name, a.name AS asg_name FROM ' . T('leads') . ' l JOIN ' . T('expos') . ' e ON e.id = l.expo_id LEFT JOIN ' . T('users') . ' u ON u.id = l.user_id LEFT JOIN ' . T('users') . " a ON a.id = l.assigned_to WHERE $w ORDER BY e.name, l.id", $p);
+$HEAT = ['hot' => 'Hot', 'warm' => 'Prospective', 'try' => 'Can try', 'cold' => 'Not now', 'no' => 'Not interested'];
+$S = ['Expo data' => [['Sl No', 'Expo name', 'Expo date', 'Expo location / city', 'Expo website', 'Company name', 'Contact person', 'Phone number', 'Email', 'Comments / notes', 'How hot', 'Assigned to', 'Follow-up notes', 'Entered by', 'Department', 'Entered on', 'Last edited']]];
 $sl = []; foreach ($rows as $r) { $sl[$r['expo_id']] = ($sl[$r['expo_id']] ?? 0) + 1;
-  $S['Expo data'][] = [$sl[$r['expo_id']], $r['expo'], $r['edate'], $r['city'], $r['website'], $r['company'], $r['person'], $r['phone'], $r['email'], $r['notes'], $r['by_name'], $r['dept'], substr($r['created_at'], 0, 16), $r['updated_at'] ? substr($r['updated_at'], 0, 16) : ''];
+  $S['Expo data'][] = [$sl[$r['expo_id']], $r['expo'], $r['edate'], $r['city'], $r['website'], $r['company'], $r['person'], $r['phone'], $r['email'], $r['notes'], $HEAT[$r['heat'] ?? ''] ?? '', $r['asg_name'] ?? '', $r['follow'] ?? '', $r['by_name'], $r['dept'], substr($r['created_at'], 0, 16), $r['updated_at'] ? substr($r['updated_at'], 0, 16) : ''];
 }
 // summary per expo
 $S['Summary'] = [['Expo name', 'Expo date', 'City', 'Entries', 'Entered by']];
