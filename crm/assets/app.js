@@ -184,6 +184,58 @@ const STALL = `<svg viewBox="0 0 160 110" fill="none" stroke="currentColor" stro
 const blank = (msg, btn = '') => `<div class="blank">${STALL}<div>${msg}</div>${btn}</div>`;
 const PLAN = `<svg viewBox="0 0 300 140" aria-hidden="true">${Array.from({ length: 24 }, (_, i) => { const x = (i % 8) * 36 + 4, y = Math.floor(i / 8) * 44 + 6; const f = [2, 5, 9, 12, 19].includes(i); return `<rect x="${x}" y="${y}" width="30" height="36" rx="2" fill="${f ? '#e9b949' : 'none'}" stroke="#fff" stroke-opacity=".6"/>`; }).join('')}</svg>`;
 
+// ---------- unsaved typing survives a refresh / power cut: every page's typed values are kept in this browser until saved ----------
+const DRAFT_SKIP = '[type=password],[type=file],[type=hidden],[type=search],[data-lheat],[data-lasg1],[data-lsel],[data-pf],[data-lfollow],[data-nodraft],[data-limp],[data-limpmap],[data-cimp],[data-cimpmap],#vq,#mlq,#lq,#ex-q,#lxh,#lxu,#pay-m,#lasg-to,#smtp-pre,#lsel-all';
+const DS = { get: k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }, del: k => { try { localStorage.removeItem(k); } catch (e) {} } };
+const draftKey = (h = location.hash || '#home') => B.me ? `zcrm-draft:${B.me.id}:${h}` : null;
+function draftFields() {
+  const seen = {}, out = [];
+  view().querySelectorAll('input, textarea, select').forEach(el => {
+    if (el.matches(DRAFT_SKIP) || el.disabled || el.closest('[data-nodraft]')) return;
+    const f = el.closest('form');
+    const fid = f ? (f.id || Object.entries(f.dataset).map(([k, v]) => k + '=' + v).join('&') || 'form') : '-';
+    const fld = el.name || Object.entries(el.dataset).filter(([k]) => !['invcalc', 'qcalc', 'touched', 'perday'].includes(k)).map(([k, v]) => k + '=' + v).join('&') || el.id;
+    if (!fld) return;
+    const sig = fid + '|' + fld; seen[sig] = (seen[sig] || 0) + 1;
+    out.push([sig + '#' + seen[sig], el]);
+  });
+  return out;
+}
+const fieldChanged = el => el.type === 'checkbox' || el.type === 'radio' ? el.checked !== el.defaultChecked : el.tagName === 'SELECT' ? [...el.options].some(o => o.selected !== o.defaultSelected) : el.value !== el.defaultValue;
+const fieldVal = el => el.type === 'checkbox' || el.type === 'radio' ? el.checked : el.value;
+function draftSave() {
+  const k = draftKey(); if (!k) return; const f = {};
+  draftFields().forEach(([key, el]) => { if (fieldChanged(el)) f[key] = fieldVal(el); });
+  if (Object.keys(f).length) DS.set(k, { t: Date.now(), f }); else DS.del(k);
+  DS.set('zcrm-last:' + (B.me?.id || 0), { h: location.hash || '#home', t: Date.now() });
+}
+function draftRestore() {
+  const k = draftKey(); if (!k) return; const d = DS.get(k);
+  if (!d || !d.f || Date.now() - d.t > 14 * 864e5) { if (d) DS.del(k); return; }
+  let n = 0;
+  draftFields().forEach(([key, el]) => {
+    if (!(key in d.f) || fieldChanged(el)) return; const v = d.f[key];
+    if (el.type === 'checkbox' || el.type === 'radio') { if (el.checked === !!v) return; el.checked = !!v; } else { if (el.value === v) return; el.value = v; if (el.tagName === 'SELECT' && el.value !== v) return; }
+    el.dispatchEvent(new Event('input', { bubbles: true })); if (el.tagName === 'SELECT' || el.type === 'checkbox' || el.type === 'radio') el.dispatchEvent(new Event('change', { bubbles: true })); n++;
+  });
+  if (!n) return;
+  const when = new Date(d.t), ago = Math.round((Date.now() - d.t) / 60000);
+  view().insertAdjacentHTML('afterbegin', `<div class="alert warn" id="draft-note" data-nodraft><b>We kept what you had typed here (not saved yet)</b><span class="m">${n} field${n === 1 ? '' : 's'} brought back from ${ago < 60 ? (ago < 1 ? 'just now' : ago + ' min ago') : when.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}. Check and save. <button class="btn link" id="draft-drop" type="button">Clear it</button></span></div>`);
+  $('#draft-drop').onclick = () => { DS.del(k); refresh().then(() => { const x = $('#draft-note'); if (x) x.remove(); }); };
+}
+let draftT = null;
+['input', 'change'].forEach(ev => document.addEventListener(ev, e => {
+  if (!e.isTrusted || !e.target.closest || !e.target.closest('#view') || e.target.matches(DRAFT_SKIP)) return;
+  C.draftClear = null; clearTimeout(draftT); draftT = setTimeout(draftSave, 400);
+}, true));
+// a save / submit: once the page re-renders (or moves on), the kept copy is dropped
+document.addEventListener('submit', e => { if (e.target.closest('#view')) C.draftClear = draftKey(); }, true);
+document.addEventListener('click', e => { const b = e.target.closest('#view button'); if (!b) return;
+  if ((b.type === 'submit' && !b.form) || /save|submit|final|post|create|send|import/i.test(b.id + ' ' + (b.dataset.pbgo || '')) || /^(save|submit|post|send|add|create|import|pay)/i.test(b.textContent.trim().replace(/^[^a-z]+/i, ''))) C.draftClear = draftKey(); }, true);
+function draftAfterRender() { if (C.draftClear) { DS.del(C.draftClear); C.draftClear = null; } }
+addEventListener('pagehide', () => { try { draftSave(); } catch (e) {} });
+// remember where each person was, and the scroll position, so a refresh / reopen comes back to the same spot
+addEventListener('scroll', () => { clearTimeout(C.scT); C.scT = setTimeout(() => { try { sessionStorage.setItem('zcrm-y:' + location.hash, String(Math.round(scrollY))); } catch (e) {} }, 250); }, { passive: true });
 // ---------- routing ----------
 const routes = {};
 function parseHash() { const h = (location.hash || '#home').slice(1); const [name, id, tab] = h.split('-'); return { name: name || 'home', id: id ? +id : null, tab }; }
@@ -197,8 +249,11 @@ async function route() {
   const fn = routes[r.name] || routes.home;
   if ((r.name in ADMIN_ONLY) && !isAdmin()) { location.hash = '#home'; return; }
   if ((r.name in RECORDS_ONLY) && !B.records && !(r.name === 'newclient' && handsOver())) { location.hash = '#home'; return; }
-  try { await fn(r); attStrip(); } catch (e) { if (e.message !== 'signed out') view().innerHTML = `<div class="alert bad"><b>Could not load this page</b><span class="m">${esc(e.message)}</span></div>`; }
-  window.scrollTo(0, 0);
+  draftAfterRender();
+  try { await fn(r); attStrip(); draftRestore(); } catch (e) { if (e.message !== 'signed out') view().innerHTML = `<div class="alert bad"><b>Could not load this page</b><span class="m">${esc(e.message)}</span></div>`; }
+  DS.set('zcrm-last:' + (B.me?.id || 0), { h: location.hash || '#home', t: Date.now() });
+  let y = 0; if (!C.firstDone) { C.firstDone = 1; try { y = +sessionStorage.getItem('zcrm-y:' + location.hash) || 0; } catch (e) {} }
+  window.scrollTo(0, y);
 }
 const ADMIN_ONLY = { att: 1, invappr: 1, clientlog: 1, saleslog: 1, leadlog: 1, jobs: 1, reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
 const RECORDS_ONLY = { refs: 1, clients: 1, client: 1, project: 1, newclient: 1, qgen: 1 };
@@ -232,7 +287,7 @@ function expoPicked(t) {   // a saved expo was picked in a form box: fill the em
   if (fid === 'lx-new') { fill(g('edate'), e.edate); fill(g('city'), e.city); }
 }
 try { new MutationObserver(() => { clearTimeout(expoTag.t); expoTag.t = setTimeout(expoTag, 30); }).observe(document.documentElement, { childList: true, subtree: true }); } catch (e) {}
-async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); attStrip(); window.scrollTo(0, y); }
+async function refresh() { const y = window.scrollY; const r = parseHash(); await (routes[r.name] || routes.home)(r); attStrip(); draftAfterRender(); window.scrollTo(0, y); }
 
 // phone app: bottom tab bar with the 4 things each person uses most, plus Menu
 const TB_ICON = { home: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>', clients: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.8c1.6.8 2.6 2.6 3 5.2"/>',
@@ -2657,6 +2712,9 @@ async function reboot() { Object.assign(B, await api('boot')); B.weekly_off = (B
 (async () => {
   try { await reboot(); } catch (e) { view().innerHTML = `<div class="alert bad"><b>Could not start</b><span class="m">${esc(e.message)}</span></div>`; return; }
   window.addEventListener('hashchange', route);
+  // opened fresh (app icon / new tab) on the home page after a power cut: go back to the page that still has unsaved typing
+  try { const L = DS.get('zcrm-last:' + B.me.id), fresh = !sessionStorage.getItem('zcrm-started'); sessionStorage.setItem('zcrm-started', '1');
+    if (fresh && (!location.hash || location.hash === '#home') && L && L.h && L.h !== '#home' && Date.now() - L.t < 12 * 36e5 && DS.get(draftKey(L.h))) { history.replaceState(null, '', L.h); } } catch (e) {}
   route();
 })();
 })();
