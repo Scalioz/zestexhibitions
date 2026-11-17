@@ -66,7 +66,7 @@ case 'lexpos':
   if ($qs) { $ep[] = "%$qs%"; $ep[] = "%$qs%"; }
   $ex = all($sql, $ep);
   foreach ($ex as &$e) { $a = $by[$e['id']] ?? ['n' => 0, 'last' => $e['created_at'], 'by' => []]; $e += ['entries' => $a['n'], 'last' => $a['last'] ?: $e['created_at'], 'by' => $a['by'], 'created_by_name' => $um[$e['created_by']] ?? '—']; } unset($e);
-  usort($ex, fn($a, $b) => strcmp($b['last'], $a['last']));
+  usort($ex, fn($a, $b) => [$b['entries'] > 0, $b['last']] <=> [$a['entries'] > 0, $a['last']]);   // expos with entries first (latest entry on top), empty expos after
   $people = [];
   if ($ADMIN) {
     $mods = setting('dept_modules', []);
