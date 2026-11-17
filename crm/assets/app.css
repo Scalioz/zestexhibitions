@@ -197,3 +197,4 @@ tr.tot td{border-top:2px solid var(--line);background:var(--bg,transparent)}
 
 /* lead heat */
 select[data-lheat]{min-width:140px}
+.tw.tall{max-height:72vh;overflow:auto}.tw.tall thead th{position:sticky;top:0;background:var(--panel,#fff);z-index:1}
