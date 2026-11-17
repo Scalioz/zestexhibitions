@@ -256,13 +256,13 @@ function renderNav(cur) {
   const L = (k, l, b) => `<a href="#${k}" class="${on === k ? 'on' : ''}">${l}${b ? `<span class="badge">${b}</span>` : ''}</a>`;
   $('#nav').innerHTML = isAdmin()
     ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('saleslog', 'Sales log', B.pending_approvals || '')}${L('invappr', 'Invoice approvals', B.inv_pending || '')}${L('leadlog', 'Expo data log')}${L('jobs', 'Design & production')}${L('reportlog', 'Daily reports', B.flags || '')}${L('att', 'Attendance', B.att_pending || '')}
-       <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('dnq', 'Do-not-quote list')}
+       <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('vendors', 'Vendors')}${L('dnq', 'Do-not-quote list')}
        <div class="sec">Accounts</div>${L('acc', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('payroll', 'Payroll & salaries')}${L('partners', 'Business partners')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}
        <div class="sec">Admin</div>${L('team', 'Team')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
     : (B.modules || []).length > 1 ? multiNav(L)
-    : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('payroll', 'Payroll & salaries')}${L('partners', 'Business partners')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
-    : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
-    : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') + L('newclient', '+ New client') + L('contacts', 'Contacts') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('contacts', 'Contacts') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`;
+    : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('vendors', 'Vendors')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('payroll', 'Payroll & salaries')}${L('partners', 'Business partners')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
+    : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('vendors', 'Vendors')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
+    : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') + L('newclient', '+ New client') + L('contacts', 'Contacts') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('vendors', 'Vendors') + L('contacts', 'Contacts') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`;
   $('#nav').insertAdjacentHTML('beforeend', `<div class="nav-acc"><div class="sec">${esc(B.me.name)}</div><a href="#account">Account</a><a href="logout.php">Sign out</a></div>`);
   tabBar(cur);
 }
@@ -275,6 +275,7 @@ function multiNav(L) {
   if (m('leads') || m('calls')) h += sec(m('calls') && m('leads') ? 'Research & telecalling' : m('calls') ? 'Telecalling' : 'Data research') + L('leads', 'Expo data') + (m('records') ? '' : L('newclient', '+ New client'));
   if (m('design')) h += sec('Design') + L('mydesign', 'My design jobs');
   if (m('ops')) h += sec('Production') + L('myops', 'My production jobs');
+  if (m('ops') || m('records') || m('accounts')) h += L('vendors', 'Vendors');
   if (m('accounts')) h += sec('Accounts') + L('acc', 'Accounts dashboard') + L('claims', 'Expense approvals', B.claims_waiting || '') + L('entry', '+ New entry') + L('invoices', 'Invoices', B.inv_todo || '') + L('topost', 'Post from orders') + L('payroll', 'Payroll & salaries') + L('partners', 'Business partners') + L('books', 'Books & reports') + L('coa', 'Chart of accounts') + L('accset', 'Company settings');
   h += sec('My work');
   if (m('records') || m('ops') || m('leads') || m('calls')) h += L('contacts', 'Contacts');
@@ -2063,6 +2064,24 @@ routes.partner = async ({ id }) => {
   $('#pt-add').onsubmit = async e => { e.preventDefault(); const ok = await act(() => api('acc_partner_tag', { partner_id: p.id, ...Object.fromEntries(new FormData(e.target)) }), 'Order added').catch(() => null); if (ok) refresh(); };
   $('#pt-pay').onsubmit = async e => { e.preventDefault(); const o = Object.fromEntries(new FormData(e.target)); if (!confirm(`${{ advance: 'Record advance of', settlement: 'Record payment of', refund: 'Record money returned:' }[o.kind]} ${inr2(o.amount)} — ${p.name}?`)) return; const ok = await act(() => api('acc_partner_pay', { partner_id: p.id, ...o }), 'Posted to books').catch(() => null); if (ok) refresh(); };
   view().querySelectorAll('[data-ptpost]').forEach(b => b.onclick = async () => { if (!confirm(`Post ${inr2(b.dataset.amt)} as ${p.name}'s share to the books (dated today)?`)) return; const ok = await act(() => api('acc_partner_post', { project_id: b.dataset.ptpost }), 'Share posted').catch(() => null); if (ok) refresh(); });
+};
+// ---------- vendor list: sales, operations, accounts and admin can add and correct vendors ----------
+routes.vendors = async () => {
+  const q = (C.vq || '').trim().toLowerCase(), ed = C.vEdit ? B.vendors.find(v => +v.id === +C.vEdit) : null;
+  const list = B.vendors.filter(v => !q || [v.name, v.city, v.phone, v.email, v.notes].join(' ').toLowerCase().includes(q));
+  view().innerHTML = `<div class="head"><div><h1>Vendors</h1><p>Fabricators, carpenters, printers, transporters and other suppliers. Vendors added here appear in every order's vendor quotes and in accounts.</p></div></div>
+  <form class="panel" id="vform"><h2>${ed ? 'Edit ' + esc(ed.name) : 'Add a vendor'}</h2><input type="hidden" name="id" value="${ed ? ed.id : ''}">
+   <div class="grid g3"><label class="f">Vendor name *<input name="name" required value="${esc(ed?.name || '')}"></label><label class="f">Phone *<input name="phone" type="tel" required value="${esc(ed?.phone || '')}"></label><label class="f">City *<input name="city" required value="${esc(ed?.city || '')}"></label>
+    <label class="f">Email<input name="email" type="email" value="${esc(ed?.email || '')}"></label><label class="f wide">What they do / notes<input name="notes" value="${esc(ed?.notes || '')}" placeholder="e.g. Carpentry & laminate, flex printing, transport to Pragati Maidan"></label></div>
+   <div class="row" style="margin-top:10px"><button class="btn sm">${ed ? 'Save changes' : '+ Add vendor'}</button>${ed ? '<button type="button" class="btn link" id="v-cancel">Cancel</button>' : ''}</div></form>
+  <div class="panel"><div class="ph"><h2>${B.vendors.length} vendor${B.vendors.length === 1 ? '' : 's'}</h2><input id="vq" placeholder="Search name, city, work…" value="${esc(C.vq || '')}" style="max-width:260px"></div>
+   ${list.length ? `<div class="tw"><table><tr><th>Vendor</th><th>Phone</th><th>City</th><th>Email</th><th>Work / notes</th><th></th></tr>${list.map(v => `<tr><td><b>${esc(v.name)}</b></td><td class="num">${esc(v.phone || '')}${v.phone ? ' ' + waBtn(v.phone, `Hello ${v.name}, `, 'WhatsApp') : ''}</td><td>${esc(v.city || '')}</td><td>${esc(v.email || '')}</td><td class="sub">${esc(v.notes || '')}</td>
+    <td class="r" style="white-space:nowrap"><button class="btn link" data-vedit="${v.id}">Edit</button>${isAdmin() ? ` <button class="btn link" data-delvendor="${v.id}" aria-label="Remove ${esc(v.name)}">✕</button>` : ''}</td></tr>`).join('')}</table></div>` : blank(q ? 'No vendor matches this search.' : 'No vendors yet. Add the first one above.')}</div>`;
+  const f = $('#vform');
+  f.onsubmit = async e => { e.preventDefault(); const o = Object.fromEntries(new FormData(f)); const ok = await act(() => api(o.id ? 'vendor_save' : 'vendor_add', o), o.id ? 'Vendor updated' : 'Vendor added').catch(() => null); if (ok) { C.vEdit = null; await reboot(); refresh(); } };
+  if ($('#v-cancel')) $('#v-cancel').onclick = () => { C.vEdit = null; refresh(); };
+  $('#vq').oninput = e => { C.vq = e.target.value; clearTimeout(C.vqT); C.vqT = setTimeout(() => { refresh().then(() => { const i = $('#vq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 250); };
+  view().querySelectorAll('[data-vedit]').forEach(b => b.onclick = () => { C.vEdit = b.dataset.vedit; refresh().then(() => $('#vform').scrollIntoView({ behavior: 'smooth', block: 'start' })); });
 };
 routes.accset = async () => {
   const m = await accMeta(true); const c = m.company;

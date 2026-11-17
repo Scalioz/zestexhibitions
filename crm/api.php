@@ -34,7 +34,7 @@ $MODS = $ADMIN ? [] : user_mods($me);   // main department + extra departments
 $RECORDS = $ADMIN || in_array('records', $MODS, true);
 $ACC = $ADMIN || in_array('accounts', $MODS, true);
 $RECORD_ACTIONS = ['clients', 'client', 'client_save', 'dup', 'dnq', 'contact_add', 'contact_del', 'project_create', 'project', 'project_save',
-  'child_add', 'child_update', 'child_del', 'vq_select', 'vendor_add'];
+  'child_add', 'child_update', 'child_del', 'vq_select'];
 $HANDOVER = !$RECORDS && array_intersect(['leads', 'calls'], $MODS) ? true : false;   // research / telecalling can add a new client and hand it to a sales person
 if (in_array($A, $RECORD_ACTIONS, true) && !$RECORDS && !($HANDOVER && ($A === 'dup' || ($A === 'client_save' && empty($in['id']))))) fail('Your department does not have access to client records.', 403);
 if ($A === 'upload' && !$RECORDS && !in_array($in['entity'] ?? '', ['ritem', 'final', 'wd', 'claim', 'voucher'], true)) fail('Your department does not have access to client records.', 403);
@@ -156,7 +156,7 @@ case 'boot':
     'weekly_off' => setting('weekly_off', [0]),
     'templates' => setting('templates', []),
     'reasons' => all('SELECT id, label FROM ' . T('reasons') . ' WHERE active = 1 ORDER BY id'),
-    'vendors' => all('SELECT id, name, phone, email, city FROM ' . T('vendors') . ' WHERE active = 1 ORDER BY name'),
+    'vendors' => all('SELECT id, name, phone, email, city, notes FROM ' . T('vendors') . ' WHERE active = 1 ORDER BY name'),
     'expos' => expo_list(),
     'partners' => ($ADMIN || $ACC) ? (function () { try { return all('SELECT id, name, rev_pct, exp_pct FROM ' . T('partners') . ' WHERE active = 1 ORDER BY name'); } catch (Throwable $e) { return []; } })() : [],
     'profile' => profile_info(),
@@ -1143,10 +1143,18 @@ case 'reason_del':
   need_admin(); q('UPDATE ' . T('reasons') . ' SET active = 0 WHERE id = ?', [(int) ($in['id'] ?? 0)]); out(['ok' => true]);
 
 case 'vendor_add':
+case 'vendor_save':   // sales, operations, accounts and admin keep the vendor list
+  if (!$RECORDS && !$ACC && !in_array('ops', $MODS, true)) fail('Your department cannot add vendors.', 403);
   $nm = s($in['name'] ?? null, 160); if (!$nm) fail('Enter the vendor name.');
   $vemail = strtolower(s($in['email'] ?? null, 160) ?? '');
   if ($vemail && !filter_var($vemail, FILTER_VALIDATE_EMAIL)) fail('Vendor email looks wrong.');
   $vd = ['phone' => s($in['phone'] ?? null, 40), 'email' => $vemail ?: null, 'city' => s($in['city'] ?? null, 80)];
+  if (array_key_exists('notes', $in)) $vd['notes'] = s($in['notes'] ?? null, 1000);
+  if ($A === 'vendor_save' && !empty($in['id'])) {
+    $vid = (int) $in['id']; if (!val('SELECT id FROM ' . T('vendors') . ' WHERE id = ?', [$vid])) fail('Vendor not found.', 404);
+    if (val('SELECT id FROM ' . T('vendors') . ' WHERE LOWER(name) = LOWER(?) AND id <> ? AND active = 1', [$nm, $vid])) fail('Another vendor already has this name.');
+    upd('vendors', $vid, ['name' => $nm] + $vd); out(['id' => $vid]);
+  }
   if ($ex = val('SELECT id FROM ' . T('vendors') . ' WHERE LOWER(name) = LOWER(?)', [$nm])) {
     upd('vendors', (int) $ex, array_filter($vd) + ['active' => 1]); out(['id' => (int) $ex]);
   }
