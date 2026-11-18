@@ -60,7 +60,8 @@ function n($v) { if ($v === null || $v === '') return null; if (!is_numeric($v))
 function client_row($id) {
   global $ADMIN, $MID;
   $c = one('SELECT * FROM ' . T('clients') . ' WHERE id = ?', [(int) $id]);
-  if (!$c || (!$ADMIN && (int) $c['owner_id'] !== $MID)) fail('Client not found or not yours.', 404);
+  if (!$c) fail('Client not found.', 404);
+  if (!$ADMIN && (int) $c['owner_id'] !== $MID) fail('This client is handled by ' . (users_map()[$c['owner_id']] ?? 'another sales person') . '. Only they and admin can see the details.', 403);
   return $c;
 }
 function project_row($id) {
@@ -350,10 +351,12 @@ case 'client_full':
 case 'clients':
   $qs = s($in['q'] ?? null, 100);
   $w = '1=1'; $p = [];
-  if (!$ADMIN) { $w .= ' AND owner_id = ?'; $p[] = $MID; }
-  elseif (!empty($in['owner_id'])) { $w .= ' AND owner_id = ?'; $p[] = (int) $in['owner_id']; }   // admin: one person's clients
+  $everyone = !$ADMIN && !empty($in['all']) && empty($in['dnq']);   // sales: every company client's name, but details only for their own
+  if (!$ADMIN && !$everyone) { $w .= ' AND owner_id = ?'; $p[] = $MID; }
+  elseif (!empty($in['owner_id'])) { $w .= ' AND owner_id = ?'; $p[] = (int) $in['owner_id']; }   // one person's clients
   if (!empty($in['dnq'])) $w .= ' AND dnq = 1';
-  if ($qs) { $w .= ' AND (company LIKE ? OR person LIKE ? OR city LIKE ? OR email LIKE ? OR phone LIKE ?)'; array_push($p, "%$qs%", "%$qs%", "%$qs%", "%$qs%", "%$qs%"); }
+  if ($qs && $everyone) { $w .= ' AND (company LIKE ? OR person LIKE ? OR city LIKE ? OR (owner_id = ? AND (email LIKE ? OR phone LIKE ?)))'; array_push($p, "%$qs%", "%$qs%", "%$qs%", $MID, "%$qs%", "%$qs%"); }
+  elseif ($qs) { $w .= ' AND (company LIKE ? OR person LIKE ? OR city LIKE ? OR email LIKE ? OR phone LIKE ?)'; array_push($p, "%$qs%", "%$qs%", "%$qs%", "%$qs%", "%$qs%"); }
   $cs = all('SELECT id, company, person, designation, city, email, phone, owner_id, dnq, dnq_reason, dnq_note, dnq_on, dnq_by FROM ' . T('clients') . " WHERE $w ORDER BY company LIMIT 500", $p);
   if ($cs) {
     $ids = implode(',', array_map('intval', array_column($cs, 'id')));
@@ -366,7 +369,10 @@ case 'clients':
       unset($a);
     }
     $um = users_map();
-    foreach ($cs as &$c) { $c += $agg[$c['id']] ?? ['orders' => 0, 'won' => 0, 'business' => 0, 'due' => 0]; $c['owner'] = $um[$c['owner_id']] ?? '—'; } unset($c);
+    foreach ($cs as &$c) { $c += $agg[$c['id']] ?? ['orders' => 0, 'won' => 0, 'business' => 0, 'due' => 0]; $c['owner'] = $um[$c['owner_id']] ?? '—';
+      if (!$ADMIN && (int) $c['owner_id'] !== $MID)   // someone else's client: name only
+        $c = ['id' => (int) $c['id'], 'company' => $c['company'], 'person' => $c['person'], 'designation' => $c['designation'], 'city' => $c['city'], 'owner' => $c['owner'], 'owner_id' => (int) $c['owner_id'], 'dnq' => $c['dnq'], 'locked' => 1]; }
+    unset($c);
   }
   out(['clients' => $cs]);
 
@@ -941,8 +947,9 @@ case 'dir_detail':   // one contact: full details + their business with us (orde
       if ($won) { $T['total'] += $b['total']; $T['received'] += $b['received']; $T['balance'] += $b['balance']; } }
     $last = val('SELECT MAX(pdate) FROM ' . T('client_payments') . ' WHERE project_id IN (SELECT id FROM ' . T('projects') . ' WHERE client_id = ?)', [$cid]);
     $mine = $ADMIN || $ACC || (int) $cl['owner_id'] === $MID;
-    $biz = ['client_id' => $cid, 'company' => $cl['company'], 'address' => $cl['location'], 'city' => $cl['city'], 'gst_no' => $cl['gst_no'], 'owner' => $um[$cl['owner_id']] ?? '—', 'since' => $cl['created_at'], 'can_open' => $mine || $RECORDS,
-      'orders' => $mine ? $orders : array_map(fn($o) => array_intersect_key($o, array_flip(['expo', 'start_date', 'status', 'location'])), $orders), 'totals' => $mine ? array_map(fn($x) => round($x, 2), $T) : null, 'last_payment' => $mine ? $last : null];
+    $biz = $mine ? ['client_id' => $cid, 'company' => $cl['company'], 'address' => $cl['location'], 'city' => $cl['city'], 'gst_no' => $cl['gst_no'], 'owner' => $um[$cl['owner_id']] ?? '—', 'since' => $cl['created_at'], 'can_open' => $ADMIN || (int) $cl['owner_id'] === $MID,
+      'orders' => $orders, 'totals' => array_map(fn($x) => round($x, 2), $T), 'last_payment' => $last]
+      : ['client_id' => $cid, 'company' => $cl['company'], 'owner' => $um[$cl['owner_id']] ?? '—', 'locked' => 1];   // another sales person's client: name only
   }
   out(['contact' => $c, 'business' => $biz]);
 

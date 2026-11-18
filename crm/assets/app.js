@@ -424,16 +424,25 @@ function projTable(ps, showOwner, showClient = true) {
 
 // ---------- CLIENTS ----------
 routes.clients = async () => {
-  const qv = C.cq || '', ow = isAdmin() ? (C.cown || '') : '';
-  const d = await api('clients', { q: qv, owner_id: ow });
-  const tot = d.clients.reduce((a, c) => (a.b += +c.business || 0, a.o += +c.due || +c.outstanding || 0, a), { b: 0, o: 0 });
+  const qv = C.cq || '', ow = isAdmin() ? (C.cown || '') : '', every = !isAdmin() && C.cscope !== 'mine';
+  const d = await api('clients', { q: qv, owner_id: ow, all: every ? 1 : '' });
+  const mine = d.clients.filter(c => !c.locked);
+  const tot = mine.reduce((a, c) => (a.b += +c.business || 0, a.o += +c.due || +c.outstanding || 0, a), { b: 0, o: 0 });
+  const showOwner = isAdmin() || every;
   view().innerHTML = `
-  <div class="head"><div><h1>${isAdmin() ? 'All clients' : 'My clients'}</h1><p>${d.clients.length} client${d.clients.length === 1 ? '' : 's'}${ow ? ` handled by ${esc((B.users.find(u => +u.id === +ow) || {}).name || '')}` : ''}${qv ? ` matching “${esc(qv)}”` : ''}${ow ? ` · business ${inr(tot.b)} · outstanding ${inr(tot.o)}` : ''}</p></div>
-   <div class="row">${isAdmin() ? `<select id="cown" aria-label="Handled by" style="min-width:200px"><option value="">All sales people</option>${B.users.filter(u => +u.active && (u.role === 'admin' || (B.dept_modules || {})[u.department] === 'records')).map(u => `<option value="${u.id}" ${+ow === +u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>` : ''}<input id="cq" placeholder="Search company, person, city, phone" value="${esc(qv)}" style="min-width:260px"><a class="btn" href="#newclient">+ New client</a></div></div>
-  <div class="panel">${d.clients.length ? `<div class="tw"><table><tr><th>Company</th><th>Contact</th><th>City</th>${isAdmin() ? '<th>Handled by</th>' : ''}<th class="r">Won / orders</th><th class="r">Business</th><th class="r">Outstanding</th></tr>
-  ${d.clients.map(c => `<tr class="click" data-go="client-${c.id}"><td><b>${esc(c.company)}</b>${+c.dnq ? '<div class="dnq">⛔ DO NOT QUOTE</div>' : ''}</td><td>${esc(c.person || '')}<div class="sub">${esc(c.designation || '')}</div></td><td>${esc(c.city || '')}</td>${isAdmin() ? `<td>${esc(c.owner)}</td>` : ''}<td class="r num">${c.won} / ${c.orders}</td><td class="r num">${inr(c.business)}</td><td class="r num">${inr(c.due)}</td></tr>`).join('')}
+  <div class="head"><div><h1>${isAdmin() ? 'All clients' : every ? 'All company clients' : 'My clients'}</h1><p>${d.clients.length} client${d.clients.length === 1 ? '' : 's'}${ow ? ` handled by ${esc((B.users.find(u => +u.id === +ow) || {}).name || '')}` : ''}${qv ? ` matching “${esc(qv)}”` : ''}${ow ? ` · business ${inr(tot.b)} · outstanding ${inr(tot.o)}` : ''}${every ? ` · ${mine.length} handled by you` : ''}</p></div>
+   <div class="row">${isAdmin() ? `<select id="cown" aria-label="Handled by" style="min-width:200px"><option value="">All sales people</option>${B.users.filter(u => +u.active && (u.role === 'admin' || (B.dept_modules || {})[u.department] === 'records')).map(u => `<option value="${u.id}" ${+ow === +u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`
+     : `<div class="seg" role="group"><button class="btn ${every ? '' : 'ghost'} sm" data-cscope="all">All clients</button><button class="btn ${every ? 'ghost' : ''} sm" data-cscope="mine">Only mine</button></div>`}<input id="cq" placeholder="Search company, person, city${every ? '' : ', phone'}" value="${esc(qv)}" style="min-width:260px"><a class="btn" href="#newclient">+ New client</a></div></div>
+  ${every ? '<p class="sub" style="margin:-6px 0 10px">🔒 Clients handled by others show only the name, city and who handles them. Their details, orders and payments are visible only to that person and admin.</p>' : ''}
+  <div class="panel">${d.clients.length ? `<div class="tw"><table><tr><th>Company</th><th>Contact</th><th>City</th>${showOwner ? '<th>Handled by</th>' : ''}<th class="r">Won / orders</th><th class="r">Business</th><th class="r">Outstanding</th></tr>
+  ${d.clients.map(c => c.locked
+    ? `<tr class="locked" title="Handled by ${esc(c.owner)} — only they and admin can open it" style="opacity:.75"><td><b>${esc(c.company)}</b> <span aria-label="locked">🔒</span>${+c.dnq ? '<div class="dnq">⛔ DO NOT QUOTE</div>' : ''}</td><td>${esc(c.person || '')}<div class="sub">${esc(c.designation || '')}</div></td><td>${esc(c.city || '')}</td><td>${esc(c.owner)}</td><td class="r sub">—</td><td class="r sub">—</td><td class="r sub">—</td></tr>`
+    : `<tr class="click" data-go="client-${c.id}"><td><b>${esc(c.company)}</b>${+c.dnq ? '<div class="dnq">⛔ DO NOT QUOTE</div>' : ''}</td><td>${esc(c.person || '')}<div class="sub">${esc(c.designation || '')}</div></td><td>${esc(c.city || '')}</td>${showOwner ? `<td>${isAdmin() ? esc(c.owner) : '<b>You</b>'}</td>` : ''}<td class="r num">${c.won} / ${c.orders}</td><td class="r num">${inr(c.business)}</td>
+  <td class="r num">${+c.due > 0 ? `<b>${inr(c.due)}</b>` : inr(0)}</td></tr>`).join('')}
   </table></div>` : blank(qv ? 'No client matches that search.' : 'No clients yet. Add your first one.', '<a class="btn sm" href="#newclient">+ New client</a>')}</div>`;
   if ($('#cown')) $('#cown').onchange = e => { C.cown = e.target.value; refresh(); };
+  view().querySelectorAll('[data-cscope]').forEach(b => b.onclick = () => { C.cscope = b.dataset.cscope; refresh(); });
+  view().querySelectorAll('tr.locked').forEach(r => r.onclick = () => toast(r.title, true));
   let t; $('#cq').oninput = e => { clearTimeout(t); t = setTimeout(() => { C.cq = e.target.value.trim(); refresh().then(() => { const i = $('#cq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 350); };
 };
 
@@ -1686,7 +1695,7 @@ async function dirDetail(box) {
       ${row('Email', esc(c.email || ''))}${row('City', esc((b && b.city) || c.city || ''))}
       ${row('Address', addr ? `${esc(addr)}<br><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQ)}" target="_blank" rel="noopener">Open in Google Maps ↗</a>` : '<span class="sub">not captured</span>')}
       ${row('GSTIN', esc((b && b.gst_no) || c.gst_no || ''))}${row('Expo', esc(c.expo || ''))}${row('Notes', esc(c.note || ''))}${row('Follow-up', esc(c.follow || ''))}</div>
-     <div>${b ? `<h3 style="margin:0 0 6px">Business with us</h3>
+     <div>${b && b.locked ? `<h3 style="margin:0 0 6px">Business with us</h3><div class="sub">🔒 ${esc(b.company)} is a client handled by <b>${esc(b.owner)}</b>. Their orders and payments are visible only to them and admin.</div>` : b ? `<h3 style="margin:0 0 6px">Business with us</h3>
       <div class="sub" style="margin-bottom:8px">Client since ${fd(b.since)} · handled by ${esc(b.owner)}${b.can_open ? ` · <a href="#client-${b.client_id}">Open client page →</a>` : ''}</div>
       ${b.totals ? `<div class="kpis" style="margin-bottom:8px"><div class="kpi"><span>Orders</span><b>${b.orders.length}</b></div><div class="kpi"><span>Billed (won orders)</span><b>${inr(b.totals.total)}</b></div><div class="kpi"><span>Paid so far</span><b>${inr(b.totals.received)}</b>${b.last_payment ? `<small>last ${fd(b.last_payment)}</small>` : ''}</div><div class="kpi ${b.totals.balance > 0 ? 'hl' : ''}"><span>Payment due</span><b>${inr(b.totals.balance)}</b></div></div>` : ''}
       ${b.orders.length ? `<div class="tw"><table><tr><th>Expo / project</th><th>Date</th><th>Status</th>${b.totals ? '<th class="r">Bill</th><th class="r">Paid</th><th class="r">Due</th>' : ''}</tr>${b.orders.map(o => `<tr><td>${b.can_open && o.id ? `<a href="#project-${o.id}">${esc(o.expo)}</a>` : esc(o.expo)}<div class="sub">${esc(o.location || '')}</div></td><td class="num">${fd(o.start_date)}</td><td>${pill(o.status)}</td>${b.totals ? `<td class="r num">${o.won ? inr(o.total) : '—'}</td><td class="r num">${o.received ? inr(o.received) : '—'}</td><td class="r num">${o.balance > 0 ? `<b>${inr(o.balance)}</b>` : '—'}</td>` : ''}</tr>`).join('')}</table></div>` : '<div class="sub">No orders yet.</div>'}`
