@@ -185,7 +185,7 @@ const blank = (msg, btn = '') => `<div class="blank">${STALL}<div>${msg}</div>${
 const PLAN = `<svg viewBox="0 0 300 140" aria-hidden="true">${Array.from({ length: 24 }, (_, i) => { const x = (i % 8) * 36 + 4, y = Math.floor(i / 8) * 44 + 6; const f = [2, 5, 9, 12, 19].includes(i); return `<rect x="${x}" y="${y}" width="30" height="36" rx="2" fill="${f ? '#e9b949' : 'none'}" stroke="#fff" stroke-opacity=".6"/>`; }).join('')}</svg>`;
 
 // ---------- unsaved typing survives a refresh / power cut: every page's typed values are kept in this browser until saved ----------
-const DRAFT_SKIP = '[type=password],[type=file],[type=hidden],[type=search],[data-lheat],[data-lasg1],[data-lsel],[data-pf],[data-lfollow],[data-nodraft],[data-limp],[data-limpmap],[data-cimp],[data-cimpmap],#vq,#mlq,#lq,#ex-q,#lxh,#lxu,#pay-m,#lasg-to,#smtp-pre,#lsel-all';
+const DRAFT_SKIP = '[type=password],[type=file],[type=hidden],[type=search],[data-lheat],[data-lasg1],[data-lsel],[data-pf],[data-lfollow],[data-nodraft],[data-limp],[data-limpmap],[data-cimp],[data-cimpmap],#vq,#mlq,#lq,#ex-q,#lxh,#lxu,#pay-m,#lasg-to,#smtp-pre,#lsel-all,#dirf input,#dirf select,#nm-place,#nm-km,#dpg-go,#llogf input,#llogf select';
 const DS = { get: k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }, del: k => { try { localStorage.removeItem(k); } catch (e) {} } };
 const draftKey = (h = location.hash || '#home') => B.me ? `zcrm-draft:${B.me.id}:${h}` : null;
 function draftFields() {
@@ -258,7 +258,7 @@ async function route() {
 const ADMIN_ONLY = { att: 1, invappr: 1, clientlog: 1, saleslog: 1, leadlog: 1, jobs: 1, reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
 const RECORDS_ONLY = { refs: 1, clients: 1, client: 1, project: 1, newclient: 1, qgen: 1 };
 const ACC_ROUTES = { partners: 1, partner: 1, payroll: 1, payemp: 1, acc: 1, entry: 1, jv: 1, invoices: 1, invnew: 1, inv: 1, invappr: 1, claims: 1, topost: 1, books: 1, coa: 1, accset: 1 };
-const MODULE_ONLY = { contacts: ['records', 'ops', 'leads', 'calls'], myinv: ['records'], myexp: ['records', 'ops'],  leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
+const MODULE_ONLY = { contacts: ['records', 'ops', 'leads', 'calls'], nearme: ['records', 'ops', 'leads', 'calls'], myinv: ['records'], myexp: ['records', 'ops'],  leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
 const handsOver = () => !isAdmin() && !B.records && (B.modules || [B.module]).some(x => ['leads', 'calls'].includes(x));   // research / telecalling add clients for sales
 // ---- shared expo list: expo name boxes suggest saved expos; picking one fills the dates & place ----
 const EXPO_INPUTS = '[data-nce="expo"],[data-pf="expo"],#np-form [name=expo],#qgenf [name=expo],[data-k="expo"],#lx-new [name=name]';
@@ -1660,13 +1660,89 @@ async function scaleForScan(file) {   // keep cards readable: only very large ph
     const b = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.9)); return b ? new File([b], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }) : file;
   } catch { return file; }
 }
+// ---- contacts: edit any contact, and open one to see its business with us ----
+const dirCanEdit = r => isAdmin() || +r.user_id === +B.me.id;
+function dirForm(r) {
+  const x = (k, l, v, extra = '') => `<label class="f">${l}<input name="${k}" value="${esc(v || '')}" ${extra}></label>`;
+  const cl = r.kind === 'client';
+  return `<form id="dirform" class="inset"><b>Edit ${esc(r.name || r.company || 'contact')}</b> <span class="sub">· ${esc(r.source)}</span><div class="grid g3" style="margin-top:8px">
+    ${x('name', r.kind === 'client' ? 'Contact person' : 'Name', r.name)}${r.kind !== 'referral' && r.kind !== 'expo' ? x('designation', 'Designation', r.designation) : ''}${r.kind !== 'ccontact' ? x('company', 'Company', r.company) : ''}
+    ${x('phone', 'Phone', r.phone)}${r.kind !== 'referral' ? x('email', 'Email', r.email, 'type="email"') : ''}${cl ? x('city', 'City', r.city) : ''}
+    ${cl ? `<label class="f wide">Address<textarea name="address" rows="2">${esc(r.address || '')}</textarea></label>` : ''}${r.kind === 'expo' ? `<label class="f wide">Notes<textarea name="note" rows="2">${esc(r.note || '')}</textarea></label>` : ''}</div>
+    ${r.kind === 'ccontact' ? '<p class="sub">Company, city and address belong to the client — change them on the client page.</p>' : ''}
+    <div class="row" style="margin-top:8px"><button class="btn sm">Save changes</button><button type="button" class="btn link" id="dirform-x">Cancel</button></div></form>`;
+}
+async function dirDetail(box) {
+  const [kind, id] = box.dataset.ddet.split(':');
+  try {
+    const { contact: c, business: b } = await api('dir_detail', { kind, id });
+    const row = (l, v) => v ? `<div class="l"><span>${l}</span><span>${v}</span></div>` : '';
+    const phones = String(c.phone || '').split(/[,/]/).map(x => x.trim()).filter(Boolean);
+    const addr = (b && b.address) || c.address || '';
+    const mapQ = [addr, (b && b.city) || c.city].filter(Boolean).join(', ');
+    box.innerHTML = `<div class="grid" style="gap:16px">
+     <div><h3 style="margin:0 0 6px">${esc(c.name || '—')}${c.designation ? ` <span class="sub">· ${esc(c.designation)}</span>` : ''}</h3><div class="sub" style="margin-bottom:6px">${esc(c.company || '')}</div>
+      ${row('Phone', phones.map(p => `<span class="num">${esc(p)}</span> ${waBtn(p, `Hello ${c.name ? c.name.split(' ')[0] : ''}, this is ${B.me.name} from Zest Exhibitions. `, 'WhatsApp')}`).join('<br>'))}
+      ${row('Email', esc(c.email || ''))}${row('City', esc((b && b.city) || c.city || ''))}
+      ${row('Address', addr ? `${esc(addr)}<br><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQ)}" target="_blank" rel="noopener">Open in Google Maps ↗</a>` : '<span class="sub">not captured</span>')}
+      ${row('GSTIN', esc((b && b.gst_no) || c.gst_no || ''))}${row('Expo', esc(c.expo || ''))}${row('Notes', esc(c.note || ''))}${row('Follow-up', esc(c.follow || ''))}</div>
+     <div>${b ? `<h3 style="margin:0 0 6px">Business with us</h3>
+      <div class="sub" style="margin-bottom:8px">Client since ${fd(b.since)} · handled by ${esc(b.owner)}${b.can_open ? ` · <a href="#client-${b.client_id}">Open client page →</a>` : ''}</div>
+      ${b.totals ? `<div class="kpis" style="margin-bottom:8px"><div class="kpi"><span>Orders</span><b>${b.orders.length}</b></div><div class="kpi"><span>Billed (won orders)</span><b>${inr(b.totals.total)}</b></div><div class="kpi"><span>Paid so far</span><b>${inr(b.totals.received)}</b>${b.last_payment ? `<small>last ${fd(b.last_payment)}</small>` : ''}</div><div class="kpi ${b.totals.balance > 0 ? 'hl' : ''}"><span>Payment due</span><b>${inr(b.totals.balance)}</b></div></div>` : ''}
+      ${b.orders.length ? `<div class="tw"><table><tr><th>Expo / project</th><th>Date</th><th>Status</th>${b.totals ? '<th class="r">Bill</th><th class="r">Paid</th><th class="r">Due</th>' : ''}</tr>${b.orders.map(o => `<tr><td>${b.can_open && o.id ? `<a href="#project-${o.id}">${esc(o.expo)}</a>` : esc(o.expo)}<div class="sub">${esc(o.location || '')}</div></td><td class="num">${fd(o.start_date)}</td><td>${pill(o.status)}</td>${b.totals ? `<td class="r num">${o.won ? inr(o.total) : '—'}</td><td class="r num">${o.received ? inr(o.received) : '—'}</td><td class="r num">${o.balance > 0 ? `<b>${inr(o.balance)}</b>` : '—'}</td>` : ''}</tr>`).join('')}</table></div>` : '<div class="sub">No orders yet.</div>'}`
+      : `<h3 style="margin:0 0 6px">Business with us</h3><div class="sub">Not a client yet — no orders or payments.</div>${B.records ? `<button class="btn ghost sm" style="margin-top:8px" data-d2c>Make client →</button>` : ''}`}</div></div>`;
+    const mk = box.querySelector('[data-d2c]'); if (mk) mk.onclick = () => { newClient = { company: c.company || '', email: c.email || '', phone: phones[0] || '', person: c.name || '', designation: c.designation || '', city: c.city || '', location: c.address || '', gst_no: '', notes: c.note || '', owner_id: '', contacts: [], cards: [], briefs: [], gstcert: [], expo: { expo: c.expo || '', location: '', start_date: '', area_sqm: '', space_type: '', sides_open: '', stall_no: '' } }; location.hash = '#newclient'; };
+  } catch (e) { box.innerHTML = `<span class="sub">${esc(e.message)}</span>`; }
+}
+
+// ---- customers near me ----
+routes.nearme = async () => {
+  const N = C.near || (C.near = { km: 25 });
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#contacts">← Contacts</a></div><h1>Customers near me</h1><p>Clients closest to where you are now — handy when you are out on the road. Uses the address and city saved on each client.</p></div></div>
+   <div class="panel"><div class="row" style="flex-wrap:wrap;gap:10px;align-items:flex-end"><button class="btn" id="nm-loc">📍 Use my current location</button><span class="sub">or</span>
+    <label class="f" style="min-width:240px">Type a place / area / pincode<input id="nm-place" placeholder="e.g. Okhla Phase 2 or 110020" value="${esc(N.place || '')}"></label><button class="btn ghost sm" id="nm-go">Find</button>
+    <label class="f">Within<select id="nm-km">${[5, 10, 25, 50, 100, 250, 3000].map(k => `<option value="${k}" ${+N.km === k ? 'selected' : ''}>${k === 3000 ? 'Any distance' : k + ' km'}</option>`).join('')}</select></label></div>
+    <div class="sub" id="nm-geo" style="margin-top:8px"></div></div>
+   <div id="nm-out"></div>`;
+  const out = $('#nm-out'), gs = $('#nm-geo');
+  const show = async () => {
+    if (!N.lat) { out.innerHTML = `<div class="panel">${blank('Tap “Use my current location” (allow location when the phone asks), or type a place.')}</div>`; return; }
+    out.innerHTML = '<div class="panel"><span class="sub">Finding clients near you…</span></div>';
+    const d = await api('near_me', { lat: N.lat, lng: N.lng, km: N.km });
+    const PREC = { address: 'exact address', pincode: 'by pincode', city: 'city centre only' };
+    out.innerHTML = `<div class="panel"><div class="ph"><h2>${d.rows.length} client${d.rows.length === 1 ? '' : 's'} within ${+N.km === 3000 ? 'any distance' : N.km + ' km'} of ${esc(N.label || 'you')}</h2></div>
+     ${d.rows.length ? `<div class="tw"><table><tr><th class="r">Distance</th><th>Client</th><th>Contact</th><th>Address</th><th>Orders</th><th class="r">Due</th><th></th></tr>${d.rows.map(r => `<tr><td class="r num"><b>${r.km < 1 ? Math.round(r.km * 1000) + ' m' : r.km + ' km'}</b><div class="sub">${PREC[r.geo_prec] || ''}</div></td>
+      <td><a href="#client-${r.id}"><b>${esc(r.company)}</b></a><div class="sub">handled by ${esc(r.owner)}</div></td><td>${esc(r.person || '')}${r.phone ? `<div class="num">${esc(r.phone)} ${waBtn(r.phone, `Hello ${r.person ? r.person.split(' ')[0] : ''}, this is ${B.me.name} from Zest Exhibitions. I am nearby today — could I drop in for a quick meeting? `, 'WhatsApp')}</div>` : ''}</td>
+      <td class="sub" style="max-width:260px">${esc(r.location || '')}${r.city ? `<div>${esc(r.city)}</div>` : ''}</td><td>${r.orders}${r.last ? `<div class="sub">last: ${esc(r.last.expo)}</div>` : ''}</td><td class="r num">${r.due > 0 ? `<b>${inr(r.due)}</b>` : '—'}</td>
+      <td class="r"><a class="btn ghost sm" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&origin=${N.lat},${N.lng}&destination=${r.lat},${r.lng}">Directions ↗</a></td></tr>`).join('')}</table></div>` : blank('No mapped clients in this range. Try a bigger distance.')}
+     <p class="sub">${d.mapped} client${d.mapped === 1 ? '' : 's'} on the map${d.unmapped ? ` · ${d.unmapped} still being located` : ''}${d.notfound ? ` · ${d.notfound} address${d.notfound === 1 ? '' : 'es'} not found on the map (check the city / pincode on those clients)` : ''}${d.noaddr ? ` · ${d.noaddr} with no address or city saved` : ''}.</p></div>`;
+  };
+  const locate = async () => {   // put a few more client addresses on the map each round while this page is open
+    for (let k = 0; k < 60 && location.hash === '#nearme'; k++) {
+      let r; try { r = await api('geo_batch'); } catch (e) { gs.textContent = 'Could not reach the map service just now: ' + e.message; return; }
+      if (!r.left) { gs.textContent = `${r.mapped} client addresses are on the map.`; if (k) show(); return; }
+      gs.textContent = `Placing client addresses on the map… ${r.mapped} done, ${r.left} to go (first time only — keep this page open).`;
+      if (k % 3 === 2 && N.lat) show();
+    }
+  };
+  $('#nm-loc').onclick = () => {
+    if (!navigator.geolocation) return toast('This browser cannot share your location. Type a place instead.', true);
+    toast('Getting your location…');
+    navigator.geolocation.getCurrentPosition(p => { Object.assign(N, { lat: p.coords.latitude, lng: p.coords.longitude, label: 'your current location', place: '' }); show(); },
+      err => toast(err.code === 1 ? 'Location is blocked — allow it for this site in the browser settings, or type a place.' : 'Could not get your location. Type a place instead.', true), { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+  };
+  const findPlace = async () => { const q = $('#nm-place').value.trim(); if (!q) return; const r = await act(() => api('geo_place', { q })).catch(() => null); if (r) { Object.assign(N, { lat: r.lat, lng: r.lng, label: q, place: q }); show(); } };
+  $('#nm-go').onclick = findPlace; $('#nm-place').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); findPlace(); } };
+  $('#nm-km').onchange = e => { N.km = +e.target.value; show(); };
+  show(); locate();
+};
 routes.contacts = async () => {
-  const f = C.dirf || (C.dirf = { q: '', source: '', tag: '', user_id: '' });
+  const f = C.dirf || (C.dirf = { q: '', source: '', tag: '', user_id: '', expo: '', city: '', from: '', to: '', sort: 'new', page: 1 });
   const [d, sc] = await Promise.all([api('dir_list', f), api('card_scans')]); C.dir = d.rows; C.scanAi = sc.ai;
-  const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
+  const qs = new URLSearchParams(Object.entries(f).filter(([k, v]) => v && k !== 'page')).toString();
   const res = C.scanRes || [];
   view().innerHTML = `<div class="head"><div><h1>Contacts</h1><p>${isAdmin() ? 'Every contact in the company in one place — business cards, clients, expo data from research & telecalling, and referral leads. The tag shows where each came from and who added it.' : 'Contacts you have brought in — business cards, your clients and referral leads.'}</p></div>
-   <div class="row"><button class="btn" id="scan-open">📷 Scan business cards</button><button class="btn ghost" id="cadd-open">+ Add contact</button><button class="btn ghost" id="cimp-open">⬆ Import from Excel</button><a class="btn ghost" href="contacts_export.php?${qs}">⬇ Export to Excel</a></div></div>
+   <div class="row"><a class="btn" href="#nearme">📍 Customers near me</a><button class="btn ghost" id="scan-open">📷 Scan business cards</button><button class="btn ghost" id="cadd-open">+ Add contact</button><button class="btn ghost" id="cimp-open">⬆ Import from Excel</button><a class="btn ghost" href="contacts_export.php?${qs}">⬇ Export to Excel</a></div></div>
   <datalist id="ctags">${[...new Set([...d.tags, ...d.expos])].map(t => `<option value="${esc(t)}">`).join('')}</datalist>
   <form class="panel" id="scanf" ${C.scanOpen ? '' : 'hidden'}><h2>Scan business cards</h2>
    <p class="sub" style="margin-top:0">Lay the cards flat in rows, not overlapping, in good light, and take one photo (up to ~30 cards). Several photos can be added at once. Each card is saved as your contact.</p>
@@ -1683,19 +1759,38 @@ routes.contacts = async () => {
     ${r.manual || r.error || !r.cards.length ? `<button class="btn ghost sm" data-cnew="${esc(C.scanTag || '')}" style="margin-top:6px">+ Type a card in</button>` : ''}</div>`).join('')}</div>` : ''}
   ${C.imp ? impPanel(C.imp) : ''}
   <div id="cadd">${C.cnew !== undefined && C.cnew !== null ? `<div class="panel"><h2>Add contact</h2>${cardForm({ tag: C.cnew }, 0)}</div>` : ''}</div>
-  <form class="panel row" id="dirf" style="align-items:flex-end"><label class="f" style="flex:1;min-width:200px">Search name, company, phone, email, tag<input name="q" value="${esc(f.q)}"></label>
+  <form class="panel" id="dirf"><div class="grid g3" style="align-items:end">
+   <label class="f">Search name, company, phone, email<input name="q" value="${esc(f.q)}" placeholder="Type and press Enter"></label>
+   <label class="f">Expo / event<select name="expo"><option value="">All expos</option>${[...new Set([...d.expos, ...d.tags])].filter(Boolean).map(t => `<option ${f.expo === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
+   <label class="f">City<select name="city"><option value="">All cities</option>${d.cities.map(c => `<option ${f.city === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
    <label class="f">Source<select name="source"><option value="">All</option>${[['card', 'Business cards, Excel & added by hand'], ['client', 'Clients'], ['expo', 'Expo data (research / telecalling)'], ['referral', 'Referral leads']].map(([k, l]) => `<option value="${k}" ${f.source === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-   <label class="f">Tag<select name="tag"><option value="">Any</option>${d.tags.map(t => `<option ${f.tag === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
-   ${isAdmin() ? `<label class="f">Added by<select name="user_id"><option value="">Everyone</option>${B.users.map(u => `<option value="${u.id}" ${+f.user_id === +u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>` : ''}<button class="btn ghost">Apply</button></form>
+   ${isAdmin() ? `<label class="f">Entered by<select name="user_id"><option value="">Everyone</option>${B.users.map(u => `<option value="${u.id}" ${+f.user_id === +u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></label>` : ''}
+   <label class="f">Tag (cards)<select name="tag"><option value="">Any</option>${d.tags.map(t => `<option ${f.tag === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
+   <label class="f">Added from<input type="date" name="from" value="${esc(f.from || '')}"></label><label class="f">to<input type="date" name="to" value="${esc(f.to || '')}"></label>
+   <label class="f">Sort by<select name="sort">${[['new', 'Newest first'], ['old', 'Oldest first'], ['name', 'Name A–Z'], ['company', 'Company A–Z'], ['city', 'City A–Z']].map(([k, l]) => `<option value="${k}" ${f.sort === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
+   <div class="row" style="margin-top:10px"><button class="btn sm">Apply</button><button type="button" class="btn link" id="dirf-clear">Clear filters</button></div></form>
   <div class="panel"><div class="ph"><h2>${d.total} contact${d.total === 1 ? '' : 's'}</h2><div class="row">${Object.entries(d.counts).map(([k, n]) => `<span class="pill ${SRC_PILL[k] || 'p-enquiry'}">${esc(k)} · ${n}</span>`).join('')}</div></div>
-   ${d.rows.length ? `<div class="tw"><table><tr><th>Name</th><th>Company</th><th>Phone</th><th>Email</th><th>City</th><th>Where from</th><th>Added by</th><th></th></tr>
-    ${d.rows.map(r => `<tr><td><b>${esc(r.name || '—')}</b>${r.designation ? `<div class="sub">${esc(r.designation)}</div>` : ''}</td><td>${esc(r.company || '')}</td>
+   ${d.rows.length ? `<div class="sub" style="margin-bottom:6px">Click a contact to see the address, past orders with us and payments.</div><div class="tw"><table><tr><th>Name</th><th>Company</th><th>Phone</th><th>Email</th><th>City</th><th>Where from</th><th>Added by</th><th></th></tr>
+    ${d.rows.map(r => `<tr class="click" data-dk="${r.kind}:${r.id}"><td><b>${esc(r.name || '—')}</b>${r.designation ? `<div class="sub">${esc(r.designation)}</div>` : ''}</td><td>${esc(r.company || '')}</td>
      <td class="num">${String(r.phone || '').split(',').filter(x => x.trim()).map(x => `<div><a href="tel:${esc(x.replace(/[^\d+]/g, ''))}">${esc(x.trim())}</a></div>`).join('')}</td><td>${String(r.email || '').split(',').filter(x => x.trim()).map(x => `<div><a href="mailto:${esc(x.trim())}">${esc(x.trim())}</a></div>`).join('')}</td><td>${esc(r.city || '')}</td>
      <td><span class="pill ${SRC_PILL[r.source] || 'p-enquiry'}">${esc(r.source)}</span>${r.tag && !['Client'].includes(r.tag) ? `<div class="sub">${esc(r.tag)}</div>` : ''}</td><td>${esc(r.by)}<div class="sub">${fd(r.at)}</div></td>
-     <td class="r" style="white-space:nowrap">${r.kind === 'card' && (isAdmin() || +r.user_id === +B.me.id) ? `<button class="btn link" data-cedit="${r.id}">Edit</button><button class="btn link" data-cdel="${r.id}">Delete</button>` : r.link ? `<a class="btn link" href="${r.link}">Open</a>` : ''}</td></tr>
-     ${r.kind === 'card' && +C.cedit === +r.id ? `<tr><td colspan="8">${cardForm(r.raw || r, r.id)}</td></tr>` : ''}`).join('')}</table></div>${d.total > d.rows.length ? `<div class="sub" style="margin-top:8px">Showing the latest ${d.rows.length}. Search or export to see all ${d.total}.</div>` : ''}`
+     <td class="r" style="white-space:nowrap">${r.kind === 'card' ? (isAdmin() || +r.user_id === +B.me.id ? `<button class="btn link" data-cedit="${r.id}">Edit</button><button class="btn link" data-cdel="${r.id}">Delete</button>` : '') : dirCanEdit(r) ? `<button class="btn link" data-dedit="${r.kind}:${r.id}">Edit</button>` : ''}${r.link ? `<a class="btn link" href="${r.link}">Open</a>` : ''}</td></tr>
+     ${r.kind === 'card' && +C.cedit === +r.id ? `<tr><td colspan="8">${cardForm(r.raw || r, r.id)}</td></tr>` : ''}
+     ${C.dedit === r.kind + ':' + r.id ? `<tr><td colspan="8">${dirForm(r)}</td></tr>` : ''}
+     ${C.dopen === r.kind + ':' + r.id ? `<tr class="dd"><td colspan="8"><div data-ddet="${r.kind}:${r.id}" class="inset"><span class="sub">Loading…</span></div></td></tr>` : ''}`).join('')}</table></div>
+    ${d.pages > 1 ? `<div class="row" style="margin-top:10px;align-items:center;flex-wrap:wrap"><button class="btn ghost sm" data-dpg="${d.page - 1}" ${d.page <= 1 ? 'disabled' : ''}>← Previous</button><span class="sub">Page <b>${d.page}</b> of ${d.pages} · ${((d.page - 1) * d.per) + 1}–${Math.min(d.page * d.per, d.total)} of ${d.total}</span><button class="btn ghost sm" data-dpg="${d.page + 1}" ${d.page >= d.pages ? 'disabled' : ''}>Next →</button>
+     <label class="row" style="gap:6px;margin-left:auto">Go to page <input type="number" min="1" max="${d.pages}" value="${d.page}" id="dpg-go" style="width:80px"></label></div>` : ''}`
     : blank('No contacts here yet. Scan the business cards from your next expo.')}</div>`;
-  $('#dirf').onsubmit = e => { e.preventDefault(); C.dirf = Object.fromEntries(new FormData(e.target)); refresh(); };
+  $('#dirf').onsubmit = e => { e.preventDefault(); C.dirf = { ...Object.fromEntries(new FormData(e.target)), page: 1 }; C.dopen = null; refresh(); };
+  $('#dirf').querySelectorAll('select').forEach(el => el.onchange = () => $('#dirf').requestSubmit());
+  $('#dirf-clear').onclick = () => { C.dirf = null; C.dopen = null; refresh(); };
+  view().querySelectorAll('[data-dpg]').forEach(b => b.onclick = () => { f.page = +b.dataset.dpg; C.dopen = null; refresh().then(() => $('#dirf').scrollIntoView({ block: 'start' })); });
+  if ($('#dpg-go')) $('#dpg-go').onchange = e => { f.page = Math.max(1, Math.min(d.pages, +e.target.value || 1)); refresh(); };
+  view().querySelectorAll('[data-dk]').forEach(tr => tr.onclick = e => { if (e.target.closest('a,button,input,select,textarea,label')) return; C.dopen = C.dopen === tr.dataset.dk ? null : tr.dataset.dk; C.dedit = null; refresh(); });
+  view().querySelectorAll('[data-dedit]').forEach(b => b.onclick = () => { C.dedit = C.dedit === b.dataset.dedit ? null : b.dataset.dedit; C.dopen = null; refresh(); });
+  if ($('#dirform')) { $('#dirform').onsubmit = async e => { e.preventDefault(); const [kind, id] = C.dedit.split(':'); const ok = await act(() => api('dir_save', { kind, id, ...Object.fromEntries(new FormData(e.target)) }), 'Contact updated').catch(() => null); if (ok) { C.dedit = null; refresh(); } };
+    $('#dirform-x').onclick = () => { C.dedit = null; refresh(); }; }
+  const dd = view().querySelector('[data-ddet]'); if (dd) dirDetail(dd);
   $('#scan-open').onclick = () => { C.scanOpen = true; $('#scanf').hidden = false; $('#scanf [name=tag]').focus(); };
   $('#cadd-open').onclick = () => { C.cnew = f.tag || ''; refresh(); };
   $('#cimp-open').onclick = () => { C.imp = C.imp || { step: 'file' }; refresh(); };

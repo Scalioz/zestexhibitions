@@ -114,24 +114,25 @@ function directory_rows($in, $admin, $uid) {
     foreach (all('SELECT * FROM ' . T('cards') . " WHERE $w ORDER BY id DESC LIMIT 3000", $p) as $r)
       $rows[] = ['source' => ['manual' => 'Added by hand', 'import' => 'Excel import'][$r['source']] ?? 'Business card', 'kind' => 'card', 'id' => (int) $r['id'], 'tag' => $r['tag'], 'by' => $um[$r['user_id']] ?? '—', 'user_id' => (int) $r['user_id'],
         'name' => $r['name'], 'designation' => $r['designation'], 'company' => $r['company'], 'phone' => trim($r['phone'] . ($r['phone2'] ? ', ' . $r['phone2'] : ''), ', '), 'email' => trim($r['email'] . ($r['email2'] ? ', ' . $r['email2'] : ''), ', '),
-        'city' => $r['city'], 'website' => $r['website'], 'address' => $r['address'], 'note' => $r['note'], 'scan_id' => $r['scan_id'] ? (int) $r['scan_id'] : null, 'at' => $r['created_at'], 'raw' => $r];
+        'city' => $r['city'], 'website' => $r['website'], 'address' => $r['address'], 'note' => $r['note'], 'expos' => [$r['tag']], 'scan_id' => $r['scan_id'] ? (int) $r['scan_id'] : null, 'at' => $r['created_at'], 'raw' => $r];
   }
   if ($tagf !== '') return $rows;   // tags belong to card contacts
   if (!$src || $src === 'client') {
     [$w, $p] = $like(['c.company', 'c.person', 'c.phone', 'c.email', 'c.city']); if ($who) { $w .= ' AND c.owner_id = ?'; $p[] = $who; }
-    foreach (all('SELECT c.* FROM ' . T('clients') . " c WHERE $w ORDER BY c.id DESC LIMIT 3000", $p) as $r)
-      $rows[] = ['source' => 'Client', 'kind' => 'client', 'id' => (int) $r['id'], 'tag' => 'Client', 'by' => $um[$r['owner_id']] ?? '—', 'user_id' => (int) $r['owner_id'], 'name' => $r['person'], 'designation' => $r['designation'], 'company' => $r['company'],
-        'phone' => $r['phone'], 'email' => $r['email'], 'city' => $r['city'], 'at' => $r['created_at'], 'link' => '#client-' . $r['id']];
+    $cex = []; foreach (all('SELECT client_id, expo FROM ' . T('projects')) as $x) $cex[$x['client_id']][] = $x['expo'];
+    foreach (all('SELECT c.* FROM ' . T('clients') . " c WHERE $w ORDER BY c.id DESC LIMIT 5000", $p) as $r)
+      $rows[] = ['source' => 'Client', 'kind' => 'client', 'id' => (int) $r['id'], 'client_id' => (int) $r['id'], 'tag' => 'Client', 'by' => $um[$r['owner_id']] ?? '—', 'user_id' => (int) $r['owner_id'], 'name' => $r['person'], 'designation' => $r['designation'], 'company' => $r['company'],
+        'phone' => $r['phone'], 'email' => $r['email'], 'city' => $r['city'], 'address' => $r['location'], 'expos' => $cex[$r['id']] ?? [], 'at' => $r['created_at'], 'link' => '#client-' . $r['id']];
     [$w, $p] = $like(['k.name', 'k.phone', 'k.email', 'c.company']); if ($who) { $w .= ' AND c.owner_id = ?'; $p[] = $who; }
-    foreach (all('SELECT k.*, c.company, c.owner_id, c.city, c.created_at FROM ' . T('contacts') . ' k JOIN ' . T('clients') . " c ON c.id = k.client_id WHERE $w ORDER BY k.id DESC LIMIT 3000", $p) as $r)
-      $rows[] = ['source' => 'Client contact', 'kind' => 'client', 'id' => (int) $r['client_id'], 'tag' => 'Client', 'by' => $um[$r['owner_id']] ?? '—', 'user_id' => (int) $r['owner_id'], 'name' => $r['name'], 'designation' => $r['designation'], 'company' => $r['company'],
-        'phone' => $r['phone'], 'email' => $r['email'], 'city' => $r['city'], 'at' => $r['created_at'], 'link' => '#client-' . $r['client_id']];
+    foreach (all('SELECT k.*, c.company, c.owner_id, c.city, c.location, c.created_at FROM ' . T('contacts') . ' k JOIN ' . T('clients') . " c ON c.id = k.client_id WHERE $w ORDER BY k.id DESC LIMIT 5000", $p) as $r)
+      $rows[] = ['source' => 'Client contact', 'kind' => 'ccontact', 'id' => (int) $r['id'], 'client_id' => (int) $r['client_id'], 'tag' => 'Client', 'by' => $um[$r['owner_id']] ?? '—', 'user_id' => (int) $r['owner_id'], 'name' => $r['name'], 'designation' => $r['designation'], 'company' => $r['company'],
+        'phone' => $r['phone'], 'email' => $r['email'], 'city' => $r['city'], 'address' => $r['location'], 'expos' => $cex[$r['client_id']] ?? [], 'at' => $r['created_at'], 'link' => '#client-' . $r['client_id']];
   }
   if (!$src || $src === 'expo') {
     [$w, $p] = $like(['l.company', 'l.person', 'l.phone', 'l.email', 'e.name']); if ($who) { $w .= ' AND l.user_id = ?'; $p[] = $who; }
     foreach (all('SELECT l.*, e.name AS expo, e.city FROM ' . T('leads') . ' l JOIN ' . T('expos') . " e ON e.id = l.expo_id WHERE $w ORDER BY l.id DESC LIMIT 5000", $p) as $r)
       $rows[] = ['source' => 'Expo data · ' . $r['dept'], 'kind' => 'expo', 'id' => (int) $r['id'], 'tag' => $r['expo'], 'by' => $um[$r['user_id']] ?? '—', 'user_id' => (int) $r['user_id'], 'name' => $r['person'], 'designation' => '', 'company' => $r['company'],
-        'phone' => $r['phone'], 'email' => $r['email'], 'city' => $r['city'], 'note' => $r['notes'], 'at' => $r['created_at'], 'link' => '#lexpo-' . $r['expo_id']];
+        'phone' => $r['phone'], 'email' => $r['email'], 'city' => $r['city'], 'note' => $r['notes'], 'expos' => [$r['expo']], 'heat' => $r['heat'], 'at' => $r['created_at'], 'link' => '#lexpo-' . $r['expo_id']];
   }
   if (!$src || $src === 'referral') {
     [$w, $p] = $like(['name', 'company', 'phone']); if ($who) { $w .= ' AND (assigned_to = ? OR referred_by = ?)'; $p[] = $who; $p[] = $who; }
@@ -139,6 +140,29 @@ function directory_rows($in, $admin, $uid) {
       $rows[] = ['source' => 'Referral lead', 'kind' => 'referral', 'id' => (int) $r['id'], 'tag' => 'Referral · ' . ($um[$r['referred_by']] ?? ''), 'by' => $um[$r['assigned_to']] ?? '—', 'user_id' => (int) $r['assigned_to'], 'name' => $r['name'], 'designation' => '', 'company' => $r['company'],
         'phone' => $r['phone'], 'email' => '', 'city' => '', 'note' => $r['note'], 'at' => $r['created_at'], 'link' => '#refs'];
   }
-  usort($rows, fn($a, $b) => strcmp((string) $b['at'], (string) $a['at']));
+  // narrower filters: expo / event, city, date added
+  $ex = mb_strtolower(trim((string) ($in['expo'] ?? ''))); $city = mb_strtolower(trim((string) ($in['city'] ?? '')));
+  $from = preg_match('/^\d{4}-\d{2}-\d{2}$/', $in['from'] ?? '') ? $in['from'] : ''; $to = preg_match('/^\d{4}-\d{2}-\d{2}$/', $in['to'] ?? '') ? $in['to'] : '';
+  if ($ex !== '' || $city !== '' || $from || $to) $rows = array_values(array_filter($rows, function ($r) use ($ex, $city, $from, $to) {
+    if ($ex !== '' && !array_filter($r['expos'] ?? [], fn($e) => mb_strtolower(trim((string) $e)) === $ex)) return false;
+    if ($city !== '' && mb_strpos(mb_strtolower((string) ($r['city'] ?? '') . ' ' . (string) ($r['address'] ?? '')), $city) === false) return false;
+    $d = substr((string) $r['at'], 0, 10); if ($from && $d < $from) return false; if ($to && $d > $to) return false;
+    return true;
+  }));
+  $sort = $in['sort'] ?? 'new';
+  $key = ['name' => 'name', 'company' => 'company', 'city' => 'city'][$sort] ?? null;
+  if ($key) usort($rows, fn($a, $b) => strcasecmp(trim((string) ($a[$key] ?: '~')), trim((string) ($b[$key] ?: '~'))));
+  elseif ($sort === 'old') usort($rows, fn($a, $b) => strcmp((string) $a['at'], (string) $b['at']));
+  else usort($rows, fn($a, $b) => strcmp((string) $b['at'], (string) $a['at']));
   return $rows;
+}
+
+// which client (if any) a contact belongs to — by phone, email or company name
+function contact_client($r) {
+  if (!empty($r['client_id'])) return (int) $r['client_id'];
+  foreach (preg_split('/[,\/]+/', (string) ($r['phone'] ?? '')) as $ph) { $d = substr(preg_replace('/\D/', '', $ph), -10); if (strlen($d) === 10 && ($id = val('SELECT id FROM ' . T('clients') . ' WHERE phone LIKE ? ORDER BY id DESC', ['%' . substr($d, -6) . '%']))) {
+    $c = one('SELECT id, phone FROM ' . T('clients') . ' WHERE id = ?', [$id]); if (substr(preg_replace('/\D/', '', $c['phone']), -10) === $d) return (int) $id; } }
+  foreach (preg_split('/[,;\s]+/', strtolower((string) ($r['email'] ?? ''))) as $em) if ($em && ($id = val('SELECT id FROM ' . T('clients') . ' WHERE LOWER(email) = ?', [$em]))) return (int) $id;
+  if (trim((string) ($r['company'] ?? '')) !== '' && ($id = val('SELECT id FROM ' . T('clients') . ' WHERE LOWER(TRIM(company)) = LOWER(TRIM(?))', [$r['company']]))) return (int) $id;
+  return null;
 }

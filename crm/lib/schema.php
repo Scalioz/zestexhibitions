@@ -201,6 +201,10 @@ function migrate() {
     try { db()->exec('CREATE INDEX zc_leads_asg ON ' . T('leads') . ' (assigned_to)'); } catch (PDOException $e) {}
     set_setting('schema_v', 26);
   }
+  if ($v < 27) {   // customers near me: where each client is on the map
+    foreach (['lat DECIMAL(10,6)', 'lng DECIMAL(10,6)', 'geo_q VARCHAR(400)', 'geo_prec VARCHAR(12)'] as $col) { try { db()->exec('ALTER TABLE ' . T('clients') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ } }
+    set_setting('schema_v', 27);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';

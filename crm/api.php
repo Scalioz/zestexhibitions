@@ -424,6 +424,7 @@ case 'client_save':
     $data['owner_id'] = (int) $in['owner_id'];
     if (!empty($in['move_orders'])) q('UPDATE ' . T('projects') . ' SET owner_id = ? WHERE client_id = ?', [$data['owner_id'], $c['id']]);
   }
+  if ((array_key_exists('city', $data) && $data['city'] !== $c['city']) || (array_key_exists('location', $data) && $data['location'] !== $c['location'])) $data += ['lat' => null, 'lng' => null, 'geo_q' => null, 'geo_prec' => null];   // address changed: find it on the map again
   upd('clients', $c['id'], $data);
   out(['ok' => true]);
 
@@ -892,7 +893,93 @@ case 'dir_list':   // one directory: cards, clients, client contacts, expo data,
   $tags = array_column(all('SELECT DISTINCT tag FROM ' . T('cards') . ' WHERE tag IS NOT NULL AND tag <> \'\'' . ($ADMIN ? '' : ' AND user_id = ' . $MID) . ' ORDER BY tag'), 'tag');
   $expos = array_values(array_unique(array_merge(array_column(all('SELECT name FROM ' . T('expos') . ' ORDER BY id DESC LIMIT 200'), 'name'), array_column(all('SELECT DISTINCT expo FROM ' . T('projects') . ' ORDER BY id DESC LIMIT 200'), 'expo'))));
   $by = []; foreach ($rows as $r) $by[$r['source']] = ($by[$r['source']] ?? 0) + 1;
-  out(['rows' => array_slice($rows, 0, 1500), 'total' => $total, 'counts' => $by, 'tags' => $tags, 'expos' => $expos]);
+  $per = max(25, min(500, (int) ($in['per'] ?? 100))); $pages = max(1, (int) ceil($total / $per)); $page = max(1, min($pages, (int) ($in['page'] ?? 1)));
+  $cities = []; foreach ($rows as $r) { $c = trim((string) ($r['city'] ?? '')); if ($c !== '') $cities[mb_convert_case($c, MB_CASE_TITLE)] = 1; } ksort($cities);
+  $slice = array_slice($rows, ($page - 1) * $per, $per); foreach ($slice as &$r) unset($r['raw']['phone_key']); unset($r);
+  out(['rows' => $slice, 'total' => $total, 'page' => $page, 'pages' => $pages, 'per' => $per, 'counts' => $by, 'tags' => $tags, 'expos' => $expos, 'cities' => array_keys($cities)]);
+
+case 'dir_save':   // correct a contact's details, whichever list it lives in
+  $k = $in['kind'] ?? ''; $id = (int) ($in['id'] ?? 0);
+  $v = fn($f, $n) => s($in[$f] ?? null, $n);
+  $em = strtolower(trim((string) ($in['email'] ?? ''))); if ($em !== '' && !filter_var($em, FILTER_VALIDATE_EMAIL)) fail('The email address looks wrong.');
+  if ($k === 'client') {
+    $c = one('SELECT * FROM ' . T('clients') . ' WHERE id = ?', [$id]) ?? fail('Client not found.', 404);
+    if (!$ADMIN && (int) $c['owner_id'] !== $MID) fail('Only the sales person handling this client (or admin) can change it.', 403);
+    $nd = ['person' => $v('name', 120), 'designation' => $v('designation', 120), 'company' => $v('company', 200) ?? $c['company'], 'phone' => $v('phone', 60), 'email' => $em ?: null, 'city' => $v('city', 80), 'location' => $v('address', 1000)];
+    if ($nd['city'] !== $c['city'] || $nd['location'] !== $c['location']) $nd += ['lat' => null, 'lng' => null, 'geo_q' => null, 'geo_prec' => null];   // address changed: find it on the map again
+    upd('clients', $id, $nd);
+  } elseif ($k === 'ccontact') {
+    $c = one('SELECT k.*, c.owner_id FROM ' . T('contacts') . ' k JOIN ' . T('clients') . ' c ON c.id = k.client_id WHERE k.id = ?', [$id]) ?? fail('Contact not found.', 404);
+    if (!$ADMIN && (int) $c['owner_id'] !== $MID) fail('Only the sales person handling this client (or admin) can change it.', 403);
+    upd('contacts', $id, ['name' => $v('name', 120) ?? $c['name'], 'designation' => $v('designation', 120), 'phone' => $v('phone', 60), 'email' => $em ?: null]);
+  } elseif ($k === 'expo') {
+    $l = one('SELECT * FROM ' . T('leads') . ' WHERE id = ?', [$id]) ?? fail('Entry not found.', 404);
+    if (!$ADMIN && (int) $l['user_id'] !== $MID && (int) $l['assigned_to'] !== $MID) fail('You can only change entries you added or that are assigned to you.', 403);
+    upd('leads', $id, ['person' => $v('name', 120), 'company' => $v('company', 200) ?? $l['company'], 'phone' => $v('phone', 60), 'email' => $em ?: null, 'notes' => $v('note', 4000), 'updated_at' => now()]);
+  } elseif ($k === 'referral') {
+    $r = one('SELECT * FROM ' . T('referrals') . ' WHERE id = ?', [$id]) ?? fail('Lead not found.', 404);
+    if (!$ADMIN && (int) $r['assigned_to'] !== $MID && (int) $r['referred_by'] !== $MID) fail('Not your referral lead.', 403);
+    upd('referrals', $id, ['name' => $v('name', 120) ?? $r['name'], 'company' => $v('company', 200), 'phone' => $v('phone', 60) ?? $r['phone']]);
+  } else fail('Business cards are edited with their own form.');
+  out(['ok' => true]);
+
+case 'dir_detail':   // one contact: full details + their business with us (orders, payments, due)
+  require_once __DIR__ . '/lib/cards.php'; require_once __DIR__ . '/lib/calc.php';
+  $k = $in['kind'] ?? ''; $id = (int) ($in['id'] ?? 0); $c = null;
+  if ($k === 'card') { $r = one('SELECT * FROM ' . T('cards') . ' WHERE id = ?', [$id]); if ($r && ($ADMIN || (int) $r['user_id'] === $MID)) $c = $r + ['note' => $r['note']]; }
+  elseif ($k === 'client') { $r = one('SELECT * FROM ' . T('clients') . ' WHERE id = ?', [$id]); if ($r) $c = ['name' => $r['person'], 'designation' => $r['designation'], 'company' => $r['company'], 'phone' => $r['phone'], 'email' => $r['email'], 'city' => $r['city'], 'address' => $r['location'], 'gst_no' => $r['gst_no'], 'note' => $r['notes'], 'client_id' => $r['id']]; }
+  elseif ($k === 'ccontact') { $r = one('SELECT k.*, c.company, c.city, c.location FROM ' . T('contacts') . ' k JOIN ' . T('clients') . ' c ON c.id = k.client_id WHERE k.id = ?', [$id]); if ($r) $c = ['name' => $r['name'], 'designation' => $r['designation'], 'company' => $r['company'], 'phone' => $r['phone'], 'email' => $r['email'], 'city' => $r['city'], 'address' => $r['location'], 'client_id' => $r['client_id']]; }
+  elseif ($k === 'expo') { $r = one('SELECT l.*, e.name AS expo, e.city FROM ' . T('leads') . ' l JOIN ' . T('expos') . ' e ON e.id = l.expo_id WHERE l.id = ?', [$id]); if ($r) $c = ['name' => $r['person'], 'company' => $r['company'], 'phone' => $r['phone'], 'email' => $r['email'], 'city' => $r['city'], 'note' => $r['notes'], 'expo' => $r['expo'], 'follow' => $r['follow']]; }
+  elseif ($k === 'referral') { $r = one('SELECT * FROM ' . T('referrals') . ' WHERE id = ?', [$id]); if ($r) $c = ['name' => $r['name'], 'company' => $r['company'], 'phone' => $r['phone'], 'note' => $r['note']]; }
+  if (!$c) fail('Contact not found.', 404);
+  $cid = contact_client($c); $biz = null;
+  if ($cid) {
+    $cl = one('SELECT * FROM ' . T('clients') . ' WHERE id = ?', [$cid]); $um = users_map();
+    $pr = all('SELECT * FROM ' . T('projects') . ' WHERE client_id = ? ORDER BY start_date DESC, id DESC', [$cid]); $bl = bills_for($pr); $orders = []; $T = ['total' => 0, 'received' => 0, 'balance' => 0];
+    foreach ($pr as $p) { $b = $bl[$p['id']]; $won = is_won($p['status']);
+      $orders[] = ['id' => (int) $p['id'], 'expo' => $p['expo'], 'location' => $p['location'], 'start_date' => $p['start_date'], 'status' => $p['status'], 'area_sqm' => $p['area_sqm'], 'total' => $b['total'], 'received' => $b['received'], 'balance' => $won ? $b['balance'] : 0, 'won' => $won];
+      if ($won) { $T['total'] += $b['total']; $T['received'] += $b['received']; $T['balance'] += $b['balance']; } }
+    $last = val('SELECT MAX(pdate) FROM ' . T('client_payments') . ' WHERE project_id IN (SELECT id FROM ' . T('projects') . ' WHERE client_id = ?)', [$cid]);
+    $mine = $ADMIN || $ACC || (int) $cl['owner_id'] === $MID;
+    $biz = ['client_id' => $cid, 'company' => $cl['company'], 'address' => $cl['location'], 'city' => $cl['city'], 'gst_no' => $cl['gst_no'], 'owner' => $um[$cl['owner_id']] ?? '—', 'since' => $cl['created_at'], 'can_open' => $mine || $RECORDS,
+      'orders' => $mine ? $orders : array_map(fn($o) => array_intersect_key($o, array_flip(['expo', 'start_date', 'status', 'location'])), $orders), 'totals' => $mine ? array_map(fn($x) => round($x, 2), $T) : null, 'last_payment' => $mine ? $last : null];
+  }
+  out(['contact' => $c, 'business' => $biz]);
+
+// ---------- customers near me: addresses → map points (OpenStreetMap), then the nearest to where you stand ----------
+case 'geo_batch':   // find map points for a few more client addresses (called repeatedly while the page is open)
+  require_once __DIR__ . '/lib/geo.php';
+  $done = 0; $t0 = microtime(true);
+  foreach (all('SELECT id, location, city FROM ' . T('clients') . " WHERE (geo_q IS NULL OR geo_q = '') AND ((location IS NOT NULL AND location <> '') OR (city IS NOT NULL AND city <> '')) ORDER BY id DESC LIMIT 6") as $c) {
+    if (microtime(true) - $t0 > 20) break;
+    $g = geo_client($c); upd('clients', $c['id'], $g); $done++;
+  }
+  $left = (int) val('SELECT COUNT(*) FROM ' . T('clients') . " WHERE (geo_q IS NULL OR geo_q = '') AND ((location IS NOT NULL AND location <> '') OR (city IS NOT NULL AND city <> ''))");
+  out(['done' => $done, 'left' => $left, 'mapped' => (int) val('SELECT COUNT(*) FROM ' . T('clients') . ' WHERE lat IS NOT NULL')]);
+
+case 'geo_place':   // a typed place (when the phone's location is off)
+  require_once __DIR__ . '/lib/geo.php';
+  $q = s($in['q'] ?? null, 200) ?? fail('Type a place, area or pincode.');
+  $p = geo_lookup($q . ', India') ?? geo_lookup($q) ?? fail('Could not find that place on the map. Try an area name or pincode.');
+  out($p);
+
+case 'near_me':
+  require_once __DIR__ . '/lib/calc.php';
+  $lat = (float) ($in['lat'] ?? 0); $lng = (float) ($in['lng'] ?? 0); if (!$lat && !$lng) fail('Location missing.');
+  $rad = max(1, min(3000, (int) ($in['km'] ?? 50)));
+  $w = 'lat IS NOT NULL'; $p = []; if (!$ADMIN && !$ACC) { $w .= ' AND owner_id = ?'; $p[] = $MID; }
+  $um = users_map(); $rows = [];
+  foreach (all('SELECT id, company, person, phone, email, city, location, lat, lng, geo_prec, owner_id FROM ' . T('clients') . " WHERE $w", $p) as $c) {
+    $d = 6371 * 2 * asin(sqrt(pow(sin(deg2rad($c['lat'] - $lat) / 2), 2) + cos(deg2rad($lat)) * cos(deg2rad($c['lat'])) * pow(sin(deg2rad($c['lng'] - $lng) / 2), 2)));
+    if ($d <= $rad) $rows[] = $c + ['km' => round($d, 1), 'owner' => $um[$c['owner_id']] ?? '—'];
+  }
+  usort($rows, fn($a, $b) => $a['km'] <=> $b['km']); $rows = array_slice($rows, 0, 100);
+  if ($rows) { $ids = implode(',', array_map(fn($r) => (int) $r['id'], $rows)); $pr = all('SELECT * FROM ' . T('projects') . " WHERE client_id IN ($ids)"); $bl = bills_for($pr); $agg = [];
+    foreach ($pr as $x) { $a = &$agg[$x['client_id']]; $a = $a ?? ['orders' => 0, 'due' => 0, 'last' => null]; $a['orders']++; if (is_won($x['status'])) $a['due'] += $bl[$x['id']]['balance']; if (!$a['last'] || $x['start_date'] > $a['last']['date']) $a['last'] = ['date' => $x['start_date'], 'expo' => $x['expo']]; unset($a); }
+    foreach ($rows as &$r) $r += $agg[$r['id']] ?? ['orders' => 0, 'due' => 0, 'last' => null]; unset($r); }
+  $wv = !$ADMIN && !$ACC ? ' AND owner_id = ' . $MID : '';
+  out(['rows' => $rows, 'mapped' => (int) val('SELECT COUNT(*) FROM ' . T('clients') . " WHERE lat IS NOT NULL$wv"), 'unmapped' => (int) val('SELECT COUNT(*) FROM ' . T('clients') . " WHERE lat IS NULL AND (geo_q IS NULL OR geo_q = '') AND ((location IS NOT NULL AND location <> '') OR (city IS NOT NULL AND city <> ''))$wv"),
+    'noaddr' => (int) val('SELECT COUNT(*) FROM ' . T('clients') . " WHERE (location IS NULL OR location = '') AND (city IS NULL OR city = '')$wv"), 'notfound' => (int) val('SELECT COUNT(*) FROM ' . T('clients') . " WHERE lat IS NULL AND geo_q IS NOT NULL AND geo_q <> ''$wv")]);
 
 case 'my_handovers':   // research / telecalling: clients I added and handed to sales
   $um = users_map();
