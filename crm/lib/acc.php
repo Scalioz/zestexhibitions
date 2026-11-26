@@ -279,11 +279,18 @@ function partner_calc($pt, $withLedger = false) {
   $bal = -acc_balance($acc); $open = -(float) val('SELECT opening FROM ' . T('accounts') . ' WHERE id = ?', [$acc]);
   $T = array_map(fn($v) => is_float($v) ? round($v, 2) : $v, $T);
   // money he spent for the company (entries in the books with "paid by partner") and anything else on his account
-  $spent = all('SELECT j.id, j.jdate, j.vno, j.narration, j.ref_type, SUM(l.cr - l.dr) AS v FROM ' . T('jlines') . ' l JOIN ' . T('journal') . " j ON j.id = l.journal_id WHERE l.account_id = ? AND j.ref_type NOT IN ('pshare', 'ppay', 'reversal') AND j.reversed_by IS NULL GROUP BY j.id, j.jdate, j.vno, j.narration, j.ref_type ORDER BY j.jdate, j.id", [$acc]);
-  $T['spent'] = round(array_sum(array_column($spent, 'v')), 2); $T['spent_list'] = array_map(fn($r) => ['id' => (int) $r['id'], 'jdate' => $r['jdate'], 'vno' => $r['vno'], 'narration' => $r['narration'], 'amount' => round((float) $r['v'], 2)], $spent);
+  $spent = all('SELECT j.id, j.jdate, j.vno, j.narration, j.ref_type, j.project_id, SUM(l.cr - l.dr) AS v FROM ' . T('jlines') . ' l JOIN ' . T('journal') . " j ON j.id = l.journal_id WHERE l.account_id = ? AND j.ref_type NOT IN ('pshare', 'ppay', 'reversal') AND j.reversed_by IS NULL GROUP BY j.id, j.jdate, j.vno, j.narration, j.ref_type, j.project_id ORDER BY j.jdate, j.id", [$acc]);
+$mineP = array_column($rows, null, 'id'); $pn = []; $sp = array_filter(array_unique(array_map(fn($r) => (int) $r['project_id'], $spent))); if ($sp) foreach (all('SELECT p.id, p.expo, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . ' c ON c.id = p.client_id WHERE p.id IN (' . implode(',', $sp) . ')') as $x) $pn[(int) $x['id']] = $x['company'] . ' · ' . $x['expo'];
+    $T['spent'] = round(array_sum(array_column($spent, 'v')), 2); $T['spent_list'] = array_map(fn($r) => ['id' => (int) $r['id'], 'jdate' => $r['jdate'], 'vno' => $r['vno'], 'narration' => $r['narration'], 'amount' => round((float) $r['v'], 2), 'ref_type' => $r['ref_type'], 'project_id' => (int) $r['project_id'], 'order' => $pn[(int) $r['project_id']] ?? '', 'shared' => isset($mineP[(int) $r['project_id']]) && $mineP[(int) $r['project_id']]['counts'] ? $mineP[(int) $r['project_id']]['exp_pct'] : 0], $spent);
   $T['opening'] = round($open, 2); $T['all_posted'] = round(array_sum($posted), 2);
   $T['paid'] = round($paid, 2); $T['books_balance'] = round($bal, 2); $T['unposted'] = round($T['net'] - $T['all_posted'], 2);
-  $T['due'] = round($T['net'] - $T['paid'] + $T['spent'] + $T['opening'], 2);   // share from won orders − paid to him + money he spent for us
+  $T['due'] = round($T['net'] - $T['paid'] + $T['spent'] + $T['opening'], 2);
+  // each payment to him is either an advance against his share or money given for company expenses (set on the partner page)
+  $tags = (array) setting('ppay_tag', []); $T['adv_share'] = 0; $T['adv_exp'] = 0;
+  foreach (all('SELECT j.id, SUM(l.dr - l.cr) AS v FROM ' . T('jlines') . ' l JOIN ' . T('journal') . " j ON j.id = l.journal_id WHERE l.account_id = ? AND j.ref_type = 'ppay' AND j.reversed_by IS NULL GROUP BY j.id", [$acc]) as $r)
+    $T[($tags[$r['id']] ?? 'share') === 'exp' ? 'adv_exp' : 'adv_share'] += (float) $r['v'];
+  $T['adv_share'] = round($T['adv_share'], 2); $T['adv_exp'] = round($T['adv_exp'], 2);
+  $T['exp_unspent'] = round($T['adv_exp'] - $T['spent'], 2);   // expense money still with him (not yet accounted for)   // share from won orders − paid to him + money he spent for us
   $out = ['partner' => $pt + ['account_id' => $acc], 'totals' => $T, 'projects' => $rows];
   if ($withLedger) {
     $run = $open; $L = $open ? [['id' => null, 'jdate' => null, 'vno' => '', 'vtype' => '', 'narration' => 'Opening balance', 'ref_type' => '', 'project_id' => null, 'reversed_by' => null, 'dr' => $open < 0 ? -$open : 0, 'cr' => $open > 0 ? $open : 0, 'kind' => 'Opening', 'balance' => round($open, 2)]] : [];
@@ -312,7 +319,7 @@ function partner_recon($pt, $acc, $rows) {
       $R['shares'][] = $item($j) + ['order' => $pi ? $pi['company'] . ' · ' . $pi['expo'] : 'order removed', 'project_id' => (int) $j['project_id'],
         'problem' => $ok ? '' : (!$pi ? 'order no longer exists' : ((int) $pi['partner_id'] !== (int) $pt['id'] ? 'order is no longer marked for him' : ($pi['status'] === 'rejected' ? 'order was rejected' : 'order is not won'))),
         'should_be' => $ok ? $won[(int) $j['project_id']]['net'] : 0]; }
-    elseif ($j['ref_type'] === 'ppay') $R['pays'][] = array_merge($item($j), ['amount' => -round((float) $j['v'], 2)]);
+    elseif ($j['ref_type'] === 'ppay') $R['pays'][] = array_merge($item($j), ['amount' => -round((float) $j['v'], 2), 'tag' => ((array) setting('ppay_tag', []))[$j['id']] ?? 'share']);
     elseif (!in_array($j['ref_type'], ['pshare', 'ppay'], true) && $j['ref_type'] !== 'reversal' && !$j['reversed_by']) continue;   // already in "company expenses paid from his advance"
     else $R['other'][] = $item($j);
   }

@@ -731,6 +731,31 @@ case 'acc_partner': {
   $c['free_projects'] = all('SELECT p.id, p.expo, c.company, p.start_date FROM ' . T('projects') . ' p JOIN ' . T('clients') . " c ON c.id = p.client_id WHERE p.partner_id IS NULL AND p.status <> 'rejected' ORDER BY p.id DESC LIMIT 400");
   out($c + ['money' => money_accounts()]);
 }
+case 'acc_partner_ppay_tag': {   // mark a payment to the partner as "against his share" or "for company expenses"
+  need_acc();
+  $j = one('SELECT id FROM ' . T('journal') . " WHERE id = ? AND ref_type = 'ppay'", [(int) ($in['journal_id'] ?? 0)]) ?? fail('Payment not found.');
+  $t = (array) setting('ppay_tag', []); $t[$j['id']] = ($in['tag'] ?? '') === 'exp' ? 'exp' : 'share'; set_setting('ppay_tag', $t);
+  out(['ok' => true]);
+}
+case 'acc_partner_spent_link': {   // link a company expense he paid from his advance to an order (or make it a general company expense)
+  need_acc();
+  $j = one('SELECT * FROM ' . T('journal') . ' WHERE id = ? AND reversed_by IS NULL', [(int) ($in['journal_id'] ?? 0)]) ?? fail('Entry not found.');
+  $pid = (int) ($in['project_id'] ?? 0) ?: null;
+  if ($pid && !val('SELECT id FROM ' . T('projects') . ' WHERE id = ?', [$pid])) fail('Order not found.');
+  $pt = one('SELECT * FROM ' . T('partners') . ' WHERE id = ?', [(int) ($in['partner_id'] ?? 0)]) ?? fail('Partner not found.');
+  $acc = party_account('partner', $pt['id'], $pt['name']);
+  $amt = (float) val('SELECT COALESCE(SUM(cr - dr),0) FROM ' . T('jlines') . ' WHERE journal_id = ? AND account_id = ?', [$j['id'], $acc]); if ($amt <= 0) fail('This entry is not paid from his advance.');
+  tx();
+  if ($j['ref_type'] === 'vpay') { if (!$pid) fail('A vendor payment must stay linked to an order — pick the right order.'); upd('vendor_payments', (int) $j['ref_id'], ['project_id' => $pid]); }
+  elseif ($j['ref_type'] === 'pexp') { if ($pid) upd('expenses', (int) $j['ref_id'], ['project_id' => $pid]); else { q('DELETE FROM ' . T('expenses') . ' WHERE id = ?', [(int) $j['ref_id']]); upd('journal', $j['id'], ['ref_type' => null, 'ref_id' => null]); } }
+  elseif (in_array($j['ref_type'], [null, ''], true)) {
+    if ($pid) { $exp = val('SELECT a.sub FROM ' . T('jlines') . ' l JOIN ' . T('accounts') . " a ON a.id = l.account_id WHERE l.journal_id = ? AND a.type = 'expense' ORDER BY l.dr DESC LIMIT 1", [$j['id']]);
+      $eid = ins('expenses', ['project_id' => $pid, 'edate' => $j['jdate'], 'category' => pexp_cat($exp), 'description' => mb_substr($j['narration'] ?: 'Expense', 0, 250), 'amount' => $amt, 'paid_by_partner' => $pt['id']]);
+      upd('journal', $j['id'], ['ref_type' => 'pexp', 'ref_id' => $eid]); }
+  } else fail('This kind of entry cannot be linked here — open the voucher to change it.');
+  upd('journal', $j['id'], ['project_id' => $pid]);
+  db()->commit(); out(['ok' => true]);
+}
 case 'acc_partner_claim_move': {   // a staff expense claim that was really paid out of the partner's advance: move it from his staff account to his partner account
   need_acc();
   $pt = one('SELECT * FROM ' . T('partners') . ' WHERE id = ?', [(int) ($in['partner_id'] ?? 0)]) ?? fail('Partner not found.', 404);
