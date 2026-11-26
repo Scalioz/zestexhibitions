@@ -262,6 +262,20 @@ case 'home':
   foreach ($lost as &$p) $p['bill'] = $b[$p['id']]; unset($p);
   $recent = array_slice($ps, 0, 25); foreach ($recent as &$p) $p['bill'] = $b[$p['id']]; unset($p);
   $um = users_map(); foreach ($recent as &$p) $p['owner'] = $um[$p['owner_id']] ?? '—'; unset($p);
+  // details behind each box (click a box on the dashboard)
+  $det = ['orders' => [], 'pays' => [], 'vpays' => [], 'exps' => []];
+  foreach ($ps as $p) { $x = $b[$p['id']]; $det['orders'][] = ['id' => (int) $p['id'], 'company' => $p['company'], 'expo' => $p['expo'], 'start_date' => $p['start_date'], 'status' => $p['status'], 'owner' => $um[$p['owner_id']] ?? '—',
+    'total' => $x['total'], 'received' => $x['received'], 'balance' => $x['balance'], 'gst' => $x['gst'], 'gst_received' => $x['gst_received'], 'vendor_paid' => $x['vendor_paid'], 'expenses' => $x['expenses'], 'losses' => $x['losses'], 'profit' => $x['profit'],
+    'offered' => (float) $p['offered'], 'reason' => $p['reason'], 'rejected_by' => $p['rejected_by'], 'note' => $p['rejection_note'] ?? '']; }
+  if ($ps) {
+    $in_ids = implode(',', array_map('intval', array_column($ps, 'id'))); $pn = array_column($det['orders'], null, 'id');
+    $lab = fn($r) => ['project_id' => (int) $r['project_id'], 'company' => $pn[$r['project_id']]['company'] ?? '', 'expo' => $pn[$r['project_id']]['expo'] ?? '', 'owner' => $pn[$r['project_id']]['owner'] ?? ''];
+    foreach (all('SELECT * FROM ' . T('client_payments') . " WHERE project_id IN ($in_ids) ORDER BY pdate DESC, id DESC") as $r) $det['pays'][] = $lab($r) + ['date' => $r['pdate'], 'amount' => (float) $r['amount'], 'mode' => $r['mode'], 'ref' => $r['reference']];
+    foreach (all('SELECT vp.*, v.name AS vendor FROM ' . T('vendor_payments') . ' vp JOIN ' . T('vendors') . " v ON v.id = vp.vendor_id WHERE vp.project_id IN ($in_ids) ORDER BY vp.pdate DESC, vp.id DESC") as $r) $det['vpays'][] = $lab($r) + ['date' => $r['pdate'], 'amount' => (float) $r['amount'], 'vendor' => $r['vendor'], 'mode' => $r['mode']];
+    foreach (all('SELECT * FROM ' . T('expenses') . " WHERE project_id IN ($in_ids)") as $r) $det['exps'][] = $lab($r) + ['date' => $r['edate'], 'amount' => (float) $r['amount'], 'kind' => 'Expense', 'what' => trim($r['category'] . ' — ' . ($r['description'] ?? ''), ' —')];
+    foreach (all('SELECT * FROM ' . T('losses') . " WHERE project_id IN ($in_ids)") as $r) $det['exps'][] = $lab($r) + ['date' => $r['ldate'], 'amount' => (float) $r['amount'], 'kind' => 'Loss', 'what' => trim($r['ltype'] . ' — ' . ($r['note'] ?? ''), ' —')];
+    usort($det['exps'], fn($a, $c) => strcmp($c['date'], $a['date']));
+  }
   out([
     'captured' => $sumk($won, 'total'), 'captured_n' => count($won),
     'missed' => array_sum(array_map(fn($p) => (float) $p['offered'], $lost)), 'missed_n' => count($lost),
@@ -270,7 +284,7 @@ case 'home':
     'vendor_paid' => $sumk($ps, 'vendor_paid'), 'expenses' => $sumk($ps, 'expenses'), 'losses' => $sumk($ps, 'losses'),
     'profit' => $sumk($won, 'profit'),
     'vendors' => $vend, 'employees' => $emps, 'customers' => array_slice($cust, 0, 15),
-    'lost' => $lost, 'recent' => $recent,
+    'lost' => $lost, 'recent' => $recent, 'detail' => $det,
   ]);
 
 // ----- CLIENT LOG (admin reports) -----

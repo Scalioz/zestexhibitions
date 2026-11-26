@@ -211,3 +211,8 @@ select[data-lheat]{min-width:140px}
 .pwork .l.tot{border-top:1px solid var(--line);margin-top:2px;padding-top:6px}
 /* merge / confirm box */
 .warnbox{border:1px solid var(--bad);border-left-width:4px;border-radius:8px;padding:10px 12px;background:var(--bad-bg)}
+/* clickable dashboard boxes */
+.kclick .kpi{cursor:pointer;transition:box-shadow .15s,transform .15s}
+.kclick .kpi:hover{box-shadow:0 4px 14px rgba(0,0,0,.08);transform:translateY(-1px)}
+.kclick .kpi.on{outline:3px solid var(--gold);outline-offset:2px}
+#kdet:empty{display:none}
