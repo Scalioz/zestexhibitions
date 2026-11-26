@@ -268,15 +268,22 @@ function partner_calc($pt, $withLedger = false) {
   foreach ($projects as $p) {
     $b = $bills[$p['id']]; $rp = $p['p_rev_pct'] !== null ? (float) $p['p_rev_pct'] : (float) $pt['rev_pct']; $ep = $p['p_exp_pct'] !== null ? (float) $p['p_exp_pct'] : (float) $pt['exp_pct'];
     $rev = round($b['base'] + $b['extras'], 2); $vend = max((float) $b['vendor_paid'], $vq[$p['id']] ?? 0); $cost = round($vend + $b['expenses'] + $b['losses'], 2);   // vendor: full agreed cost, or what's paid if more
-    $rs = round($rev * $rp / 100, 2); $es = round($cost * $ep / 100, 2); $net = round($rs - $es, 2); $po = round($posted[$p['id']] ?? 0, 2);
+    $counts = is_won($p['status']);   // only orders actually won count towards his share
+    $rs = $counts ? round($rev * $rp / 100, 2) : 0; $es = $counts ? round($cost * $ep / 100, 2) : 0; $net = round($rs - $es, 2); $po = round($posted[$p['id']] ?? 0, 2);
     $rows[] = ['id' => (int) $p['id'], 'expo' => $p['expo'], 'company' => $p['company'], 'status' => $p['status'], 'start_date' => $p['start_date'], 'rev_pct' => $rp, 'exp_pct' => $ep,
-      'revenue' => $rev, 'received' => $b['received'], 'vendor' => round($vend, 2), 'expenses' => round($b['expenses'] + $b['losses'], 2), 'costs' => $cost, 'rev_share' => $rs, 'exp_share' => $es, 'net' => $net, 'posted' => $po, 'to_post' => round($net - $po, 2), 'paid_by_partner' => round($byP[$p['id']] ?? 0, 2)];
+      'revenue' => $rev, 'received' => $b['received'], 'vendor' => round($vend, 2), 'expenses' => round($b['expenses'] + $b['losses'], 2), 'costs' => $cost, 'rev_share' => $rs, 'exp_share' => $es, 'net' => $net, 'counts' => $counts ? 1 : 0, 'posted' => $po, 'to_post' => round($net - $po, 2), 'paid_by_partner' => round($byP[$p['id']] ?? 0, 2)];
+    if (!$counts) continue;
     $T['projects']++; foreach (['revenue' => $rev, 'costs' => $cost, 'rev_share' => $rs, 'exp_share' => $es, 'net' => $net, 'posted' => $po, 'paid_by_partner' => $byP[$p['id']] ?? 0] as $k => $v) $T[$k] += $v;
   }
   $paid = (float) val('SELECT COALESCE(SUM(l.dr - l.cr), 0) FROM ' . T('jlines') . ' l JOIN ' . T('journal') . " j ON j.id = l.journal_id WHERE l.account_id = ? AND j.ref_type = 'ppay' AND j.reversed_by IS NULL", [$acc]);
   $bal = -acc_balance($acc); $open = -(float) val('SELECT opening FROM ' . T('accounts') . ' WHERE id = ?', [$acc]);
   $T = array_map(fn($v) => is_float($v) ? round($v, 2) : $v, $T);
-  $T['paid'] = round($paid, 2); $T['books_balance'] = round($bal, 2); $T['unposted'] = round($T['net'] - $T['posted'], 2); $T['due'] = round($bal + $T['unposted'], 2);
+  // money he spent for the company (entries in the books with "paid by partner") and anything else on his account
+  $spent = all('SELECT j.id, j.jdate, j.vno, j.narration, j.ref_type, SUM(l.cr - l.dr) AS v FROM ' . T('jlines') . ' l JOIN ' . T('journal') . " j ON j.id = l.journal_id WHERE l.account_id = ? AND j.ref_type NOT IN ('pshare', 'ppay', 'reversal') AND j.reversed_by IS NULL GROUP BY j.id, j.jdate, j.vno, j.narration, j.ref_type ORDER BY j.jdate, j.id", [$acc]);
+  $T['spent'] = round(array_sum(array_column($spent, 'v')), 2); $T['spent_list'] = array_map(fn($r) => ['id' => (int) $r['id'], 'jdate' => $r['jdate'], 'vno' => $r['vno'], 'narration' => $r['narration'], 'amount' => round((float) $r['v'], 2)], $spent);
+  $T['opening'] = round($open, 2); $T['all_posted'] = round(array_sum($posted), 2);
+  $T['paid'] = round($paid, 2); $T['books_balance'] = round($bal, 2); $T['unposted'] = round($T['net'] - $T['all_posted'], 2);
+  $T['due'] = round($T['net'] - $T['paid'] + $T['spent'] + $T['opening'], 2);   // share from won orders − paid to him + money he spent for us
   $out = ['partner' => $pt + ['account_id' => $acc], 'totals' => $T, 'projects' => $rows];
   if ($withLedger) {
     $run = $open; $L = $open ? [['id' => null, 'jdate' => null, 'vno' => '', 'vtype' => '', 'narration' => 'Opening balance', 'ref_type' => '', 'project_id' => null, 'reversed_by' => null, 'dr' => $open < 0 ? -$open : 0, 'cr' => $open > 0 ? $open : 0, 'kind' => 'Opening', 'balance' => round($open, 2)]] : [];
