@@ -20,6 +20,7 @@ if (!hash_equals($_SESSION['csrf'], $_SERVER['HTTP_X_CSRF'] ?? '')) fail('Page e
 session_write_close();   // release the session so one person's parallel requests don't queue behind each other
 migrate();
 try { require_once __DIR__ . '/lib/att.php'; att_tick(); } catch (Throwable $e) { error_log('[zestcrm] attendance tick: ' . $e->getMessage()); }
+try { require_once __DIR__ . '/lib/alerts.php'; alerts_tick(); } catch (Throwable $e) { error_log('[zestcrm] alerts tick: ' . $e->getMessage()); }
 
 $isUpload = str_starts_with($_SERVER['CONTENT_TYPE'] ?? '', 'multipart/form-data');
 if ($isUpload && empty($_POST) && empty($_FILES) && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) fail('File is too large for the server (max ' . upload_limit_mb() . ' MB).');
@@ -595,7 +596,13 @@ case 'project_save':
   if (isset($data['status']) && !in_array($data['status'], ['enquiry', 'quoted', 'won', 'rejected', 'completed'], true)) fail('Unknown status.');
   if (isset($data['rejected_by']) && !in_array($data['rejected_by'], ['us', 'client'], true)) $data['rejected_by'] = null;
   if ($ADMIN && !empty($in['fields']['owner_id'])) $data['owner_id'] = (int) $in['fields']['owner_id'];
-  upd('projects', $p['id'], $data);
+  if (isset($data['status']) && is_won($data['status']) && !is_won($p['status']) && empty($p['won_on'])) $data['won_on'] = today();   // for the daily sales alert
+  try { upd('projects', $p['id'], $data); }
+  catch (PDOException $e) {   // older database without the won_on column: add it and try again
+    if (!isset($data['won_on'])) throw $e;
+    try { db()->exec('ALTER TABLE ' . T('projects') . ' ADD COLUMN won_on DATE'); } catch (PDOException $e2) {}
+    try { upd('projects', $p['id'], $data); } catch (PDOException $e3) { unset($data['won_on']); upd('projects', $p['id'], $data); }
+  }
   if (array_intersect(['expo', 'location', 'start_date', 'end_date'], array_keys($data))) { $np = $data + $p; try { expo_remember($np['expo'], $np['location'], $np['start_date'], $np['end_date']); } catch (Throwable $e) {} }
   out(['ok' => true]);
 
@@ -1023,7 +1030,7 @@ case 'gst_read_image':   // read a screenshot of the GST portal result with the 
   $content = [['type' => 'image', 'source' => ['type' => 'base64', 'media_type' => 'image/jpeg', 'data' => $imgs[0]]],
     ['type' => 'text', 'text' => 'This is a screenshot of the Indian GST portal "Search Taxpayer" result. Copy exactly what is shown. Reply with JSON only: {"gstin":"","legal_name":"","trade_name":"","status":"","constitution":"","address":"","city":"","state":"","pincode":""}. "address" is the Principal Place of Business. Use "" for anything not visible. Do not guess.']];
   $ch = curl_init($ai['url']);
-  curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode(['model' => $ai['model'], 'max_tokens' => 1500, 'temperature' => 0, 'messages' => [['role' => 'user', 'content' => $content]]]),
+  curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode(['model' => $ai['model'], 'max_tokens' => 1500, 'messages' => [['role' => 'user', 'content' => $content]]]),
     CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 90, CURLOPT_CONNECTTIMEOUT => 20, CURLOPT_HTTPHEADER => ['content-type: application/json', 'x-api-key: ' . $ai['key'], 'anthropic-version: 2023-06-01']]);
   $res = curl_exec($ch); $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
   $j = $res ? json_decode($res, true) : null; if ($code !== 200) fail('Could not read the screenshot: ' . ($j['error']['message'] ?? 'service not reachable'));

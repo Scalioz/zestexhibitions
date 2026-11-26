@@ -128,10 +128,45 @@ case 'att_settings':
   if (isset($in['wa'])) { $w = (array) $in['wa']; $c['wa'] = ['on' => !empty($w['on']) ? 1 : 0, 'url' => s($w['url'] ?? null, 300) ?? $c['wa']['url'], 'token' => ($w['token'] ?? '') === '' ? $c['wa']['token'] : s($w['token'], 400), 'group' => s($w['group'] ?? null, 120) ?? '']; }
   set_setting('att_cfg', $c); out(['ok' => true, 'ip' => att_ip()]);
 
+case 'att_alerts':   // Auto alerts page
+  need_admin(); require_once __DIR__ . '/alerts.php';
+  $w = att_cfg()['wa'];
+  $team = array_map(fn($u) => ['id' => (int) $u['id'], 'name' => $u['name'], 'department' => $u['role'] === 'admin' ? 'Admin' : $u['department'], 'phone' => $u['phone'], 'ok' => al_phone($u['phone']) ? 1 : 0],
+    all('SELECT id, name, role, department, phone FROM ' . T('users') . " WHERE active = 1 ORDER BY (role = 'admin') DESC, name"));
+  out(['cfg' => alerts_cfg(), 'wa' => ['on' => (int) $w['on'], 'url' => $w['url'], 'token' => $w['token'] ? '••••' . substr($w['token'], -4) : '', 'group' => $w['group']],
+    'team' => $team, 'log' => array_slice((array) setting('alerts_log', []), 0, 12), 'sent' => setting('alerts_sent', []), 'cron' => setting('alerts_cron'),
+    'shift' => att_cfg()['start'], 'buffer' => (int) att_cfg()['buffer'], 'now' => date('H:i'), 'today' => today()]);
+
+case 'att_alerts_save':
+  need_admin(); require_once __DIR__ . '/alerts.php';
+  if (isset($in['wa'])) { $c = att_cfg(); $x = (array) $in['wa'];
+    $c['wa'] = ['on' => !empty($x['on']) ? 1 : 0, 'url' => s($x['url'] ?? null, 300) ?? $c['wa']['url'], 'token' => trim((string) ($x['token'] ?? '')) === '' ? $c['wa']['token'] : s($x['token'], 400), 'group' => s($x['group'] ?? null, 120) ?? ''];
+    set_setting('att_cfg', $c); }
+  $cur = alerts_cfg(); $new = [];
+  foreach ($cur as $k => $v) {
+    $x = (array) ($in['alerts'][$k] ?? []); $o = $v;
+    foreach (['on', 'auto', 'group', 'dm', 'month'] as $b) if (array_key_exists($b, $v)) $o[$b] = !empty($x[$b]) ? 1 : 0;
+    if (array_key_exists('times', $v)) $o['times'] = implode(', ', al_hm_list($x['times'] ?? ''));
+    if (array_key_exists('time', $v)) $o['time'] = att_hm($x['time'] ?? '') ?: $v['time'];
+    $o['users'] = array_values(array_unique(array_map('intval', (array) ($x['users'] ?? []))));
+    $o['extra'] = s($x['extra'] ?? null, 600) ?? '';
+    $new[$k] = $o;
+  }
+  set_setting('alerts', $new); out(['ok' => true]);
+
+case 'att_alerts_try':   // see the message now, or send it now
+  need_admin(); require_once __DIR__ . '/alerts.php';
+  $k = $in['kind'] ?? '';
+  $t = $k === 'att' ? alert_att_text() : ($k === 'rep' ? alert_rep_text() : ($k === 'sales' ? alert_sales_text(null, !empty(alerts_cfg()['sales']['month'])) : fail('Unknown alert.')));
+  if (!$t) $t = $k === 'att' ? 'Nobody is tracked for attendance today (holiday, or attendance not started).' : 'Nobody owes a report today.';
+  if (empty($in['send'])) out(['text' => $t, 'to' => alert_targets($k)]);
+  if (!alert_targets($k)) fail('Choose who this alert goes to first (group or people), and save.');
+  out(['sent' => alert_send($k, $t), 'of' => count(alert_targets($k))]);
+
 case 'att_test':
   need_admin();
   $what = $in['what'] ?? 'email';
-  if ($what === 'wa') out(['ok' => att_wa('✅ Test from Zest CRM — attendance alerts will appear here.')]);
+  if ($what === 'wa') out(['ok' => att_wa('✅ Test from Zest CRM — alerts will appear here.', att_cfg()['wa']['group'] ?: null)]);
   out(['ok' => att_mail('Zest CRM test email', 'This is a test. Attendance alerts will arrive at this address.')]);
 }
 fail('Unknown action', 404);

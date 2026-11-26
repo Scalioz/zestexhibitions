@@ -44,7 +44,7 @@ function card_read($abs) {
   $imgs = card_images($abs); if (!$imgs) return ['cards' => [], 'error' => 'Could not open this photo. Please upload a JPG or PNG.'];
   $content = array_map(fn($b) => ['type' => 'image', 'source' => ['type' => 'base64', 'media_type' => 'image/jpeg', 'data' => $b]], $imgs);
   $content[] = ['type' => 'text', 'text' => CARD_PROMPT];
-  $body = json_encode(['model' => $ai['model'], 'max_tokens' => 16000, 'temperature' => 0, 'messages' => [['role' => 'user', 'content' => $content]]]);
+  $body = json_encode(['model' => $ai['model'], 'max_tokens' => 16000, 'messages' => [['role' => 'user', 'content' => $content]]]);
   @set_time_limit(300);
   $ch = curl_init($ai['url']);
   curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $body, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 240, CURLOPT_CONNECTTIMEOUT => 20,

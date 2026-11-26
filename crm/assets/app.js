@@ -185,7 +185,7 @@ const blank = (msg, btn = '') => `<div class="blank">${STALL}<div>${msg}</div>${
 const PLAN = `<svg viewBox="0 0 300 140" aria-hidden="true">${Array.from({ length: 24 }, (_, i) => { const x = (i % 8) * 36 + 4, y = Math.floor(i / 8) * 44 + 6; const f = [2, 5, 9, 12, 19].includes(i); return `<rect x="${x}" y="${y}" width="30" height="36" rx="2" fill="${f ? '#e9b949' : 'none'}" stroke="#fff" stroke-opacity=".6"/>`; }).join('')}</svg>`;
 
 // ---------- unsaved typing survives a refresh / power cut: every page's typed values are kept in this browser until saved ----------
-const DRAFT_SKIP = '[type=password],[type=file],[type=hidden],[type=search],[data-lheat],[data-lasg1],[data-lsel],[data-pf],[data-lfollow],[data-nodraft],[data-limp],[data-limpmap],[data-cimp],[data-cimpmap],#vq,#mlq,#lq,#ex-q,#lxh,#lxu,#pay-m,#lasg-to,#smtp-pre,#lsel-all,#dirf input,#dirf select,#nm-place,#nm-km,#dpg-go,#llogf input,#llogf select';
+const DRAFT_SKIP = '[type=password],[type=file],[type=hidden],[type=search],[data-lheat],[data-lasg1],[data-lsel],[data-pf],[data-lfollow],[data-nodraft],[data-limp],[data-limpmap],[data-cimp],[data-cimpmap],#vq,#mlq,#lq,#ex-q,#lxh,#lxu,#pay-m,#lasg-to,#smtp-pre,#lsel-all,#dirf input,#dirf select,#nm-place,#nm-km,#dpg-go,#llogf input,#llogf select,#alf input';
 const DS = { get: k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }, del: k => { try { localStorage.removeItem(k); } catch (e) {} } };
 const draftKey = (h = location.hash || '#home') => B.me ? `zcrm-draft:${B.me.id}:${h}` : null;
 function draftFields() {
@@ -313,7 +313,7 @@ function renderNav(cur) {
     ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('saleslog', 'Sales log', B.pending_approvals || '')}${L('invappr', 'Invoice approvals', B.inv_pending || '')}${L('leadlog', 'Expo data log')}${L('jobs', 'Design & production')}${L('reportlog', 'Daily reports', B.flags || '')}${L('att', 'Attendance', B.att_pending || '')}
        <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('vendors', 'Vendors')}${L('dnq', 'Do-not-quote list')}
        <div class="sec">Accounts</div>${L('acc', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('payroll', 'Payroll & salaries')}${L('partners', 'Business partners')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}
-       <div class="sec">Admin</div>${L('team', 'Team')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
+       <div class="sec">Admin</div>${L('team', 'Team')}${L('alerts', 'Auto WhatsApp alerts')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
     : (B.modules || []).length > 1 ? multiNav(L)
     : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('vendors', 'Vendors')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('payroll', 'Payroll & salaries')}${L('partners', 'Business partners')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
     : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('vendors', 'Vendors')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
@@ -1556,11 +1556,9 @@ routes.att = async r => {
      <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" name="email" ${+c.email ? 'checked' : ''}> Email me the list of people not checked in (and new leave requests)</label>
      <h3 style="margin-top:16px">Office network <span class="sub" style="font-weight:400">(optional — only marks check-ins from outside; nobody is blocked, so work from home still works)</span></h3>
      <div class="grid"><label class="f">Office internet address(es)<textarea name="office_ips" rows="2" placeholder="Leave empty to not mark">${esc((c.office_ips || []).join('\n'))}</textarea></label><div class="sub" style="align-self:end">This computer's address now: <b>${esc(d.ip)}</b><br><button type="button" class="btn ghost sm" id="attmyip" style="margin-top:6px">I'm in the office — use this network</button></div></div>
-     <h3 style="margin-top:16px">WhatsApp group alert <span class="sub" style="font-weight:400">(optional — needs a spare number connected to a gateway such as Whapi)</span></h3>
-     <div class="grid g3"><label class="f">Gateway address<input name="wa_url" value="${esc(c.wa.url)}"></label><label class="f">Gateway token<input name="wa_token" placeholder="${c.wa.token ? esc(c.wa.token) + ' (saved — leave blank to keep)' : 'paste token'}"></label><label class="f">Group ID<input name="wa_group" value="${esc(c.wa.group)}" placeholder="e.g. 1203630...@g.us"></label></div>
-     <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" name="wa_on" ${+c.wa.on ? 'checked' : ''}> Post alerts in the WhatsApp group</label>
-     <div class="row" style="margin-top:14px"><button class="btn">Save settings</button><button type="button" class="btn ghost sm" data-atttest="email">Send test email</button><button type="button" class="btn ghost sm" data-atttest="wa">Send test WhatsApp</button></div></form>`;
-    const f = $('#attset'), save = extra => api('att_settings', Object.assign({ start: f.start.value, end: f.end.value, buffer: f.buffer.value, email: f.email.checked ? 1 : 0, office_ips: f.office_ips.value, wa: { on: f.wa_on.checked ? 1 : 0, url: f.wa_url.value, token: f.wa_token.value, group: f.wa_group.value } }, extra || {}));
+     <p class="sub" style="margin-top:12px">WhatsApp alerts (group and individuals, times, who gets what) are set in <a href="#alerts">Admin → Auto WhatsApp alerts</a>.</p>
+     <div class="row" style="margin-top:14px"><button class="btn">Save settings</button><button type="button" class="btn ghost sm" data-atttest="email">Send test email</button></div></form>`;
+    const f = $('#attset'), save = extra => api('att_settings', Object.assign({ start: f.start.value, end: f.end.value, buffer: f.buffer.value, email: f.email.checked ? 1 : 0, office_ips: f.office_ips.value }, extra || {}));
     f.onsubmit = async e => { e.preventDefault(); await act(() => save(), 'Attendance settings saved'); refresh(); };
     $('#attmyip').onclick = async () => { await act(() => save({ add_my_ip: 1 }), 'This network is marked as the office'); refresh(); };
     view().querySelectorAll('[data-atttest]').forEach(b => b.onclick = async () => { const r = await act(() => api('att_test', { what: b.dataset.atttest })).catch(() => null); if (r) toast(r.ok ? 'Sent — check ' + (b.dataset.atttest === 'wa' ? 'the WhatsApp group' : 'your inbox') : 'Could not send. ' + (b.dataset.atttest === 'wa' ? 'Check the gateway token and group ID, and that it is switched on.' : 'The server could not send email.'), !r.ok); });
@@ -1705,6 +1703,64 @@ async function dirDetail(box) {
 }
 
 // ---- customers near me ----
+// ---------- automatic WhatsApp alerts (admin) ----------
+routes.alerts = async () => {
+  const d = await api('att_alerts'); const c = d.cfg, w = d.wa;
+  const who = (k, x) => `<div class="f" style="margin-top:6px"><span>Send to</span>
+      <label style="display:flex;gap:8px;align-items:center;font-weight:400"><input type="checkbox" name="${k}_group" ${+x.group ? 'checked' : ''}> The main WhatsApp group ${w.group ? '' : '<span class="sub">(add the group ID above)</span>'}</label>
+      <div class="alppl">${d.team.map(u => `<label class="${u.ok ? '' : 'sub'}" title="${u.ok ? esc(u.phone) : 'No mobile number — add it in Team → Edit'}"><input type="checkbox" name="${k}_users" value="${u.id}" ${x.users.includes(u.id) ? 'checked' : ''} ${u.ok ? '' : 'disabled'}> ${esc(u.name)} <span class="sub">${esc(u.department)}</span></label>`).join('')}</div>
+      <label class="f" style="margin-top:6px">Other numbers or group IDs <span class="sub" style="font-weight:400">(optional, comma separated)</span><input name="${k}_extra" value="${esc(x.extra)}" placeholder="e.g. 98450 12345, 1203630...@g.us"></label></div>`;
+  const tryRow = k => `<div class="row" style="margin-top:10px"><button type="button" class="btn ghost sm" data-altry="${k}">👁 See today's message</button><button type="button" class="btn ghost sm" data-alsend="${k}">Send it now</button></div><pre class="alpre" id="alpre_${k}" hidden></pre>`;
+  const sentToday = k => ((d.sent && d.sent.date === d.today ? d.sent.k : null) || []).filter(x => x.startsWith(k + '@')).map(x => x.split('@')[1]);
+  const sw = (k, x, title, sub) => `<div class="ph"><h3><label style="display:flex;gap:10px;align-items:center"><input type="checkbox" name="${k}_on" ${+x.on ? 'checked' : ''}> ${title}</label></h3>${sentToday(k).length ? `<span class="sub">sent today at ${sentToday(k).join(', ')}</span>` : ''}</div><p class="sub" style="margin-top:0">${sub}</p>`;
+  view().innerHTML = `<div class="head"><div><h1>Auto WhatsApp alerts</h1><p>Messages the CRM posts by itself at set times — to the team group, to you, or to each person.</p></div></div>
+  <form id="alf">
+  <div class="panel"><h2>① WhatsApp sending number</h2>
+    <p class="sub">The CRM sends from a spare company WhatsApp number linked to a gateway (Whapi.Cloud). Steps are at the bottom of this page.</p>
+    <div class="grid g3"><label class="f">Gateway token<input name="wa_token" placeholder="${w.token ? 'saved ' + esc(w.token) + ' — leave blank to keep' : 'paste the token from Whapi'}" autocomplete="off"></label>
+      <label class="f">Main group ID<input name="wa_group" value="${esc(w.group)}" placeholder="e.g. 120363012345678901@g.us"></label>
+      <label class="f">Gateway address<input name="wa_url" value="${esc(w.url)}"></label></div>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" name="wa_on" ${+w.on ? 'checked' : ''}> <b>Alerts switched on</b> <span class="sub">(untick to pause every alert)</span></label>
+    <div class="row" style="margin-top:8px"><button type="button" class="btn ghost sm" data-atttest="wa">Send a test to the main group</button></div></div>
+
+  <div class="panel">${sw('att', c.att, '🕙 Attendance', 'Who has checked in, who is late (with time), who has not come in, who is on leave or working from home.')}
+    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="att_auto" ${+c.att.auto ? 'checked' : ''}> Alert as soon as someone is late — at shift start + ${d.buffer} min (${esc(d.shift)} shift), and again when they finally check in</label>
+    <label class="f" style="margin-top:8px;max-width:420px">Full attendance list at <span class="sub" style="font-weight:400">(one or more times)</span><input name="att_times" value="${esc(c.att.times)}" placeholder="e.g. 10:30, 12:00"></label>
+    ${who('att', c.att)}${tryRow('att')}</div>
+
+  <div class="panel">${sw('rep', c.rep, '📝 Daily reports not sent', 'Names of everyone who has not submitted today\'s daily report. People on leave, holidays and week-offs are left out.')}
+    <label class="f" style="max-width:200px">Send at<input type="time" name="rep_time" value="${esc(c.rep.time)}"></label>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" name="rep_dm" ${+c.rep.dm ? 'checked' : ''}> Also remind each person who hasn't sent it, on their own WhatsApp</label>
+    ${who('rep', c.rep)}${tryRow('rep')}</div>
+
+  <div class="panel">${sw('sales', c.sales, '📊 Daily sales summary', 'For each salesperson: new orders won today (value), payments collected, quotes sent and new enquiries. Comes from what is entered in the CRM that day.')}
+    <label class="f" style="max-width:200px">Send at<input type="time" name="sales_time" value="${esc(c.sales.time)}"></label>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" name="sales_month" ${+c.sales.month ? 'checked' : ''}> Add the month-so-far total (orders and collection)</label>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:4px"><input type="checkbox" name="sales_dm" ${+c.sales.dm ? 'checked' : ''}> Also send each salesperson their own day, on their WhatsApp</label>
+    ${who('sales', c.sales)}${tryRow('sales')}</div>
+
+  <div class="panel row" style="justify-content:space-between;position:sticky;bottom:0;z-index:3"><span class="sub">${d.cron ? '⏱ Timer running (last run ' + esc(d.cron.slice(11)) + ')' : '⚠ Timer not set up yet — alerts only go out while someone has the CRM open. See step 4 below.'}</span><button class="btn">Save alerts</button></div>
+  </form>
+
+  <div class="panel"><h2>How to set this up (one time, ~15 minutes)</h2><ol class="alsteps">
+    <li><b>Get a spare WhatsApp number</b> for the company (a new SIM is fine). Install WhatsApp (or WhatsApp Business) on a spare phone with it. Add this number to your team WhatsApp group.</li>
+    <li><b>Connect it to Whapi.Cloud</b>: sign up at whapi.cloud → Create channel → scan the QR code with that phone (WhatsApp → Linked devices). Copy the <b>API token</b> and paste it in ① above.</li>
+    <li><b>Find the group ID</b>: in Whapi, open the channel → <i>Groups</i> → <i>Get groups</i> → copy the ID of your team group (ends in <code>@g.us</code>) and paste it in ①. Tick “Alerts switched on”, Save, then press “Send a test”.</li>
+    <li><b>Turn on the timer</b> so alerts go out on time even when nobody has the CRM open: Hostinger → Websites → Manage → <i>Advanced → Cron Jobs</i> → Custom → command <code>php ~/domains/zestexhibitions.com/public_html/crm/tools/att-cron.php</code> → every 5 minutes (<code>*/5 * * * *</code>) → Save. If Hostinger shows a different folder path for your site, use that path ending in <code>/crm/tools/att-cron.php</code>.</li>
+    <li><b>Mobile numbers</b>: personal alerts need each person's mobile in Team → Edit. Names greyed out above have no number yet.</li></ol>
+    <p class="sub">Whapi has a free trial; after that a paid plan is needed (check their site for today's price). Keep the token private, like a password. Use a spare number, not your personal one: WhatsApp can block numbers that send a lot of automated messages.</p></div>
+  ${d.log.length ? `<div class="panel"><h3>Last messages sent</h3><div class="tw"><table><tr><th>When</th><th>To</th><th>Result</th><th>Message</th></tr>${d.log.map(l => `<tr><td class="num">${esc(l.at)}</td><td class="num">${esc(l.to)}</td><td>${l.ok ? '<span class="pill p-ok">Sent</span>' : '<span class="pill p-bad">Failed ' + esc(l.code || '') + '</span>'}</td><td class="sub">${esc(l.text)}</td></tr>`).join('')}</table></div></div>` : ''}`;
+  const f = $('#alf');
+  const collect = () => { const o = {}; ['att', 'rep', 'sales'].forEach(k => { const v = n => f.elements[k + '_' + n]; o[k] = { on: v('on')?.checked ? 1 : 0, group: v('group')?.checked ? 1 : 0, users: [...f.querySelectorAll(`[name="${k}_users"]:checked`)].map(x => +x.value), extra: v('extra')?.value || '' };
+    if (k === 'att') { o[k].auto = v('auto').checked ? 1 : 0; o[k].times = v('times').value; } else { o[k].time = v('time').value; o[k].dm = v('dm').checked ? 1 : 0; } if (k === 'sales') o[k].month = v('month').checked ? 1 : 0; });
+    return { alerts: o, wa: { on: f.wa_on.checked ? 1 : 0, token: f.wa_token.value, group: f.wa_group.value, url: f.wa_url.value } }; };
+  const save = () => api('att_alerts_save', collect());
+  f.onsubmit = async e => { e.preventDefault(); await act(save, 'Alerts saved'); refresh(); };
+  view().querySelectorAll('[data-atttest]').forEach(b => b.onclick = async () => { await save().catch(() => null); const r = await act(() => api('att_test', { what: 'wa' })).catch(() => null); if (r) toast(r.ok ? 'Sent — check the WhatsApp group' : 'Could not send. Check the token and group ID, and that alerts are switched on.', !r.ok); });
+  view().querySelectorAll('[data-altry]').forEach(b => b.onclick = async () => { await save().catch(() => null); const r = await act(() => api('att_alerts_try', { kind: b.dataset.altry })).catch(() => null); if (!r) return; const p = $('#alpre_' + b.dataset.altry); p.hidden = false; p.textContent = r.text + '\n\n→ goes to: ' + (r.to.length ? r.to.join(', ') : 'nobody chosen yet'); });
+  view().querySelectorAll('[data-alsend]').forEach(b => b.onclick = async () => { await save().catch(() => null); const r = await act(() => api('att_alerts_try', { kind: b.dataset.alsend, send: 1 })).catch(() => null); if (r) toast(r.sent ? `Sent to ${r.sent} of ${r.of}` : 'Could not send — check the gateway token, and that alerts are switched on.', !r.sent); });
+};
+
 routes.nearme = async () => {
   const N = C.near || (C.near = { km: 25 });
   view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#contacts">← Contacts</a></div><h1>Customers near me</h1><p>Clients closest to where you are now — handy when you are out on the road. Uses the address and city saved on each client.</p></div></div>

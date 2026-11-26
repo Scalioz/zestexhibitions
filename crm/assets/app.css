@@ -199,3 +199,9 @@ tr.tot td{border-top:2px solid var(--line);background:var(--bg,transparent)}
 select[data-lheat]{min-width:140px}
 .tw.tall{max-height:72vh;overflow:auto}.tw.tall thead th{position:sticky;top:0;background:var(--panel,#fff);z-index:1}
 [data-ddet] .l{display:flex;gap:12px;padding:5px 0;border-bottom:1px solid var(--line)}[data-ddet] .l>span:first-child{min-width:90px;color:var(--muted,#667);font-size:13px}
+/* auto alerts */
+.alppl{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:4px}
+.alppl label{display:flex;gap:6px;align-items:center;font-weight:400;font-size:13px}
+.alpre{white-space:pre-wrap;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:8px;font:13px/1.5 system-ui,sans-serif;max-width:560px}
+.alsteps{padding-left:20px;display:grid;gap:8px;line-height:1.5}
+.alsteps code{word-break:break-all}

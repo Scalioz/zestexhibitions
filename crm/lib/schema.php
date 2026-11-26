@@ -205,6 +205,15 @@ function migrate() {
     foreach (['lat DECIMAL(10,6)', 'lng DECIMAL(10,6)', 'geo_q VARCHAR(400)', 'geo_prec VARCHAR(12)'] as $col) { try { db()->exec('ALTER TABLE ' . T('clients') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ } }
     set_setting('schema_v', 27);
   }
+  if ($v < 28) {   // daily sales alert: the day an order was won
+    try { db()->exec('ALTER TABLE ' . T('projects') . ' ADD COLUMN won_on DATE'); } catch (PDOException $e) { /* already there */ }
+    q('UPDATE ' . T('projects') . " SET won_on = COALESCE(invoice_date, " . ((cfg()['driver'] ?? 'mysql') === 'sqlite' ? 'date(created_at)' : 'DATE(created_at)') . ") WHERE won_on IS NULL AND status IN ('won', 'completed')");
+    set_setting('schema_v', 28);
+  }
+  if ($v < 29) {   // make sure won_on really exists (some servers recorded v28 without it)
+    try { db()->exec('ALTER TABLE ' . T('projects') . ' ADD COLUMN won_on DATE'); } catch (PDOException $e) { /* already there */ }
+    set_setting('schema_v', 29);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';

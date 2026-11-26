@@ -30,7 +30,7 @@ function att_reqs($from, $to, $statuses = ['approved', 'pending'], $uid = null) 
 // What is expected of a person on a date and what happened. $rec = attendance row or null, $reqs = their requests.
 function att_status($u, $date, $rec, $reqs) {
   $c = att_cfg(); [$s, $e] = att_shift($u); $exp = att_min($s); $end = att_min($e); $buf = (int) $c['buffer'];
-  $o = ['date' => $date, 'expected' => $s, 'shift' => "$s–$e", 'in' => $rec ? substr($rec['check_in'] ?? '', 11, 5) : '', 'out' => $rec && $rec['check_out'] ? substr($rec['check_out'], 11, 5) : '',
+  $o = ['date' => $date, 'expected' => $s, 'shift' => "{$s}–{$e}", 'in' => $rec ? substr($rec['check_in'] ?? '', 11, 5) : '', 'out' => $rec && $rec['check_out'] ? substr($rec['check_out'], 11, 5) : '',
     'wfh' => false, 'notes' => [], 'late_min' => 0, 'off_net' => $rec ? (int) ($rec['off_net'] ?? 0) : 0];
   if (!is_working_day($date)) return $o + ['code' => 'off', 'label' => 'Holiday / week off'];
   $pending = null;
@@ -121,13 +121,11 @@ function att_mail($subject, $body) {
   $h = "From: Zest CRM <noreply@$host>\r\nReply-To: $reply\r\nContent-Type: text/plain; charset=UTF-8";
   return @mail(implode(',', $to), '=?UTF-8?B?' . base64_encode($subject) . '?=', $body, $h);
 }
-function att_wa($text) {   // posts into the WhatsApp group through a gateway, when switched on in settings
-  $w = att_cfg()['wa']; if (empty($w['on']) || !$w['token'] || !$w['group'] || !function_exists('curl_init')) return false;
-  $ch = curl_init($w['url'] ?: 'https://gate.whapi.cloud/messages/text');
-  curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode(['to' => $w['group'], 'body' => $text]), CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 20,
-    CURLOPT_HTTPHEADER => ['content-type: application/json', 'authorization: Bearer ' . $w['token']]]);
-  $r = curl_exec($ch); $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
-  return $code >= 200 && $code < 300;
+function att_wa($text, $to = null) {   // attendance messages go to the people / groups chosen in Auto alerts → Attendance
+  require_once __DIR__ . '/alerts.php';
+  if ($to !== null) return wa_send_to($to, $text);
+  if (empty(alerts_cfg()['att']['on'])) return false;
+  return alert_send('att', $text) > 0;
 }
 function att_alert($subject, $text) { $c = att_cfg(); if (!empty($c['email'])) att_mail($subject, $text); att_wa($text); }
 
@@ -138,7 +136,8 @@ function att_tick() {
   $board = att_board($d); if (!$board) return;
   $sent = (array) setting('att_alerted', []); if (($sent['date'] ?? '') !== $d) $sent = ['date' => $d, 'late' => [], 'out' => 0];
   $miss = array_values(array_filter($board, fn($r) => $r['code'] === 'absent' && !in_array($r['user']['id'], $sent['late'], true)));
-  if ($miss) {
+  require_once __DIR__ . '/alerts.php';
+  if ($miss && !empty(alerts_cfg()['att']['auto'])) {
     $line = fn($code) => implode(', ', array_map(fn($r) => $r['user']['name'] . ($code === 'late' ? ' (' . $r['in'] . ')' : ''), array_filter($board, fn($r) => $r['code'] === $code)));
     $t = '🕙 Attendance — ' . date('h:i A, D d M') . "\n" . '❌ Not checked in: ' . implode(', ', array_map(fn($r) => $r['user']['name'], $miss));
     if ($x = $line('ontime')) $t .= "\n✅ On time: $x"; if ($x = $line('late')) $t .= "\n🟠 Late: $x"; if ($x = $line('leave')) $t .= "\n🌴 On leave: $x"; if ($x = $line('requested')) $t .= "\n⏳ Leave requested: $x";
