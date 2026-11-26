@@ -738,6 +738,19 @@ case 'acc_partner_ppay_tag': {   // mark a payment to the partner as "against hi
   $t = (array) setting('ppay_tag', []); $t[$j['id']] = ($in['tag'] ?? '') === 'exp' ? 'exp' : 'share'; set_setting('ppay_tag', $t);
   out(['ok' => true]);
 }
+case 'acc_partner_expmoney_settle': {   // admin: the rest of the expense money was spent on the company — book it as a company expense (company 100%)
+  need_admin();
+  $pt = one('SELECT * FROM ' . T('partners') . ' WHERE id = ?', [(int) ($in['partner_id'] ?? 0)]) ?? fail('Partner not found.');
+  $t = partner_calc($pt, false)['totals']; $amt = round((float) $t['exp_unspent'], 2);
+  if ($amt < 1) fail('Nothing left to settle — all expense money is accounted for.');
+  $pid = (int) ($in['project_id'] ?? 0) ?: null;
+  if ($pid && (int) val('SELECT partner_id FROM ' . T('projects') . ' WHERE id = ?', [$pid]) === (int) $pt['id']) fail('Pick a company order or “General” — this amount is company 100%.');
+  $narr = s($in['note'] ?? null, 300) ?: 'Balance of expense money spent for the company';
+  tx();
+  $jid = post_journal(d($in['date'] ?? null) ?? today(), 'Expense', $narr . " (paid from {$pt['name']}'s advance)", [[acc_sub('exp_misc'), $amt, 0, $narr], [party_account('partner', $pt['id'], $pt['name']), 0, $amt, $narr]], null, null, $pid, $MID);
+  if ($pid) { $eid = ins('expenses', ['project_id' => $pid, 'edate' => d($in['date'] ?? null) ?? today(), 'category' => 'Other', 'description' => mb_substr($narr, 0, 250), 'amount' => $amt, 'paid_by_partner' => $pt['id']]); upd('journal', $jid, ['ref_type' => 'pexp', 'ref_id' => $eid]); }
+  db()->commit(); out(['id' => $jid, 'amount' => $amt]);
+}
 case 'acc_partner_pay_expense': {   // money given to the partner for expenses, which he spent on an order: book it as that order's expense (paid from his advance)
   need_acc();
   $pt = one('SELECT * FROM ' . T('partners') . ' WHERE id = ?', [(int) ($in['partner_id'] ?? 0)]) ?? fail('Partner not found.');

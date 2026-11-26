@@ -2460,13 +2460,17 @@ routes.partner = async ({ id }) => {
       adv: () => ['Advance taken for himself', tb([['Date'], ['Voucher'], ['Details'], ['Amount', 1]], jvRows(advS), `<td colspan="3"><b>Total</b></td><td class="r num"><b>${inr2(S(advS, 'amount'))}</b></td>`)],
       own: () => ['Spent on his orders — he bears his share', tb([['Date'], ['Voucher'], ['Details · order'], ['Amount', 1]], jvRows(own), `<td colspan="3"><b>Total</b></td><td class="r num"><b>${inr2(S(own, 'amount'))}</b></td>`)],
       co: () => ['Spent for the company — company 100%', tb([['Date'], ['Voucher'], ['Details · order'], ['Amount', 1]], jvRows(co), `<td colspan="3"><b>Total</b></td><td class="r num"><b>${inr2(S(co, 'amount'))}</b></td>`)],
-      expmoney: () => ['Money given for company expenses', tb([['Date'], ['Voucher'], ['Details'], ['Amount', 1]], jvRows(advE), `<td colspan="3"><b>Given ${inr2(S(advE, 'amount'))} − spent ${inr2(t.spent)}</b></td><td class="r num"><b>${inr2(t.exp_unspent)}</b></td>`)],
+      expmoney: () => ['Money given for company expenses', tb([['Date'], ['Voucher'], ['Details'], ['Amount', 1]], jvRows(advE), `<td colspan="3"><b>Given ${inr2(S(advE, 'amount'))} − spent ${inr2(t.spent)}</b></td><td class="r num"><b>${inr2(t.exp_unspent)}</b></td>`)
+        + (t.exp_unspent >= 1 && isAdmin() ? `<form id="pk-settle" class="inset" style="margin-top:12px"><h3 style="margin-top:0">Was the remaining ${inr(t.exp_unspent)} also spent on the company?</h3><p class="sub" style="margin-top:0">This books it as one company expense (company 100%, not shared by him), so it no longer shows as money with him.</p>
+          <div class="grid g3"><label class="f">For order<select name="project_id"><option value="">— General company expense —</option>${d.free_projects.map(r => `<option value="${r.id}">${esc(r.company)} · ${esc(r.expo)}</option>`).join('')}</select></label><label class="f">Date<input type="date" name="date" value="${B.today}"></label><label class="f">Description<input name="note" value="Balance of expense money spent for the company"></label></div>
+          <div class="row" style="margin-top:8px"><button class="btn">Yes — book ${inr(t.exp_unspent)} as company expense</button></div></form>` : '')],
     };
     const showP = k => { view().querySelectorAll('.kclick [data-pk]').forEach(x => x.classList.toggle('on', x.dataset.pk === k)); const box = $('#pkdet');
       if (k === 'stmt') { box.innerHTML = ''; $('#pt-stmt').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
       if (!k || !PK[k]) { box.innerHTML = ''; return; } const [title, body] = PK[k]();
       box.innerHTML = `<div class="panel"><div class="ph"><h2>${title}</h2><button type="button" class="btn link sm" id="pkdet-x">Close ✕</button></div>${body}</div>`;
-      $('#pkdet-x').onclick = () => showP(''); box.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+      $('#pkdet-x').onclick = () => showP(''); box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if ($('#pk-settle')) $('#pk-settle').onsubmit = async e => { e.preventDefault(); const ok = await act(() => api('acc_partner_expmoney_settle', { partner_id: p.id, ...Object.fromEntries(new FormData(e.target)) }), 'Booked as company expense').catch(() => null); if (ok) refresh(); }; };
     view().querySelectorAll('[data-pk]').forEach(x => x.onclick = () => showP(x.classList.contains('on') ? '' : x.dataset.pk)); }
   view().querySelectorAll('[data-pptag]').forEach(sel => sel.onchange = async () => { const ok = await act(() => api('acc_partner_ppay_tag', { journal_id: sel.dataset.pptag, tag: sel.value }), 'Saved').catch(() => null); if (ok) refresh(); });
   view().querySelectorAll('[data-splink]').forEach(sel => sel.onchange = async () => { const ok = await act(() => api('acc_partner_spent_link', { partner_id: p.id, journal_id: sel.dataset.splink, project_id: sel.value }), 'Saved').catch(() => null); if (ok) refresh(); });
