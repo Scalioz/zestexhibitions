@@ -195,7 +195,8 @@ case 'acc_kpi':   // what is behind a box on the Accounts page
   }
   $b = balances_to(today());
   $acs = function ($subs, $sg) use ($b) { $o = []; foreach (all('SELECT id, name, sub FROM ' . T('accounts') . ' WHERE sub IN (' . implode(',', array_fill(0, count($subs), '?')) . ') ORDER BY name', $subs) as $a) { $v = round(($b[$a['id']] ?? 0) * $sg, 2); if (abs($v) >= 0.5) $o[] = ['id' => (int) $a['id'], 'name' => $a['name'], 'amount' => $v]; } usort($o, fn($x, $y) => abs($y['amount']) <=> abs($x['amount'])); return $o; };
-  if ($k === 'debtor') out(['title' => 'Receivable from clients', 'note' => 'Positive = client owes us. Negative = we received more than we invoiced in the books (usually a receipt entered before its tax invoice).', 'accounts' => $acs(['debtor'], 1)]);
+  if ($k === 'debtor') out(['title' => 'Clients owe us', 'note' => 'Invoiced in the books and not yet paid.', 'accounts' => array_values(array_filter($acs(['debtor'], 1), fn($a) => $a['amount'] > 0))]);
+  if ($k === 'advance') out(['title' => 'Advances received from clients (not yet invoiced)', 'note' => 'Money received for orders whose tax invoice is not made yet. It clears when the invoice is entered after the project is completed.', 'accounts' => array_values(array_filter($acs(['debtor'], -1), fn($a) => $a['amount'] > 0))]);
   if ($k === 'creditor') out(['title' => 'Payable to vendors', 'note' => 'Positive = we owe the vendor. Negative = advance paid to the vendor.', 'accounts' => $acs(['creditor'], -1)]);
   if ($k === 'staff') out(['title' => 'Payable to staff', 'note' => 'Expense reimbursements still to be paid to each person.', 'accounts' => $acs(['employee', 'claims_pay'], -1)]);
   if ($k === 'gst') out(['title' => 'GST & TDS accounts', 'note' => 'Output GST (collected on sales) minus input GST (paid on purchases) = GST payable.', 'accounts' => array_merge($acs(['gst_out_c', 'gst_out_s', 'gst_out_i', 'tds_out'], -1), array_map(fn($x) => ['amount' => -$x['amount']] + $x, $acs(['gst_in_c', 'gst_in_s', 'gst_in_i'], 1)))]);
@@ -215,7 +216,8 @@ case 'acc_home':
   $toPost = (int) val('SELECT COUNT(*) FROM ' . T('client_payments') . ' x WHERE pdate >= ? AND NOT EXISTS (SELECT 1 FROM ' . T('journal') . " j WHERE j.ref_type = 'cpay' AND j.ref_id = x.id) AND NOT EXISTS (SELECT 1 FROM " . T('post_skip') . " s WHERE s.ref_type = 'cpay' AND s.ref_id = x.id)", [$bf])
           + (int) val('SELECT COUNT(*) FROM ' . T('vendor_payments') . ' x WHERE pdate >= ? AND NOT EXISTS (SELECT 1 FROM ' . T('journal') . " j WHERE j.ref_type = 'vpay' AND j.ref_id = x.id) AND NOT EXISTS (SELECT 1 FROM " . T('post_skip') . " s WHERE s.ref_type = 'vpay' AND s.ref_id = x.id)", [$bf])
           + (int) val('SELECT COUNT(*) FROM ' . T('expenses') . ' x WHERE edate >= ? AND NOT EXISTS (SELECT 1 FROM ' . T('journal') . " j WHERE j.ref_type = 'pexp' AND j.ref_id = x.id) AND NOT EXISTS (SELECT 1 FROM " . T('post_skip') . " s WHERE s.ref_type = 'pexp' AND s.ref_id = x.id)", [$bf]);
-  out(['money' => $money, 'receivable' => $sum(['debtor']), 'payable' => $sum(['creditor'], -1), 'staff' => $sum(['employee', 'claims_pay'], -1),
+  $rcv = 0; $adv = 0; foreach (all('SELECT id FROM ' . T('accounts') . " WHERE sub = 'debtor'") as $a) { $v = $b[$a['id']] ?? 0; if ($v > 0) $rcv += $v; else $adv -= $v; }
+  out(['money' => $money, 'receivable' => $sum(['debtor']), 'rcv_pos' => round($rcv, 2), 'rcv_adv' => round($adv, 2), 'payable' => $sum(['creditor'], -1), 'staff' => $sum(['employee', 'claims_pay'], -1),
     'gst_net' => round($sum(['gst_out_c', 'gst_out_s', 'gst_out_i'], -1) - $sum(['gst_in_c', 'gst_in_s', 'gst_in_i']), 2), 'tds' => $sum(['tds_out'], -1),
     'income_month' => $ti, 'expense_month' => $te,
     'claims_waiting' => (int) val('SELECT COUNT(*) FROM ' . T('claims') . " WHERE status = 'submitted'"), 'claims_hold' => (int) val('SELECT COUNT(*) FROM ' . T('claims') . " WHERE status = 'on_hold'"),

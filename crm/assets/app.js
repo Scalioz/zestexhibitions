@@ -1990,7 +1990,7 @@ routes.acc = async () => {
   ${d.claims_waiting ? `<div class="alert warn"><b>${d.claims_waiting} expense claim${d.claims_waiting > 1 ? 's' : ''} waiting for approval</b><div><a class="btn sm" href="#claims">Review claims</a></div></div>` : ''}
   ${d.to_post ? `<div class="alert warn"><b>${d.to_post} payment${d.to_post > 1 ? 's' : ''} / expense${d.to_post > 1 ? 's' : ''} recorded in orders are not in the books yet</b><div><a class="btn sm" href="#topost">Post them</a></div></div>` : ''}
   <div class="kpis kclick">${d.money.map(a => `<div class="kpi ${a.sub === 'bank' ? 'hl' : ''}" data-ak="acct" data-acc="${a.id}"><span>${esc(a.name)}</span><b>${inr2(a.balance)}</b></div>`).join('')}
-   <div class="kpi" data-ak="debtor"><span>Receivable from clients</span><b>${inr2(d.receivable)}</b></div><div class="kpi" data-ak="creditor"><span>Payable to vendors</span><b>${inr2(d.payable)}</b></div>
+   <div class="kpi" data-ak="debtor"><span>Clients owe us</span><b>${inr2(d.rcv_pos ?? d.receivable)}</b><small>invoiced, not yet paid</small></div><div class="kpi" data-ak="advance"><span>Advances received</span><b>${inr2(d.rcv_adv ?? 0)}</b><small>from clients · not yet invoiced</small></div><div class="kpi" data-ak="creditor"><span>Payable to vendors</span><b>${inr2(d.payable)}</b></div>
    <div class="kpi" data-ak="staff"><span>Payable to staff</span><b>${inr2(d.staff)}</b><small>expense reimbursements</small></div>
    <div class="kpi" data-ak="gst"><span>GST payable</span><b>${inr2(d.gst_net)}</b><small>TDS payable ${inr2(d.tds)}</small></div>
    <div class="kpi" data-ak="month"><span>This month</span><b>${inr2(d.income_month - d.expense_month)}</b><small>income ${inr2(d.income_month)} · expenses ${inr2(d.expense_month)}</small></div></div>
