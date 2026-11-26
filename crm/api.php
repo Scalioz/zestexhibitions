@@ -579,6 +579,7 @@ case 'project':
   $um = users_map();
   $p['designer'] = $um[$p['designer_id']] ?? null; $p['ops_person'] = $um[$p['ops_id']] ?? null;
   $p['ops'] = json_decode($p['ops_json'] ?? '', true) ?: null; unset($p['ops_json']);
+  $p['vq_agreed'] = (float) val('SELECT COALESCE(SUM(amount),0) FROM ' . T('vendor_quotes') . ' WHERE project_id = ? AND selected = 1', [$id]);
   $p['chosen_vendor'] = one('SELECT v.name, q.amount FROM ' . T('vendor_quotes') . ' q JOIN ' . T('vendors') . ' v ON v.id = q.vendor_id WHERE q.project_id = ? AND q.selected = 1', [$id]);
   $p['approvals'] = all('SELECT a.*, u.name AS requested_by_name FROM ' . T('approvals') . ' a LEFT JOIN ' . T('users') . ' u ON u.id = a.requested_by WHERE a.project_id = ? ORDER BY a.kind, a.version', [$id]);
   $p['approvals'] = array_values(array_filter($p['approvals'], fn($a) => $a['status'] !== 'draft' || $ADMIN || (int) $a['requested_by'] === $MID));   // drafts: only their maker

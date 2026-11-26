@@ -261,15 +261,16 @@ function partner_calc($pt, $withLedger = false) {
   $projects = all('SELECT p.*, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . " c ON c.id = p.client_id WHERE p.partner_id = ? AND p.status <> 'rejected' ORDER BY p.start_date DESC, p.id DESC", [$pt['id']]);
   $bills = bills_for($projects);
   $posted = []; foreach (all('SELECT j.project_id, SUM(l.cr - l.dr) AS v FROM ' . T('jlines') . ' l JOIN ' . T('journal') . " j ON j.id = l.journal_id WHERE l.account_id = ? AND j.ref_type = 'pshare' AND j.reversed_by IS NULL GROUP BY j.project_id", [$acc]) as $r) $posted[(int) $r['project_id']] = (float) $r['v'];
+  $vq = []; foreach (all('SELECT project_id, SUM(amount) AS v FROM ' . T('vendor_quotes') . ' WHERE selected = 1 GROUP BY project_id') as $r) $vq[(int) $r['project_id']] = (float) $r['v'];   // total vendor cost agreed
   $byP = []; foreach (['expenses' => 'amount', 'vendor_payments' => 'amount'] as $t => $col) foreach (all('SELECT project_id, SUM(amount) AS v FROM ' . T($t) . ' WHERE paid_by_partner = ? GROUP BY project_id', [$pt['id']]) as $r) $byP[(int) $r['project_id']] = ($byP[(int) $r['project_id']] ?? 0) + (float) $r['v'];
   $T = ['projects' => 0, 'revenue' => 0, 'costs' => 0, 'rev_share' => 0, 'exp_share' => 0, 'net' => 0, 'posted' => 0, 'paid_by_partner' => 0];
   $rows = [];
   foreach ($projects as $p) {
     $b = $bills[$p['id']]; $rp = $p['p_rev_pct'] !== null ? (float) $p['p_rev_pct'] : (float) $pt['rev_pct']; $ep = $p['p_exp_pct'] !== null ? (float) $p['p_exp_pct'] : (float) $pt['exp_pct'];
-    $rev = round($b['base'] + $b['extras'], 2); $cost = round($b['vendor_paid'] + $b['expenses'] + $b['losses'], 2);
+    $rev = round($b['base'] + $b['extras'], 2); $vend = max((float) $b['vendor_paid'], $vq[$p['id']] ?? 0); $cost = round($vend + $b['expenses'] + $b['losses'], 2);   // vendor: full agreed cost, or what's paid if more
     $rs = round($rev * $rp / 100, 2); $es = round($cost * $ep / 100, 2); $net = round($rs - $es, 2); $po = round($posted[$p['id']] ?? 0, 2);
     $rows[] = ['id' => (int) $p['id'], 'expo' => $p['expo'], 'company' => $p['company'], 'status' => $p['status'], 'start_date' => $p['start_date'], 'rev_pct' => $rp, 'exp_pct' => $ep,
-      'revenue' => $rev, 'received' => $b['received'], 'costs' => $cost, 'rev_share' => $rs, 'exp_share' => $es, 'net' => $net, 'posted' => $po, 'to_post' => round($net - $po, 2), 'paid_by_partner' => round($byP[$p['id']] ?? 0, 2)];
+      'revenue' => $rev, 'received' => $b['received'], 'vendor' => round($vend, 2), 'expenses' => round($b['expenses'] + $b['losses'], 2), 'costs' => $cost, 'rev_share' => $rs, 'exp_share' => $es, 'net' => $net, 'posted' => $po, 'to_post' => round($net - $po, 2), 'paid_by_partner' => round($byP[$p['id']] ?? 0, 2)];
     $T['projects']++; foreach (['revenue' => $rev, 'costs' => $cost, 'rev_share' => $rs, 'exp_share' => $es, 'net' => $net, 'posted' => $po, 'paid_by_partner' => $byP[$p['id']] ?? 0] as $k => $v) $T[$k] += $v;
   }
   $paid = (float) val('SELECT COALESCE(SUM(l.dr - l.cr), 0) FROM ' . T('jlines') . ' l JOIN ' . T('journal') . " j ON j.id = l.journal_id WHERE l.account_id = ? AND j.ref_type = 'ppay' AND j.reversed_by IS NULL", [$acc]);

@@ -205,3 +205,7 @@ select[data-lheat]{min-width:140px}
 .alpre{white-space:pre-wrap;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:8px;font:13px/1.5 system-ui,sans-serif;max-width:560px}
 .alsteps{padding-left:20px;display:grid;gap:8px;line-height:1.5}
 .alsteps code{word-break:break-all}
+/* partner share working */
+.pwork{border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px}
+.pwork .l{padding:4px 0}
+.pwork .l.tot{border-top:1px solid var(--line);margin-top:2px;padding-top:6px}
