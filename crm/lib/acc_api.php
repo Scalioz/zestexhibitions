@@ -737,6 +737,28 @@ case 'acc_partner_ppay_tag': {   // mark a payment to the partner as "against hi
   $t = (array) setting('ppay_tag', []); $t[$j['id']] = ($in['tag'] ?? '') === 'exp' ? 'exp' : 'share'; set_setting('ppay_tag', $t);
   out(['ok' => true]);
 }
+case 'acc_partner_pay_expense': {   // money given to the partner for expenses, which he spent on an order: book it as that order's expense (paid from his advance)
+  need_acc();
+  $pt = one('SELECT * FROM ' . T('partners') . ' WHERE id = ?', [(int) ($in['partner_id'] ?? 0)]) ?? fail('Partner not found.');
+  $acc = party_account('partner', $pt['id'], $pt['name']);
+  $pay = one('SELECT * FROM ' . T('journal') . " WHERE id = ? AND ref_type = 'ppay' AND reversed_by IS NULL", [(int) ($in['journal_id'] ?? 0)]) ?? fail('Payment not found.');
+  $given = (float) val('SELECT COALESCE(SUM(dr - cr),0) FROM ' . T('jlines') . ' WHERE journal_id = ? AND account_id = ?', [$pay['id'], $acc]);
+  $map = (array) setting('ppay_exp', []); $done = 0;
+  foreach ((array) ($map[$pay['id']] ?? []) as $jid) if (!val('SELECT reversed_by FROM ' . T('journal') . ' WHERE id = ?', [(int) $jid])) $done += (float) val('SELECT COALESCE(SUM(cr - dr),0) FROM ' . T('jlines') . ' WHERE journal_id = ? AND account_id = ?', [(int) $jid, $acc]);
+  $amt = n($in['amount'] ?? 0) ?? 0; if ($amt <= 0) fail('Enter the amount.');
+  if ($amt > round($given - $done, 2) + 0.01) fail('Only ' . number_format($given - $done, 2) . ' of this payment is left to book.');
+  $pid = (int) ($in['project_id'] ?? 0) ?: null; $proj = $pid ? one('SELECT p.*, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . ' c ON c.id = p.client_id WHERE p.id = ?', [$pid]) : null; if ($pid && !$proj) fail('Order not found.');
+  $cat = array_key_exists($in['category'] ?? '', PEXP_SUB) ? $in['category'] : 'Other';
+  $exp = acc_sub(PEXP_SUB[$cat] ?? 'exp_misc');
+  $narr = s($in['note'] ?? null, 300) ?: preg_replace('/^Advance paid to [^—]+— ?/u', '', (string) $pay['narration']);
+  $date = d($in['date'] ?? null) ?? $pay['jdate'];
+  tx();
+  $jid = post_journal($date, 'Expense', $narr . ' (paid from ' . $pt['name'] . "'s advance)", [[$exp, $amt, 0, $narr], [$acc, 0, $amt, $narr]], null, null, $pid, $MID);
+  if ($proj) { $eid = ins('expenses', ['project_id' => $pid, 'edate' => $date, 'category' => $cat, 'description' => mb_substr($narr, 0, 250), 'amount' => $amt, 'paid_by_partner' => $pt['id']]); upd('journal', $jid, ['ref_type' => 'pexp', 'ref_id' => $eid]); }
+  $map[$pay['id']] = array_values(array_merge((array) ($map[$pay['id']] ?? []), [$jid])); set_setting('ppay_exp', $map);
+  $t = (array) setting('ppay_tag', []); $t[$pay['id']] = 'exp'; set_setting('ppay_tag', $t);
+  db()->commit(); out(['id' => $jid]);
+}
 case 'acc_partner_spent_link': {   // link a company expense he paid from his advance to an order (or make it a general company expense)
   need_acc();
   $j = one('SELECT * FROM ' . T('journal') . ' WHERE id = ? AND reversed_by IS NULL', [(int) ($in['journal_id'] ?? 0)]) ?? fail('Entry not found.');

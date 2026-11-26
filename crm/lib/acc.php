@@ -267,7 +267,7 @@ function partner_calc($pt, $withLedger = false) {
   $rows = [];
   foreach ($projects as $p) {
     $b = $bills[$p['id']]; $rp = $p['p_rev_pct'] !== null ? (float) $p['p_rev_pct'] : (float) $pt['rev_pct']; $ep = $p['p_exp_pct'] !== null ? (float) $p['p_exp_pct'] : (float) $pt['exp_pct'];
-    $rev = round($b['base'] + $b['extras'], 2); $vend = (!empty($p['vendor_settled']) || $p['status'] === 'completed') ? (float) $b['vendor_paid'] : max((float) $b['vendor_paid'], $vq[$p['id']] ?? 0);   // settled vendor: what was actually paid $cost = round($vend + $b['expenses'] + $b['losses'], 2);   // vendor: full agreed cost, or what's paid if more
+    $rev = round($b['base'] + $b['extras'], 2); $vend = (!empty($p['vendor_settled']) || $p['status'] === 'completed') ? (float) $b['vendor_paid'] : max((float) $b['vendor_paid'], $vq[$p['id']] ?? 0); $cost = round($vend + $b['expenses'] + $b['losses'], 2);   // vendor: final paid when settled, else full agreed cost (or paid if more)
     $counts = is_won($p['status']);   // only orders actually won count towards his share
     $rs = $counts ? round($rev * $rp / 100, 2) : 0; $es = $counts ? round($cost * $ep / 100, 2) : 0; $net = round($rs - $es, 2); $po = round($posted[$p['id']] ?? 0, 2);
     $rows[] = ['id' => (int) $p['id'], 'expo' => $p['expo'], 'company' => $p['company'], 'status' => $p['status'], 'start_date' => $p['start_date'], 'rev_pct' => $rp, 'exp_pct' => $ep,
@@ -319,7 +319,8 @@ function partner_recon($pt, $acc, $rows) {
       $R['shares'][] = $item($j) + ['order' => $pi ? $pi['company'] . ' · ' . $pi['expo'] : 'order removed', 'project_id' => (int) $j['project_id'],
         'problem' => $ok ? '' : (!$pi ? 'order no longer exists' : ((int) $pi['partner_id'] !== (int) $pt['id'] ? 'order is no longer marked for him' : ($pi['status'] === 'rejected' ? 'order was rejected' : 'order is not won'))),
         'should_be' => $ok ? $won[(int) $j['project_id']]['net'] : 0]; }
-    elseif ($j['ref_type'] === 'ppay') $R['pays'][] = array_merge($item($j), ['amount' => -round((float) $j['v'], 2), 'tag' => ((array) setting('ppay_tag', []))[$j['id']] ?? 'share']);
+    elseif ($j['ref_type'] === 'ppay') { $bk = 0; foreach ((array) (((array) setting('ppay_exp', []))[$j['id']] ?? []) as $x) if (!val('SELECT reversed_by FROM ' . T('journal') . ' WHERE id = ?', [(int) $x])) $bk += (float) val('SELECT COALESCE(SUM(cr - dr),0) FROM ' . T('jlines') . ' WHERE journal_id = ? AND account_id = ?', [(int) $x, $acc]);
+      $R['pays'][] = array_merge($item($j), ['amount' => -round((float) $j['v'], 2), 'tag' => ((array) setting('ppay_tag', []))[$j['id']] ?? 'share', 'booked' => round($bk, 2)]); }
     elseif (!in_array($j['ref_type'], ['pshare', 'ppay'], true) && $j['ref_type'] !== 'reversal' && !$j['reversed_by']) continue;   // already in "company expenses paid from his advance"
     else $R['other'][] = $item($j);
   }
