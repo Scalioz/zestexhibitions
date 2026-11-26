@@ -289,9 +289,46 @@ function partner_calc($pt, $withLedger = false) {
     $run = $open; $L = $open ? [['id' => null, 'jdate' => null, 'vno' => '', 'vtype' => '', 'narration' => 'Opening balance', 'ref_type' => '', 'project_id' => null, 'reversed_by' => null, 'dr' => $open < 0 ? -$open : 0, 'cr' => $open > 0 ? $open : 0, 'kind' => 'Opening', 'balance' => round($open, 2)]] : [];
     foreach (all('SELECT j.id, j.jdate, j.vno, j.vtype, j.narration, j.ref_type, j.project_id, j.reversed_by, l.dr, l.cr FROM ' . T('jlines') . ' l JOIN ' . T('journal') . ' j ON j.id = l.journal_id WHERE l.account_id = ? ORDER BY j.jdate, j.id', [$acc]) as $r) {
       $run += $r['cr'] - $r['dr'];
-      $L[] = $r + ['kind' => ['ppay' => 'Paid to partner', 'pshare' => 'Share of profit', 'pexp' => 'Expense paid by partner', 'vpay' => 'Vendor paid by partner'][$r['ref_type']] ?? ($r['vtype'] === 'Expense' ? 'Expense paid by partner' : $r['vtype']), 'balance' => round($run, 2)];
+      $L[] = $r + ['kind' => ['ppay' => 'Paid to partner', 'pshare' => 'Share of profit', 'pexp' => 'Expense paid by partner', 'vpay' => 'Vendor paid by partner', 'pclaim' => 'Expense paid from advance'][$r['ref_type']] ?? ($r['vtype'] === 'Expense' ? 'Expense paid by partner' : $r['vtype']), 'balance' => round($run, 2)];
     }
     $out['ledger'] = $L;
+    $out['recon'] = partner_recon($pt, $acc, $rows);
   }
   return $out;
 }
+
+// "Check his account": every entry on the partner's account, sorted into what it is, plus his staff expense claims
+function partner_recon($pt, $acc, $rows) {
+  $won = []; foreach ($rows as $r) if ($r['counts']) $won[$r['id']] = $r;
+  $J = all('SELECT j.id, j.jdate, j.vno, j.vtype, j.narration, j.ref_type, j.ref_id, j.project_id, j.reversed_by, SUM(l.cr - l.dr) AS v FROM ' . T('jlines') . ' l JOIN ' . T('journal') . ' j ON j.id = l.journal_id WHERE l.account_id = ? GROUP BY j.id, j.jdate, j.vno, j.vtype, j.narration, j.ref_type, j.ref_id, j.project_id, j.reversed_by ORDER BY j.jdate, j.id', [$acc]);
+  $ids = array_column($J, 'id'); $live = [];
+  foreach ($J as $j) { if ($j['reversed_by'] && in_array($j['reversed_by'], $ids)) continue; if ($j['ref_type'] === 'reversal' && in_array((int) $j['ref_id'], $ids)) continue; $live[] = $j; }
+  $pinfo = []; $pids = array_filter(array_unique(array_map(fn($j) => (int) $j['project_id'], $live)));
+  if ($pids) foreach (all('SELECT p.id, p.expo, p.status, p.partner_id, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . ' c ON c.id = p.client_id WHERE p.id IN (' . implode(',', $pids) . ')') as $x) $pinfo[(int) $x['id']] = $x;
+  $R = ['shares' => [], 'pays' => [], 'other' => [], 'claims' => []];
+  $item = fn($j) => ['id' => (int) $j['id'], 'jdate' => $j['jdate'], 'vno' => $j['vno'], 'narration' => $j['narration'], 'amount' => round((float) $j['v'], 2)];
+  foreach ($live as $j) {
+    if ($j['ref_type'] === 'pshare') { $pi = $pinfo[(int) $j['project_id']] ?? null; $ok = isset($won[(int) $j['project_id']]);
+      $R['shares'][] = $item($j) + ['order' => $pi ? $pi['company'] . ' · ' . $pi['expo'] : 'order removed', 'project_id' => (int) $j['project_id'],
+        'problem' => $ok ? '' : (!$pi ? 'order no longer exists' : ((int) $pi['partner_id'] !== (int) $pt['id'] ? 'order is no longer marked for him' : ($pi['status'] === 'rejected' ? 'order was rejected' : 'order is not won'))),
+        'should_be' => $ok ? $won[(int) $j['project_id']]['net'] : 0]; }
+    elseif ($j['ref_type'] === 'ppay') $R['pays'][] = array_merge($item($j), ['amount' => -round((float) $j['v'], 2)]);
+    elseif (!in_array($j['ref_type'], ['pshare', 'ppay'], true) && $j['ref_type'] !== 'reversal' && !$j['reversed_by']) continue;   // already in "company expenses paid from his advance"
+    else $R['other'][] = $item($j);
+  }
+  // his own expense claims as staff (same email or phone as the partner)
+  $u = null; if ($pt['email'] ?? '') $u = one('SELECT id, name FROM ' . T('users') . ' WHERE LOWER(email) = ?', [strtolower(trim($pt['email']))]);
+  if (!$u && ($pt['phone'] ?? '')) { $d = substr(preg_replace('/\D/', '', $pt['phone']), -10); foreach (all('SELECT id, name, phone FROM ' . T('users')) as $x) if (strlen($d) === 10 && substr(preg_replace('/\D/', '', (string) $x['phone']), -10) === $d) { $u = $x; break; } }
+  if ($u) {
+    $ea = val('SELECT id FROM ' . T('accounts') . " WHERE party_type = 'employee' AND party_id = ?", [$u['id']]);
+    $moved = []; foreach (all('SELECT ref_id FROM ' . T('journal') . " WHERE ref_type = 'pclaim' AND reversed_by IS NULL") as $m) $moved[(int) $m['ref_id']] = 1;
+    foreach (all('SELECT c.id, c.edate, c.particular, c.grand, c.journal_id, j.vno FROM ' . T('claims') . ' c LEFT JOIN ' . T('journal') . " j ON j.id = c.journal_id WHERE c.user_id = ? AND c.status = 'approved' ORDER BY c.edate", [$u['id']]) as $c) {
+      $toStaff = $ea && $c['journal_id'] ? (float) val('SELECT COALESCE(SUM(cr - dr),0) FROM ' . T('jlines') . ' WHERE journal_id = ? AND account_id = ?', [$c['journal_id'], $ea]) : 0;
+      $R['claims'][] = ['id' => (int) $c['id'], 'edate' => $c['edate'], 'particular' => $c['particular'], 'amount' => round((float) $c['grand'], 2), 'jid' => (int) $c['journal_id'], 'vno' => $c['vno'],
+        'how' => isset($moved[(int) $c['id']]) ? 'moved' : ($toStaff > 0 ? 'staff' : 'company')];
+    }
+    $R['staff_name'] = $u['name']; $R['staff_balance'] = $ea ? round(-acc_balance($ea), 2) : 0;
+  }
+  return $R;
+}
+

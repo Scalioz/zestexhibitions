@@ -731,6 +731,19 @@ case 'acc_partner': {
   $c['free_projects'] = all('SELECT p.id, p.expo, c.company, p.start_date FROM ' . T('projects') . ' p JOIN ' . T('clients') . " c ON c.id = p.client_id WHERE p.partner_id IS NULL AND p.status <> 'rejected' ORDER BY p.id DESC LIMIT 400");
   out($c + ['money' => money_accounts()]);
 }
+case 'acc_partner_claim_move': {   // a staff expense claim that was really paid out of the partner's advance: move it from his staff account to his partner account
+  need_acc();
+  $pt = one('SELECT * FROM ' . T('partners') . ' WHERE id = ?', [(int) ($in['partner_id'] ?? 0)]) ?? fail('Partner not found.', 404);
+  $c = one('SELECT * FROM ' . T('claims') . " WHERE id = ? AND status = 'approved'", [(int) ($in['claim_id'] ?? 0)]) ?? fail('Approved expense not found.');
+  if (val('SELECT COUNT(*) FROM ' . T('journal') . " WHERE ref_type = 'pclaim' AND ref_id = ? AND reversed_by IS NULL", [$c['id']])) fail('Already moved.');
+  $ea = val('SELECT id FROM ' . T('accounts') . " WHERE party_type = 'employee' AND party_id = ?", [$c['user_id']]) ?? fail('This expense was not booked to his staff account.');
+  $amt = (float) val('SELECT COALESCE(SUM(cr - dr),0) FROM ' . T('jlines') . ' WHERE journal_id = ? AND account_id = ?', [(int) $c['journal_id'], $ea]);
+  if ($amt <= 0) fail('This expense was paid by the company directly, not owed to him as staff — nothing to move.');
+  tx();
+  $nar = "Paid from {$pt['name']}'s advance: {$c['particular']}";
+  $jid = post_journal($c['edate'], 'Journal', $nar, [[$ea, $amt, 0, $nar], [party_account('partner', $pt['id'], $pt['name']), 0, $amt, $nar]], 'pclaim', $c['id'], $c['project_id'], $MID);
+  db()->commit(); out(['id' => $jid]);
+}
 case 'acc_partner_save': {   // admin: add / edit a partner and his default sharing %
   need_admin();
   $data = ['name' => s($in['name'] ?? null, 120) ?? fail('Enter the partner name.'), 'phone' => s($in['phone'] ?? null, 30), 'email' => s($in['email'] ?? null, 160), 'note' => s($in['note'] ?? null, 255),
