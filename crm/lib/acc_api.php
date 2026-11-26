@@ -181,7 +181,7 @@ case 'acc_meta':
     'clients' => all('SELECT id, company FROM ' . T('clients') . ' ORDER BY company'),
     'vendors' => all('SELECT id, name FROM ' . T('vendors') . ' WHERE active = 1 ORDER BY name'),
     'staff' => all('SELECT id, name, department FROM ' . T('users') . " WHERE active = 1 ORDER BY name"),
-    'projects' => all('SELECT p.id, p.expo, p.status, c.company, p.client_id FROM ' . T('projects') . ' p JOIN ' . T('clients') . " c ON c.id = p.client_id WHERE p.status <> 'rejected' ORDER BY p.id DESC LIMIT 400"),
+    'projects' => all('SELECT p.id, p.expo, p.status, c.company, p.client_id, p.partner_id, pt.name AS partner_name FROM ' . T('projects') . ' p JOIN ' . T('clients') . ' c ON c.id = p.client_id LEFT JOIN ' . T('partners') . " pt ON pt.id = p.partner_id WHERE p.status <> 'rejected' ORDER BY p.id DESC LIMIT 400"),
     'company' => setting('company', []), 'claim_cats' => CLAIM_CATS, 'partners' => all('SELECT id, name FROM ' . T('partners') . ' WHERE active = 1 ORDER BY name'),
   ]);
 
@@ -236,6 +236,7 @@ case 'acc_entry':
   $amt = n($in['amount'] ?? 0) ?? 0; $narr = s($in['narration'] ?? null, 2000) ?? '';
   $pid = (int) ($in['project_id'] ?? 0) ?: null; $proj = $pid ? one('SELECT p.*, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . ' c ON c.id = p.client_id WHERE p.id = ?', [$pid]) : null;
   if ($pid && !$proj) fail('Order not found.');
+  if (in_array($k, ['expense', 'vendor_pay'], true) && !$pid && ($in['project_id'] ?? '') !== 'none') fail('Pick which order this is for — or “None — general office / company overhead”.');
   tx();
   switch ($k) {
     case 'expense': {   // company overhead or order expense, paid or owed to a vendor
