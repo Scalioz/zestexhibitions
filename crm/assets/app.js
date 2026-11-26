@@ -1989,13 +1989,26 @@ routes.acc = async () => {
   ${d.inv.todo + d.inv.changes ? `<div class="alert warn"><b>${d.inv.todo} invoice request${d.inv.todo === 1 ? '' : 's'} to prepare${d.inv.changes ? ` · ${d.inv.changes} sent back by admin` : ''}</b><div><a class="btn sm" href="#invoices">Open invoices</a></div></div>` : ''}${d.inv.pending ? `<div class="alert"><b>${d.inv.pending} invoice${d.inv.pending > 1 ? 's' : ''} with admin for approval</b></div>` : ''}
   ${d.claims_waiting ? `<div class="alert warn"><b>${d.claims_waiting} expense claim${d.claims_waiting > 1 ? 's' : ''} waiting for approval</b><div><a class="btn sm" href="#claims">Review claims</a></div></div>` : ''}
   ${d.to_post ? `<div class="alert warn"><b>${d.to_post} payment${d.to_post > 1 ? 's' : ''} / expense${d.to_post > 1 ? 's' : ''} recorded in orders are not in the books yet</b><div><a class="btn sm" href="#topost">Post them</a></div></div>` : ''}
-  <div class="kpis">${d.money.map(a => `<div class="kpi ${a.sub === 'bank' ? 'hl' : ''}"><span>${esc(a.name)}</span><b>${inr2(a.balance)}</b></div>`).join('')}
-   <div class="kpi"><span>Receivable from clients</span><b>${inr2(d.receivable)}</b></div><div class="kpi"><span>Payable to vendors</span><b>${inr2(d.payable)}</b></div>
-   <div class="kpi"><span>Payable to staff</span><b>${inr2(d.staff)}</b><small>expense reimbursements</small></div>
-   <div class="kpi"><span>GST payable</span><b>${inr2(d.gst_net)}</b><small>TDS payable ${inr2(d.tds)}</small></div>
-   <div class="kpi"><span>This month</span><b>${inr2(d.income_month - d.expense_month)}</b><small>income ${inr2(d.income_month)} · expenses ${inr2(d.expense_month)}</small></div></div>
+  <div class="kpis kclick">${d.money.map(a => `<div class="kpi ${a.sub === 'bank' ? 'hl' : ''}" data-ak="acct" data-acc="${a.id}"><span>${esc(a.name)}</span><b>${inr2(a.balance)}</b></div>`).join('')}
+   <div class="kpi" data-ak="debtor"><span>Receivable from clients</span><b>${inr2(d.receivable)}</b></div><div class="kpi" data-ak="creditor"><span>Payable to vendors</span><b>${inr2(d.payable)}</b></div>
+   <div class="kpi" data-ak="staff"><span>Payable to staff</span><b>${inr2(d.staff)}</b><small>expense reimbursements</small></div>
+   <div class="kpi" data-ak="gst"><span>GST payable</span><b>${inr2(d.gst_net)}</b><small>TDS payable ${inr2(d.tds)}</small></div>
+   <div class="kpi" data-ak="month"><span>This month</span><b>${inr2(d.income_month - d.expense_month)}</b><small>income ${inr2(d.income_month)} · expenses ${inr2(d.expense_month)}</small></div></div>
+  <p class="sub" style="margin:-6px 0 12px">Click any box to see what makes up the figure.</p><div id="akdet"></div>
   <div class="panel"><div class="ph"><h2>Latest entries</h2><a class="btn ghost sm" href="#books">Books & reports</a></div>${d.recent.length ? `<div class="tw"><table><tr><th>Date</th><th>Voucher</th><th>Type</th><th>Narration</th><th class="r">Amount</th></tr>
    ${d.recent.map(j => `<tr class="click" data-go="jv-${j.id}"><td class="num">${fd(j.jdate)}</td><td class="num">${esc(j.vno)}</td><td><span class="pill ${vt[j.vtype] || 'p-off'}">${esc(j.vtype)}</span>${j.reversed_by ? ' <span class="sub">reversed</span>' : ''}</td><td>${esc(j.narration)}</td><td class="r num">${inr2(j.amount)}</td></tr>`).join('')}</table></div>` : blank('No entries yet. Start with <a href="#coa">opening balances</a>, then <a href="#entry">add entries</a>.')}</div>`;
+  const openLedger = id => { C.bf = Object.assign({}, C.bf || {}, { account_id: String(id) }); C.br = 'ledger'; location.hash = '#books-ledger'; };
+  const showA = async (el) => { const box = $('#akdet'); const on = el && !el.classList.contains('on');
+    view().querySelectorAll('[data-ak]').forEach(x => x.classList.remove('on')); if (!on) { box.innerHTML = ''; return; } el.classList.add('on');
+    const r = await act(() => api('acc_kpi', { k: el.dataset.ak, account_id: el.dataset.acc })).catch(() => null); if (!r) return;
+    let body;
+    if (r.lines) body = r.lines.length ? `<div class="tw tall"><table><tr><th>Date</th><th>Voucher</th><th>Type</th><th>Narration</th><th class="r">In (Dr)</th><th class="r">Out (Cr)</th></tr>${r.lines.map(l => `<tr class="click" data-go="jv-${l.id}"><td class="num">${fd(l.jdate)}</td><td class="num">${esc(l.vno)}</td><td>${esc(l.vtype)}${l.reversed_by ? ' <span class="sub">reversed</span>' : ''}</td><td>${esc(l.narration || '')}</td><td class="r num">${+l.dr ? inr2(l.dr) : ''}</td><td class="r num">${+l.cr ? inr2(l.cr) : ''}</td></tr>`).join('')}</table></div><div class="row" style="margin-top:8px"><span class="sub">Balance ${inr2(r.balance)} · latest ${r.lines.length} entries</span><button type="button" class="btn ghost sm" id="ak-full">Open full ledger with dates →</button></div>` : '<div class="empty">No entries yet.</div>';
+    else body = (r.note ? `<p class="sub" style="margin-top:0">${esc(r.note)}</p>` : '') + (r.accounts.length ? `<div class="tw tall"><table><tr><th>Account</th><th class="r">Amount</th></tr>${r.accounts.map(a => `<tr class="click" data-ledger="${a.id}"><td>${esc(a.name)}</td><td class="r num" style="color:${a.amount < 0 ? 'var(--bad)' : 'inherit'}">${inr2(a.amount)}</td></tr>`).join('')}<tr class="tot"><td><b>Total</b></td><td class="r num"><b>${inr2(r.accounts.reduce((v, a) => v + a.amount, 0))}</b></td></tr></table></div><p class="sub">Click a row to open its ledger (every entry).</p>` : '<div class="empty">Nothing outstanding.</div>');
+    box.innerHTML = `<div class="panel"><div class="ph"><h2>${esc(r.title)}</h2><button type="button" class="btn link sm" id="akdet-x">Close ✕</button></div>${body}</div>`;
+    $('#akdet-x').onclick = () => showA(null); if ($('#ak-full')) $('#ak-full').onclick = () => openLedger(r.account_id);
+    box.querySelectorAll('[data-ledger]').forEach(t => t.onclick = () => openLedger(t.dataset.ledger));
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  view().querySelectorAll('[data-ak]').forEach(x => x.onclick = () => showA(x));
 };
 
 // ---------- new entry ----------

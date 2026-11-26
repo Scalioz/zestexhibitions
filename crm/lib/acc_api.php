@@ -185,6 +185,27 @@ case 'acc_meta':
     'company' => setting('company', []), 'claim_cats' => CLAIM_CATS, 'partners' => all('SELECT id, name FROM ' . T('partners') . ' WHERE active = 1 ORDER BY name'),
   ]);
 
+case 'acc_kpi':   // what is behind a box on the Accounts page
+  need_acc();
+  $k = $in['k'] ?? '';
+  if ($k === 'acct') {
+    $a = acc_get((int) ($in['account_id'] ?? 0)) ?? fail('Account not found.');
+    $rows = all('SELECT j.id, j.jdate, j.vno, j.vtype, j.narration, j.reversed_by, l.dr, l.cr FROM ' . T('jlines') . ' l JOIN ' . T('journal') . ' j ON j.id = l.journal_id WHERE l.account_id = ? ORDER BY j.jdate DESC, j.id DESC LIMIT 150', [$a['id']]);
+    out(['title' => $a['name'] . ' — latest entries', 'account_id' => (int) $a['id'], 'balance' => acc_balance($a['id']), 'lines' => $rows]);
+  }
+  $b = balances_to(today());
+  $acs = function ($subs, $sg) use ($b) { $o = []; foreach (all('SELECT id, name, sub FROM ' . T('accounts') . ' WHERE sub IN (' . implode(',', array_fill(0, count($subs), '?')) . ') ORDER BY name', $subs) as $a) { $v = round(($b[$a['id']] ?? 0) * $sg, 2); if (abs($v) >= 0.5) $o[] = ['id' => (int) $a['id'], 'name' => $a['name'], 'amount' => $v]; } usort($o, fn($x, $y) => abs($y['amount']) <=> abs($x['amount'])); return $o; };
+  if ($k === 'debtor') out(['title' => 'Receivable from clients', 'note' => 'Positive = client owes us. Negative = we received more than we invoiced in the books (usually a receipt entered before its tax invoice).', 'accounts' => $acs(['debtor'], 1)]);
+  if ($k === 'creditor') out(['title' => 'Payable to vendors', 'note' => 'Positive = we owe the vendor. Negative = advance paid to the vendor.', 'accounts' => $acs(['creditor'], -1)]);
+  if ($k === 'staff') out(['title' => 'Payable to staff', 'note' => 'Expense reimbursements still to be paid to each person.', 'accounts' => $acs(['employee', 'claims_pay'], -1)]);
+  if ($k === 'gst') out(['title' => 'GST & TDS accounts', 'note' => 'Output GST (collected on sales) minus input GST (paid on purchases) = GST payable.', 'accounts' => array_merge($acs(['gst_out_c', 'gst_out_s', 'gst_out_i', 'tds_out'], -1), array_map(fn($x) => ['amount' => -$x['amount']] + $x, $acs(['gst_in_c', 'gst_in_s', 'gst_in_i'], 1)))]);
+  if ($k === 'month') {
+    $mv = movement(date('Y-m-01'), today()); $o = [];
+    foreach (all('SELECT id, name, type FROM ' . T('accounts') . " WHERE type IN ('income', 'expense') ORDER BY type DESC, name") as $a) { [$d, $c] = $mv[$a['id']] ?? [0, 0]; $v = round($a['type'] === 'income' ? $c - $d : $d - $c, 2); if (abs($v) >= 0.5) $o[] = ['id' => (int) $a['id'], 'name' => ($a['type'] === 'income' ? 'Income · ' : 'Expense · ') . $a['name'], 'amount' => $a['type'] === 'income' ? $v : -$v]; }
+    out(['title' => 'This month — income and expenses by head', 'note' => 'Income is positive, expenses negative. Click a head to see its entries.', 'accounts' => $o]);
+  }
+  fail('Unknown box.');
+
 case 'acc_home':
   need_acc();
   $b = balances_to(today()); $sum = function ($subs, $sg = 1) use ($b) { $t = 0; foreach (all('SELECT id FROM ' . T('accounts') . ' WHERE sub IN (' . implode(',', array_fill(0, count($subs), '?')) . ')', $subs) as $a) $t += ($b[$a['id']] ?? 0) * $sg; return round($t, 2); };
