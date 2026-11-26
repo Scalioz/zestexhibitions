@@ -2383,19 +2383,20 @@ routes.partner = async ({ id }) => {
    <div class="row">${isAdmin() ? `<button class="btn ghost" id="pt-edit">Edit partner / %</button>` : ''}<button class="btn ghost" id="pt-led">Ledger in books</button></div></div>
   ${(() => { const own = t.spent_list.filter(x => +x.shared), co = t.spent_list.filter(x => !+x.shared), S = a => a.reduce((v, x) => v + +x.amount, 0);
     const ownAmt = S(own), coAmt = S(co), myPart = own.reduce((v, x) => v + x.amount * x.shared / 100, 0), gross = t.net + myPart, first = esc(p.name.split(' ')[0]);
-    const R = (k, v, cls, note) => `<tr class="${cls || ''}"><td>${k}${note ? `<div class="sub">${note}</div>` : ''}</td><td class="r num">${v}</td></tr>`;
-    return `<div class="kpis"><div class="kpi"><span>His share (won orders)</span><b>${inr(gross)}</b><small>${t.projects} won orders · billed ${inr(t.revenue)}</small></div>
-   <div class="kpi"><span>Advance taken for himself</span><b>${inr(t.adv_share)}</b><small>against his share</small></div>
-   <div class="kpi"><span>Spent on his orders</span><b>${inr(ownAmt)}</b><small>he bears ${inr(myPart)} · company ${inr(ownAmt - myPart)}</small></div>
-   <div class="kpi"><span>Spent for the company</span><b>${inr(coAmt)}</b><small>other orders / general — company 100%</small></div>
-   <div class="kpi hl"><span>${t.due < 0 ? 'Advance with partner' : 'Company owes him'}</span><b>${inr(Math.abs(t.due))}</b><small>see statement below</small></div></div>
-  <div class="panel"><h2>Statement — ${esc(p.name)}</h2><div class="tw"><table class="stmt" style="max-width:720px">
-   ${R('His share from won orders', inr2(gross), '', `${num(p.rev_pct)}% of revenue − ${num(p.exp_pct)}% of order costs (before the expenses below)`)}
-   ${R('− Advance taken for himself', inr2(-t.adv_share))}
-   ${R(`− ${first}'s ${num(p.exp_pct)}% of expenses he paid on his own orders`, inr2(-myPart), '', `${inr(ownAmt)} spent on his orders; the company bears the other ${inr(ownAmt - myPart)}`)}
+    const R = (k, v, cls, note, pk) => `<tr class="${cls || ''}${pk ? ' click' : ''}" ${pk ? `data-pk="${pk}"` : ''}><td>${k}${pk ? ' <span class="sub">›</span>' : ''}${note ? `<div class="sub">${note}</div>` : ''}</td><td class="r num">${v}</td></tr>`;
+    return `<div class="kpis kclick"><div class="kpi" data-pk="share"><span>His share (won orders)</span><b>${inr(gross)}</b><small>${t.projects} won orders · billed ${inr(t.revenue)}</small></div>
+   <div class="kpi" data-pk="adv"><span>Advance taken for himself</span><b>${inr(t.adv_share)}</b><small>against his share</small></div>
+   <div class="kpi" data-pk="own"><span>Spent on his orders</span><b>${inr(ownAmt)}</b><small>he bears ${inr(myPart)} · company ${inr(ownAmt - myPart)}</small></div>
+   <div class="kpi" data-pk="co"><span>Spent for the company</span><b>${inr(coAmt)}</b><small>other orders / general — company 100%</small></div>
+   <div class="kpi hl" data-pk="stmt"><span>${t.due < 0 ? 'Advance with partner' : 'Company owes him'}</span><b>${inr(Math.abs(t.due))}</b><small>see statement below</small></div></div>
+  <div id="pkdet"></div>
+  <div class="panel" id="pt-stmt"><h2>Statement — ${esc(p.name)}</h2><div class="tw"><table class="stmt" style="max-width:720px">
+   ${R('His share from won orders', inr2(gross), '', `${num(p.rev_pct)}% of revenue − ${num(p.exp_pct)}% of order costs (before the expenses below)`, 'share')}
+   ${R('− Advance taken for himself', inr2(-t.adv_share), '', '', 'adv')}
+   ${R(`− ${first}'s ${num(p.exp_pct)}% of expenses he paid on his own orders`, inr2(-myPart), '', `${inr(ownAmt)} spent on his orders; the company bears the other ${inr(ownAmt - myPart)}`, 'own')}
    ${R('<b>Total against his account</b>', '<b>' + inr2(-(t.adv_share + myPart)) + '</b>', 'tot')}
    <tr><td colspan="2" class="sub" style="padding-top:12px"><b>Money given for company expenses</b> ${inr(t.adv_exp)} — spent on his orders ${inr(ownAmt)} + for the company ${inr(coAmt)} = ${inr(ownAmt + coAmt)}</td></tr>
-   ${t.exp_unspent > 0.5 ? R('− Expense money not yet accounted for (still with him)', inr2(-t.exp_unspent), '', 'enter the remaining expenses with “Paid from: ' + esc(p.name) + ' (partner)” to clear this') : t.exp_unspent < -0.5 ? R('+ He spent more than the expense money given', inr2(-t.exp_unspent), '', 'the company owes this back to him') : ''}
+   ${t.exp_unspent > 0.5 ? R('− Expense money not yet accounted for (still with him)', inr2(-t.exp_unspent), '', 'enter the remaining expenses with “Paid from: ' + esc(p.name) + ' (partner)” to clear this', 'expmoney') : t.exp_unspent < -0.5 ? R('+ He spent more than the expense money given', inr2(-t.exp_unspent), '', 'the company owes this back to him') : ''}
    ${t.opening ? R('+ Opening balance', inr2(t.opening)) : ''}
    ${R(`<b>${t.due < 0 ? 'He owes the company' : 'Company owes him'}</b>`, '<b>' + inr2(Math.abs(t.due)) + '</b>', 'tot')}
   </table></div>${Math.abs(t.unposted) >= 1 ? `<p class="sub">${inr(t.unposted)} of share is not yet posted in the books — see “His orders”.</p>` : ''}</div>`; })()}
@@ -2446,6 +2447,27 @@ routes.partner = async ({ id }) => {
       <div class="row" style="gap:6px"><label class="f" style="flex:1">Amount<input type="number" step="any" min="1" name="amount" value="${b.dataset.left}" required></label><label class="f" style="flex:1">Type<select name="category">${['Other', 'Commute', 'Hotel', 'Food', 'Flight', 'Train', 'Courier'].map(c => `<option>${c}</option>`).join('')}</select></label></div>
       <label class="f">What was it for<input name="note" value="${b.dataset.note}"></label><div class="row"><button class="btn sm">Book expense</button><span class="sub">Part of it for another order? Book this part, then click + Book again.</span></div></form>`;
     box.querySelector('form').onsubmit = async e => { e.preventDefault(); const ok = await act(() => api('acc_partner_pay_expense', { partner_id: p.id, journal_id: b.dataset.ppexp, date: b.dataset.date, ...Object.fromEntries(new FormData(e.target)) }), 'Expense booked').catch(() => null); if (ok) refresh(); }; });
+  { const R2 = d.recon || {}, won = d.projects.filter(r => +r.counts), own = t.spent_list.filter(x => +x.shared), co = t.spent_list.filter(x => !+x.shared);
+    const tags = (R2.pays || []); const advS = tags.filter(x => x.tag !== 'exp'), advE = tags.filter(x => x.tag === 'exp');
+    const S = (a, k) => a.reduce((v, x) => v + (+x[k] || 0), 0);
+    const tb = (head, rows, tot) => rows.length ? `<div class="tw tall"><table><tr>${head.map(h => `<th${h[1] ? ' class="r"' : ''}>${h[0]}</th>`).join('')}</tr>${rows.join('')}${tot ? `<tr class="tot">${tot}</tr>` : ''}</table></div>` : '<div class="empty">Nothing here yet.</div>';
+    const jvRows = a => a.map(x => `<tr class="click" data-go="jv-${x.id}"><td class="num">${fd(x.jdate)}</td><td>${esc(x.vno)}</td><td>${esc(x.narration || '')}${x.order ? `<div class="sub">${esc(x.order)}</div>` : ''}</td><td class="r num">${inr2(x.amount)}</td></tr>`);
+    const PK = {
+      share: () => [`His share — ${won.length} won orders`, tb([['Order'], ['Expo date'], ['Billed (no GST)', 1], ['Costs', 1], ['Revenue share', 1], ['Expense share', 1], ['Net share', 1]],
+        won.map(r => `<tr class="click" data-go="project-${r.id}-money"><td><b>${esc(r.company)}</b><div class="sub">${esc(r.expo)}</div></td><td class="num">${fd(r.start_date)}</td><td class="r num">${inr(r.revenue)}</td><td class="r num">${inr(r.costs)}</td><td class="r num">${inr(r.rev_share)}</td><td class="r num">${inr(r.exp_share)}</td><td class="r num"><b>${inr(r.net)}</b></td></tr>`),
+        `<td colspan="2"><b>Total</b></td><td class="r num"><b>${inr(S(won, 'revenue'))}</b></td><td class="r num"><b>${inr(S(won, 'costs'))}</b></td><td class="r num"><b>${inr(S(won, 'rev_share'))}</b></td><td class="r num"><b>${inr(S(won, 'exp_share'))}</b></td><td class="r num"><b>${inr(S(won, 'net'))}</b></td>`)
+        + '<p class="sub">Net share here already takes off his 50% of every cost on these orders (including the expenses he paid himself).</p>'],
+      adv: () => ['Advance taken for himself', tb([['Date'], ['Voucher'], ['Details'], ['Amount', 1]], jvRows(advS), `<td colspan="3"><b>Total</b></td><td class="r num"><b>${inr2(S(advS, 'amount'))}</b></td>`)],
+      own: () => ['Spent on his orders — he bears his share', tb([['Date'], ['Voucher'], ['Details · order'], ['Amount', 1]], jvRows(own), `<td colspan="3"><b>Total</b></td><td class="r num"><b>${inr2(S(own, 'amount'))}</b></td>`)],
+      co: () => ['Spent for the company — company 100%', tb([['Date'], ['Voucher'], ['Details · order'], ['Amount', 1]], jvRows(co), `<td colspan="3"><b>Total</b></td><td class="r num"><b>${inr2(S(co, 'amount'))}</b></td>`)],
+      expmoney: () => ['Money given for company expenses', tb([['Date'], ['Voucher'], ['Details'], ['Amount', 1]], jvRows(advE), `<td colspan="3"><b>Given ${inr2(S(advE, 'amount'))} − spent ${inr2(t.spent)}</b></td><td class="r num"><b>${inr2(t.exp_unspent)}</b></td>`)],
+    };
+    const showP = k => { view().querySelectorAll('.kclick [data-pk]').forEach(x => x.classList.toggle('on', x.dataset.pk === k)); const box = $('#pkdet');
+      if (k === 'stmt') { box.innerHTML = ''; $('#pt-stmt').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+      if (!k || !PK[k]) { box.innerHTML = ''; return; } const [title, body] = PK[k]();
+      box.innerHTML = `<div class="panel"><div class="ph"><h2>${title}</h2><button type="button" class="btn link sm" id="pkdet-x">Close ✕</button></div>${body}</div>`;
+      $('#pkdet-x').onclick = () => showP(''); box.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+    view().querySelectorAll('[data-pk]').forEach(x => x.onclick = () => showP(x.classList.contains('on') ? '' : x.dataset.pk)); }
   view().querySelectorAll('[data-pptag]').forEach(sel => sel.onchange = async () => { const ok = await act(() => api('acc_partner_ppay_tag', { journal_id: sel.dataset.pptag, tag: sel.value }), 'Saved').catch(() => null); if (ok) refresh(); });
   view().querySelectorAll('[data-splink]').forEach(sel => sel.onchange = async () => { const ok = await act(() => api('acc_partner_spent_link', { partner_id: p.id, journal_id: sel.dataset.splink, project_id: sel.value }), 'Saved').catch(() => null); if (ok) refresh(); });
   view().querySelectorAll('[data-ptclaim]').forEach(b => b.onclick = async () => { if (!confirm(`Mark this ${inr2(b.dataset.amt)} expense as paid from ${p.name}'s advance? It moves from his staff account to his partner account.`)) return; const ok = await act(() => api('acc_partner_claim_move', { partner_id: p.id, claim_id: b.dataset.ptclaim }), 'Moved to his advance').catch(() => null); if (ok) refresh(); });

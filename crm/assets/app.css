@@ -216,3 +216,4 @@ select[data-lheat]{min-width:140px}
 .kclick .kpi:hover{box-shadow:0 4px 14px rgba(0,0,0,.08);transform:translateY(-1px)}
 .kclick .kpi.on{outline:3px solid var(--gold);outline-offset:2px}
 #kdet:empty{display:none}
+#pkdet:empty{display:none}
