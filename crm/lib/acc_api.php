@@ -759,6 +759,16 @@ case 'acc_partner_pay_expense': {   // money given to the partner for expenses, 
   $t = (array) setting('ppay_tag', []); $t[$pay['id']] = 'exp'; set_setting('ppay_tag', $t);
   db()->commit(); out(['id' => $jid]);
 }
+case 'acc_partner_spent_remove': {   // remove a duplicate expense paid from his advance: reverse it in the books and take it off the order
+  need_acc();
+  $j = one('SELECT * FROM ' . T('journal') . ' WHERE id = ? AND reversed_by IS NULL', [(int) ($in['journal_id'] ?? 0)]) ?? fail('Entry not found or already removed.');
+  if (in_array($j['ref_type'], ['claim', 'invoice', 'pshare', 'ppay'], true)) fail('This entry cannot be removed here.');
+  tx();
+  if ($j['ref_type'] === 'pexp' && $j['ref_id']) q('DELETE FROM ' . T('expenses') . ' WHERE id = ?', [(int) $j['ref_id']]);
+  if ($j['ref_type'] === 'vpay' && $j['ref_id']) q('DELETE FROM ' . T('vendor_payments') . ' WHERE id = ?', [(int) $j['ref_id']]);
+  reverse_journal($j['id'], $j['jdate'], s($in['reason'] ?? null, 300) ?? 'Duplicate entry removed', $MID);
+  db()->commit(); out(['ok' => true]);
+}
 case 'acc_partner_spent_link': {   // link a company expense he paid from his advance to an order (or make it a general company expense)
   need_acc();
   $j = one('SELECT * FROM ' . T('journal') . ' WHERE id = ? AND reversed_by IS NULL', [(int) ($in['journal_id'] ?? 0)]) ?? fail('Entry not found.');
