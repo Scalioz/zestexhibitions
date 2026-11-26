@@ -110,7 +110,7 @@ function r_ledger($id, $from, $to) {
   foreach (all('SELECT l.*, j.jdate, j.vno, j.vtype, j.narration FROM ' . T('jlines') . ' l JOIN ' . T('journal') . ' j ON j.id = l.journal_id WHERE l.account_id = ? AND j.jdate BETWEEN ? AND ? ORDER BY j.jdate, j.id, l.id', [$id, $from, $to]) as $l) {
     $other = array_unique(array_map(fn($o) => $names[$o['account_id']] ?? '', all('SELECT account_id FROM ' . T('jlines') . ' WHERE journal_id = ? AND account_id <> ?', [$l['journal_id'], $id])));
     $bal += $l['dr'] - $l['cr']; $td += $l['dr']; $tc += $l['cr'];
-    $rows[] = R([$l['jdate'], $l['vno'], ($l['dr'] > 0 ? 'To ' : 'By ') . implode(', ', $other), $l['narration'], (float) $l['dr'] ?: '', (float) $l['cr'] ?: '', drcr($bal)]);
+    $rows[] = R([$l['jdate'], $l['vno'], ($l['dr'] > 0 ? 'To ' : 'By ') . implode(', ', $other), $l['narration'], (float) $l['dr'] ?: '', (float) $l['cr'] ?: '', drcr($bal)], 'j' . $l['journal_id']);
   }
   $rows[] = R(['', '', 'Total / closing balance', '', $td, $tc, drcr($bal)], 't');
   return ['title' => "Ledger: {$a['name']} ($from to $to)", 'cols' => ['Date', 'Voucher', 'Particulars', 'Narration', 'Debit (₹)', 'Credit (₹)', 'Balance'], 'num' => [4, 5], 'rows' => $rows, 'closing' => $bal];
