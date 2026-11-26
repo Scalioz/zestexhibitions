@@ -214,6 +214,10 @@ function migrate() {
     try { db()->exec('ALTER TABLE ' . T('projects') . ' ADD COLUMN won_on DATE'); } catch (PDOException $e) { /* already there */ }
     set_setting('schema_v', 29);
   }
+  if ($v < 30) {   // vendor fully settled (final amount paid, e.g. after a penalty) — partner share then uses the amount actually paid
+    try { db()->exec('ALTER TABLE ' . T('projects') . ' ADD COLUMN vendor_settled TINYINT NOT NULL DEFAULT 0'); } catch (PDOException $e) { /* already there */ }
+    set_setting('schema_v', 30);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
