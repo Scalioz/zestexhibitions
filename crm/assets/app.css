@@ -209,3 +209,5 @@ select[data-lheat]{min-width:140px}
 .pwork{border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px}
 .pwork .l{padding:4px 0}
 .pwork .l.tot{border-top:1px solid var(--line);margin-top:2px;padding-top:6px}
+/* merge / confirm box */
+.warnbox{border:1px solid var(--bad);border-left-width:4px;border-radius:8px;padding:10px 12px;background:var(--bad-bg)}

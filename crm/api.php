@@ -506,10 +506,73 @@ case 'dup':
   }
   out(['matches' => $res]);
 
+case 'client_dupes':   // admin: groups of clients that look like the same company
+  need_admin();
+  $rows = all('SELECT id, company, person, phone, email, gst_no, city, owner_id, dnq, created_at FROM ' . T('clients') . ' ORDER BY id');
+  $norm = function ($n) { $n = strtolower(preg_replace('/[^a-z0-9 ]+/i', ' ', (string) $n));
+    $n = preg_replace('/\b(pvt|private|ltd|limited|llp|inc|co|company|corp|corporation|the|m s|ms)\b/', ' ', $n); return preg_replace('/\s+/', '', $n); };
+  $par = []; $find = function ($x) use (&$par, &$find) { return $par[$x] === $x ? $x : ($par[$x] = $find($par[$x])); };
+  $seen = [];
+  foreach ($rows as $r) { $id = (int) $r['id']; $par[$id] = $id;
+    $keys = ['n:' . $norm($r['company'])];
+    $ph = substr(preg_replace('/\D/', '', (string) $r['phone']), -10); if (strlen($ph) === 10) $keys[] = 'p:' . $ph;
+    if ($r['email']) $keys[] = 'e:' . strtolower(trim($r['email']));
+    if ($r['gst_no'] && strlen(trim($r['gst_no'])) >= 10) $keys[] = 'g:' . strtoupper(trim($r['gst_no']));
+    foreach ($keys as $k) { if ($k === 'n:') continue; if (isset($seen[$k])) $par[$find($id)] = $find($seen[$k]); else $seen[$k] = $id; } }
+  $g = []; foreach ($rows as $r) $g[$find((int) $r['id'])][] = $r;
+  $g = array_values(array_filter($g, fn($x) => count($x) > 1));
+  $ids = array_merge([], ...array_map(fn($x) => array_column($x, 'id'), $g)); $st = [];
+  if ($ids) { $in_c = implode(',', array_map('intval', $ids));
+    foreach (all('SELECT client_id, COUNT(*) AS n, SUM(CASE WHEN status IN (\'won\',\'completed\') THEN 1 ELSE 0 END) AS w FROM ' . T('projects') . " WHERE client_id IN ($in_c) GROUP BY client_id") as $x) $st[(int) $x['client_id']] = ['orders' => (int) $x['n'], 'won' => (int) $x['w']];
+    foreach (all('SELECT p.client_id, SUM(cp.amount) AS v FROM ' . T('client_payments') . ' cp JOIN ' . T('projects') . " p ON p.id = cp.project_id WHERE p.client_id IN ($in_c) GROUP BY p.client_id") as $x) $st[(int) $x['client_id']]['received'] = (float) $x['v'];
+    foreach (all('SELECT client_id, COUNT(*) AS n FROM ' . T('contacts') . " WHERE client_id IN ($in_c) GROUP BY client_id") as $x) $st[(int) $x['client_id']]['contacts'] = (int) $x['n']; }
+  $um = users_map();
+  out(['groups' => array_map(fn($x) => array_map(fn($r) => $r + ['owner' => $um[$r['owner_id']] ?? '—', 'orders' => $st[$r['id']]['orders'] ?? 0, 'won' => $st[$r['id']]['won'] ?? 0, 'received' => $st[$r['id']]['received'] ?? 0, 'contacts' => $st[$r['id']]['contacts'] ?? 0], $x), $g)]);
+
+case 'client_merge':   // admin: move everything of a duplicate client into the one to keep, then remove the duplicate
+  need_admin();
+  $keep = client_row($in['keep'] ?? 0); $dup = client_row($in['dup'] ?? 0);
+  if ((int) $keep['id'] === (int) $dup['id']) fail('Pick two different clients.');
+  require_once __DIR__ . '/lib/acc.php';
+  tx();
+  $fill = []; foreach (['email', 'phone', 'person', 'designation', 'location', 'city', 'gst_no'] as $f) if (trim((string) $keep[$f]) === '' && trim((string) $dup[$f]) !== '') $fill[$f] = $dup[$f];
+  if (trim((string) $dup['notes']) !== '') $fill['notes'] = trim(trim((string) $keep['notes']) . "\n" . $dup['notes']);
+  if ((int) $dup['dnq'] && !(int) $keep['dnq']) foreach (['dnq', 'dnq_reason', 'dnq_note', 'dnq_on', 'dnq_by'] as $f) $fill[$f] = $dup[$f];
+  if ($fill) upd('clients', $keep['id'], $fill);
+  // the duplicate's main person becomes a contact of the kept client (if different)
+  if (trim((string) $dup['person']) !== '' && strcasecmp(trim($dup['person']), trim((string) ($fill['person'] ?? $keep['person']))) !== 0)
+    ins('contacts', ['client_id' => $keep['id'], 'name' => $dup['person'], 'designation' => $dup['designation'], 'phone' => $dup['phone'], 'email' => $dup['email']]);
+  $moved = ['orders' => (int) val('SELECT COUNT(*) FROM ' . T('projects') . ' WHERE client_id = ?', [$dup['id']])];
+  q('UPDATE ' . T('projects') . ' SET client_id = ? WHERE client_id = ?', [$keep['id'], $dup['id']]);
+  // contacts: move, skipping ones the kept client already has (same name + phone)
+  $have = []; foreach (all('SELECT name, phone FROM ' . T('contacts') . ' WHERE client_id = ?', [$keep['id']]) as $ct) $have[strtolower(trim($ct['name'])) . '|' . preg_replace('/\D/', '', (string) $ct['phone'])] = 1;
+  foreach (all('SELECT * FROM ' . T('contacts') . ' WHERE client_id = ?', [$dup['id']]) as $ct) {
+    $k = strtolower(trim($ct['name'])) . '|' . preg_replace('/\D/', '', (string) $ct['phone']);
+    if (isset($have[$k])) q('DELETE FROM ' . T('contacts') . ' WHERE id = ?', [$ct['id']]); else { upd('contacts', $ct['id'], ['client_id' => $keep['id']]); $have[$k] = 1; } }
+  foreach (['invoices', 'referrals'] as $tb) { try { q('UPDATE ' . T($tb) . ' SET client_id = ? WHERE client_id = ?', [$keep['id'], $dup['id']]); } catch (PDOException $e) {} }
+  q('UPDATE ' . T('files') . " SET entity_id = ? WHERE entity IN ('card','brief','gstcert') AND entity_id = ?", [$keep['id'], $dup['id']]);
+  // books: the duplicate's ledger joins the kept client's ledger
+  try {
+    $da = val('SELECT id FROM ' . T('accounts') . " WHERE party_type = 'client' AND party_id = ?", [$dup['id']]);
+    if ($da) {
+      $ka = val('SELECT id FROM ' . T('accounts') . " WHERE party_type = 'client' AND party_id = ?", [$keep['id']]);
+      if (!$ka) upd('accounts', $da, ['party_id' => $keep['id'], 'name' => 'Client: ' . $keep['company']]);
+      else { q('UPDATE ' . T('jlines') . ' SET account_id = ? WHERE account_id = ?', [$ka, $da]);
+        $op = (float) val('SELECT opening FROM ' . T('accounts') . ' WHERE id = ?', [$da]); if ($op) q('UPDATE ' . T('accounts') . ' SET opening = opening + ? WHERE id = ?', [$op, $ka]);
+        q('DELETE FROM ' . T('accounts') . ' WHERE id = ?', [$da]); }
+    }
+  } catch (PDOException $e) { db()->rollBack(); fail('Could not join the two ledgers: ' . $e->getMessage()); }
+  q('DELETE FROM ' . T('clients') . ' WHERE id = ?', [$dup['id']]);
+  db()->commit();
+  out(['ok' => true, 'keep' => (int) $keep['id'], 'moved' => $moved]);
+
 case 'client_del':  // admin only: removes a client with all its orders, payments and files
   need_admin();
   $c = client_row($in['id'] ?? 0);
   $pids = array_map('intval', array_column(all('SELECT id FROM ' . T('projects') . ' WHERE client_id = ?', [$c['id']]), 'id'));
+  $inv = 0; try { $inv = (int) val('SELECT COUNT(*) FROM ' . T('invoices') . ' WHERE client_id = ?', [$c['id']]); } catch (PDOException $e) {}
+  $jl = 0; try { $jl = (int) val('SELECT COUNT(*) FROM ' . T('jlines') . ' l JOIN ' . T('accounts') . " a ON a.id = l.account_id WHERE a.party_type = 'client' AND a.party_id = ?", [$c['id']]); } catch (PDOException $e) {}
+  if ($inv || $jl) fail('This client has invoices or entries in the books, so it cannot be deleted. If it is a duplicate, use “Merge duplicate” instead — everything moves to the other entry.');
   $files = all('SELECT * FROM ' . T('files') . " WHERE entity IN ('card','brief','gstcert') AND entity_id = ?", [$c['id']]);
   tx();
   if ($pids) {

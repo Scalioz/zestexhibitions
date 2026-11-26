@@ -432,7 +432,7 @@ routes.clients = async () => {
   view().innerHTML = `
   <div class="head"><div><h1>${isAdmin() ? 'All clients' : every ? 'All company clients' : 'My clients'}</h1><p>${d.clients.length} client${d.clients.length === 1 ? '' : 's'}${ow ? ` handled by ${esc((B.users.find(u => +u.id === +ow) || {}).name || '')}` : ''}${qv ? ` matching “${esc(qv)}”` : ''}${ow ? ` · business ${inr(tot.b)} · outstanding ${inr(tot.o)}` : ''}${every ? ` · ${mine.length} handled by you` : ''}</p></div>
    <div class="row">${isAdmin() ? `<select id="cown" aria-label="Handled by" style="min-width:200px"><option value="">All sales people</option>${B.users.filter(u => +u.active && (u.role === 'admin' || (B.dept_modules || {})[u.department] === 'records')).map(u => `<option value="${u.id}" ${+ow === +u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`
-     : `<div class="seg" role="group"><button class="btn ${every ? '' : 'ghost'} sm" data-cscope="all">All clients</button><button class="btn ${every ? 'ghost' : ''} sm" data-cscope="mine">Only mine</button></div>`}<input id="cq" placeholder="Search company, person, city${every ? '' : ', phone'}" value="${esc(qv)}" style="min-width:260px"><a class="btn" href="#newclient">+ New client</a></div></div>
+     : `<div class="seg" role="group"><button class="btn ${every ? '' : 'ghost'} sm" data-cscope="all">All clients</button><button class="btn ${every ? 'ghost' : ''} sm" data-cscope="mine">Only mine</button></div>`}<input id="cq" placeholder="Search company, person, city${every ? '' : ', phone'}" value="${esc(qv)}" style="min-width:260px">${isAdmin() ? '<a class="btn ghost" href="#dupes">Find duplicates</a>' : ''}<a class="btn" href="#newclient">+ New client</a></div></div>
   ${every ? '<p class="sub" style="margin:-6px 0 10px">🔒 Clients handled by others show only the name, city and who handles them. Their details, orders and payments are visible only to that person and admin.</p>' : ''}
   <div class="panel">${d.clients.length ? `<div class="tw"><table><tr><th>Company</th><th>Contact</th><th>City</th>${showOwner ? '<th>Handled by</th>' : ''}<th class="r">Won / orders</th><th class="r">Business</th><th class="r">Outstanding</th></tr>
   ${d.clients.map(c => c.locked
@@ -560,6 +560,26 @@ function dupCheck() {
   }, 300);
 }
 
+// ---------- duplicate clients (admin) ----------
+routes.dupes = async () => {
+  const d = await api('client_dupes');
+  view().innerHTML = `<div class="head"><div><a href="#clients" class="sub">← All clients</a><h1>Duplicate clients</h1><p>Entries that look like the same company — same name (ignoring Pvt Ltd, spaces, dots), same phone, same email or same GST number.</p></div></div>
+  ${d.groups.length ? d.groups.map((g, gi) => { const best = g.reduce((a, x) => (x.orders > a.orders || (x.orders === a.orders && x.contacts > a.contacts)) ? x : a, g[0]);
+    return `<div class="panel dupg" data-g="${gi}"><p class="sub" style="margin-top:0">Tick the entry to <b>keep</b>. The others are merged into it — orders, payments, contacts, files, invoices and ledger move over, then the extra entry is removed.</p>
+    <div class="tw"><table><tr><th>Keep</th><th>Company</th><th>Contact</th><th>City</th><th>Handled by</th><th class="r">Won / orders</th><th class="r">Received</th><th>Added</th></tr>
+    ${g.map(c => `<tr><td><input type="radio" name="keep${gi}" value="${c.id}" ${+c.id === +best.id ? 'checked' : ''}></td><td><a href="#client-${c.id}"><b>${esc(c.company)}</b></a>${+c.dnq ? ' <span class="pill p-bad">do not quote</span>' : ''}</td><td>${esc(c.person || '')}<div class="sub">${esc(c.phone || '')}${c.email ? ' · ' + esc(c.email) : ''}</div></td><td>${esc(c.city || '')}</td><td>${esc(c.owner)}</td><td class="r num">${c.won} / ${c.orders}</td><td class="r num">${inr(c.received)}</td><td class="num">${fd(String(c.created_at).slice(0, 10))}</td></tr>`).join('')}</table></div>
+    <div class="row" style="margin-top:8px"><button class="btn" data-dmerge="${gi}">Merge into the ticked one</button><button class="btn link" data-dskip="${gi}">Not duplicates — hide</button></div><div class="dok"></div></div>`; }).join('')
+    : '<div class="panel"><p>✅ No duplicate clients found.</p></div>'}`;
+  let hidden = []; try { hidden = JSON.parse(localStorage.getItem('zcrm-dupskip') || '[]'); } catch (e) {}
+  const key = g => g.map(c => +c.id).sort((a, b) => a - b).join('-');
+  view().querySelectorAll('.dupg').forEach(el => { if (hidden.includes(key(d.groups[+el.dataset.g]))) el.hidden = true; });
+  view().querySelectorAll('[data-dskip]').forEach(b => b.onclick = () => { hidden.push(key(d.groups[+b.dataset.dskip])); try { localStorage.setItem('zcrm-dupskip', JSON.stringify(hidden)); } catch (e) {} b.closest('.dupg').hidden = true; });
+  view().querySelectorAll('[data-dmerge]').forEach(b => b.onclick = () => { const gi = +b.dataset.dmerge, g = d.groups[gi], box = b.closest('.dupg');
+    const keep = +box.querySelector(`[name=keep${gi}]:checked`).value, k = g.find(c => +c.id === keep), others = g.filter(c => +c.id !== keep);
+    box.querySelector('.dok').innerHTML = `<div class="warnbox" style="margin-top:10px">Keep <b>${esc(k.company)}</b>${k.city ? ' (' + esc(k.city) + ')' : ''} and merge ${others.length} other entr${others.length > 1 ? 'ies' : 'y'} into it? This cannot be undone.<div class="row" style="margin-top:8px"><button class="btn danger">Yes, merge</button></div></div>`;
+    box.querySelector('.dok .btn').onclick = async () => { for (const o of others) await act(() => api('client_merge', { keep, dup: o.id })); toast('Merged'); refresh(); }; });
+};
+
 routes.client = async ({ id }) => {
   const { client: c } = await api('client', { id });
   C.client = c;
@@ -569,9 +589,9 @@ routes.client = async ({ id }) => {
   const F = (k, l, t = 'text') => `<label class="f">${l}<input name="${k}" type="${t}" value="${esc(c[k])}"></label>`;
   view().innerHTML = `
   <div class="head"><div><div class="crumb"><a href="#clients">← Clients</a></div><h1>${esc(c.company)}</h1><p>${esc(c.city || '')}${c.city ? ' · ' : ''}handled by ${esc(c.owner)}</p></div>
-   <div class="row">${isAdmin() ? '<button class="btn link" id="client-del">Delete client</button>' : ''}<a class="btn ghost" href="ledger.php?client=${c.id}" target="_blank" rel="noopener">Ledger</a>${+c.dnq || !isAdmin() ? '' : '<button class="btn ghost" id="dnq-open">Mark “Do not quote”</button>'}<button class="btn" id="np-open">+ New expo order</button></div></div>
+   <div class="row">${isAdmin() ? '<button class="btn link" id="client-del">Delete client</button><button class="btn ghost" id="merge-open">Merge duplicate</button>' : ''}<a class="btn ghost" href="ledger.php?client=${c.id}" target="_blank" rel="noopener">Ledger</a>${+c.dnq || !isAdmin() ? '' : '<button class="btn ghost" id="dnq-open">Mark “Do not quote”</button>'}<button class="btn" id="np-open">+ New expo order</button></div></div>
   ${+c.dnq ? `<div class="alert bad"><b>⛔ Do not quote</b><span class="m">Since ${fd(c.dnq_on)} · ${esc(c.dnq_reason)}${c.dnq_note ? ' — ' + esc(c.dnq_note) : ''} · flagged by ${esc(c.dnq_by)}</span>${isAdmin() ? '<div><button class="btn sm ghost" id="dnq-off">Remove flag</button></div>' : ''}</div>` : ''}
-  <div id="dnq-form"></div>
+  <div id="dnq-form"></div><div id="merge-form"></div>
   <form class="panel" id="np-form" hidden><h3>New expo order</h3><div class="grid g3"><label class="f">Expo name *<input name="expo" required></label><label class="f">Location<input name="location"></label><label class="f">Start date<input type="date" name="start_date"></label><label class="f">Area chosen (sqm)<input type="number" step="0.01" name="area_sqm"></label><label class="f">Space type<select name="space_type"><option value="">Select</option><option>Bare space</option><option>Shell scheme</option></select></label><label class="f">No. of sides open<select name="sides_open"><option value="">Select</option>${[1, 2, 3, 4].map(k => `<option value="${k}">${SIDES[k]}</option>`).join('')}</select></label><label class="f">Stall no.<input name="stall_no"></label></div><div class="row" style="margin-top:10px"><button class="btn">Create order</button><button type="button" class="btn ghost" id="np-cancel">Cancel</button></div></form>
   <div class="kpis"><div class="kpi"><span>Orders</span><b>${won.length} won / ${c.projects.length}</b></div><div class="kpi hl"><span>Total business</span><b>${inr(T.t)}</b></div><div class="kpi"><span>Received</span><b>${inr(T.r)}</b></div><div class="kpi"><span>Outstanding</span><b style="color:${T.b > 0.5 ? 'var(--bad)' : 'var(--ok)'}">${inr(T.b)}</b></div></div>
   <div class="panel"><h2>Orders</h2>${projTable(c.projects.map(p => ({ ...p, company: c.company })), isAdmin(), false)}</div>
@@ -2643,6 +2663,14 @@ document.addEventListener('click', async e => {
       }
       case 'dnq-open': $('#dnq-form').innerHTML = `<form class="panel" id="dnqf"><h3>Mark as “Do not quote”</h3><div class="grid"><label class="f">Reason<select name="reason" required>${B.reasons.map(r => `<option>${esc(r.label)}</option>`).join('')}</select></label><label class="f">What happened?<input name="note"></label></div><div class="row" style="margin-top:8px"><button class="btn danger">Confirm flag</button></div></form>`;
         $('#dnqf').onsubmit = async ev => { ev.preventDefault(); await act(() => api('dnq', { id: C.client.id, on: 1, ...Object.fromEntries(new FormData(ev.target)) }), 'Flagged: do not quote'); refresh(); }; return;
+      case 'merge-open': { const all = (await api('clients', {})).clients.filter(x => +x.id !== +C.client.id);
+        $('#merge-form').innerHTML = `<form class="panel" id="mgf"><h3>Merge a duplicate into ${esc(C.client.company)}</h3><p class="sub">Pick the duplicate entry. Its orders, payments, contacts, files, invoices and ledger move here, blank details here are filled from it, and then the duplicate is removed.</p>
+          <label class="f">Duplicate entry<input name="dup" list="mg-list" placeholder="Type the company name" required autocomplete="off"><datalist id="mg-list">${all.map(x => `<option value="${esc(x.company)} · ${esc(x.city || '')} · #${x.id}">`).join('')}</datalist></label>
+          <div class="row" style="margin-top:8px"><button class="btn">Next</button><button type="button" class="btn link" id="mg-x">Cancel</button></div><div id="mg-ok"></div></form>`;
+        $('#mg-x').onclick = () => $('#merge-form').innerHTML = '';
+        $('#mgf').onsubmit = ev => { ev.preventDefault(); const m = /#(\d+)\s*$/.exec(ev.target.dup.value); const dup = m && all.find(x => +x.id === +m[1]); if (!dup) return toast('Pick the company from the list', true);
+          $('#mg-ok').innerHTML = `<div class="warnbox" style="margin-top:10px"><b>${esc(dup.company)}</b>${dup.city ? ' (' + esc(dup.city) + ')' : ''} will be merged into <b>${esc(C.client.company)}</b> and removed. This cannot be undone.<div class="row" style="margin-top:8px"><button type="button" class="btn danger" id="mg-go">Yes, merge</button></div></div>`;
+          $('#mg-go').onclick = async () => { await act(() => api('client_merge', { keep: C.client.id, dup: dup.id }), 'Merged'); refresh(); }; }; return; }
       case 'client-del': if (!confirm(`Delete ${C.client.company} with all its orders, payments and files? This cannot be undone.`)) return; await act(() => api('client_del', { id: C.client.id }), 'Client deleted'); location.hash = '#clients'; return;
       case 'dnq-off': if (!confirm('Remove the do-not-quote flag?')) return; await act(() => api('dnq', { id: C.client.id, on: 0 }), 'Flag removed'); return refresh();
       case 'np-open': $('#np-form').hidden = false; $('#np-form [name=expo]').focus(); return;
