@@ -52,6 +52,7 @@ else: ?><div class="bar"><a href="index.php#invd-<?= (int) $i['id'] ?>">← Back
 <?php if (!$ok): ?><div class="wm"><?= $i['status'] === 'cancelled' ? 'CANCELLED' : 'NOT APPROVED' ?></div><?php endif; ?>
 <h1><?= $title ?><?= $i['status'] === 'cancelled' ? ' <span class="draft">(CANCELLED)</span>' : (!$ok ? ' <span class="draft">(DRAFT — NOT APPROVED)</span>' : '') ?></h1>
 <div class="meta">
+<?php if (($i['bill_name'] ?? null) !== null) { $i['company'] = $i['bill_name']; $i['location'] = $i['bill_address']; $i['city'] = ''; $i['gst_no'] = $i['bill_gstin']; }   // the invoice's own copy of who it was billed to ?>
  <div><b>Bill to</b><br><?= $h($i['company']) ?><br><?= nl2br($h($i['location'] ?: $i['city'])) ?><?= $i['gst_no'] ? '<br>GSTIN: ' . $h($i['gst_no']) : '' ?><?= $i['person'] ? '<br>Attn: ' . $h($i['person']) : '' ?></div>
  <div><b><?= $i['kind'] === 'tax' ? 'Invoice' : 'Proforma' ?> no.:</b> <?= $h($i['inv_no'] ?: '—') ?><br><b>Date:</b> <?= date('d-M-Y', strtotime($i['inv_date'])) ?><br><b>Place of supply:</b> <?= $h($i['place_state']) ?><?= $i['expo'] ? '<br><b>Event:</b> ' . $h($i['expo']) : '' ?></div>
 </div>

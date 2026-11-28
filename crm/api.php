@@ -413,7 +413,26 @@ case 'client':
   $b = bills_for($ps); $um = users_map();
   foreach ($ps as &$p) { $p['bill'] = $b[$p['id']]; $p['owner'] = $um[$p['owner_id']] ?? '—'; } unset($p);
   $c['projects'] = $ps; $c['owner'] = $um[$c['owner_id']] ?? '—';
+  $c['gsts'] = all('SELECT * FROM ' . T('client_gst') . ' WHERE client_id = ? ORDER BY id', [$c['id']]);
+  $c['gst_state'] = gstin_state($c['gst_no']);
   out(['client' => $c]);
+
+case 'client_gst_save':   // add / edit another GST registration or billing name of a client (owner, admin or accounts)
+case 'client_gst_del':
+  if ($A === 'client_gst_del') { $g = one('SELECT * FROM ' . T('client_gst') . ' WHERE id = ?', [(int) ($in['id'] ?? 0)]) ?? fail('Not found.', 404); $cid = (int) $g['client_id']; }
+  else { $g = !empty($in['id']) ? (one('SELECT * FROM ' . T('client_gst') . ' WHERE id = ?', [(int) $in['id']]) ?? fail('Not found.', 404)) : null; $cid = $g ? (int) $g['client_id'] : (int) ($in['client_id'] ?? 0); }
+  $cl = one('SELECT * FROM ' . T('clients') . ' WHERE id = ?', [$cid]) ?? fail('Client not found.', 404);
+  if (!$ADMIN && !$ACC && (int) $cl['owner_id'] !== $MID) fail('Only the person handling this client, accounts or admin can change its GST details.', 403);
+  if ($A === 'client_gst_del') { q('DELETE FROM ' . T('client_gst') . ' WHERE id = ?', [$g['id']]); out(['ok' => true]); }   // invoices already made keep their own copy
+  $gstin = gstin_clean($in['gstin'] ?? ''); $name = s($in['legal_name'] ?? null, 200);
+  if (!$name) fail('Enter the registered firm name.');
+  if ($gstin !== '' && (strlen($gstin) !== 15 || !gstin_state($gstin))) fail('This GSTIN does not look right — it must be 15 characters and start with a state code.');
+  if ($gstin !== '' && ($gstin === gstin_clean($cl['gst_no']) || val('SELECT COUNT(*) FROM ' . T('client_gst') . ' WHERE client_id = ? AND gstin = ? AND id <> ?', [$cid, $gstin, (int) ($g['id'] ?? 0)]))) fail('This client already has that GSTIN.');
+  $row = ['gstin' => $gstin ?: null, 'legal_name' => $name, 'address' => s($in['address'] ?? null, 1000), 'state' => gstin_state($gstin) ?? s($in['state'] ?? null, 60)];
+  if ($g) upd('client_gst', $g['id'], $row); else $g = ['id' => ins('client_gst', $row + ['client_id' => $cid, 'added_by' => $MID, 'created_at' => now()])];
+  // same GSTIN on another client is allowed (it only shows a note) — e.g. before those two entries are merged
+  $also = $gstin ? all('SELECT id, company FROM ' . T('clients') . ' WHERE id <> ? AND UPPER(REPLACE(gst_no, \' \', \'\')) = ? UNION SELECT c.id, c.company FROM ' . T('client_gst') . ' g JOIN ' . T('clients') . ' c ON c.id = g.client_id WHERE g.client_id <> ? AND g.gstin = ?', [$cid, $gstin, $cid, $gstin]) : [];
+  out(['id' => (int) $g['id'], 'also_on' => $also]);
 
 case 'client_save':
   $data = [];
@@ -537,12 +556,13 @@ case 'client_dupes':   // admin: groups of clients that look like the same compa
   $norm = function ($n) { $n = strtolower(preg_replace('/[^a-z0-9 ]+/i', ' ', (string) $n));
     $n = preg_replace('/\b(pvt|private|ltd|limited|llp|inc|co|company|corp|corporation|the|m s|ms)\b/', ' ', $n); return preg_replace('/\s+/', '', $n); };
   $par = []; $find = function ($x) use (&$par, &$find) { return $par[$x] === $x ? $x : ($par[$x] = $find($par[$x])); };
-  $seen = []; $W = [];
+  $seen = []; $W = []; $XG = []; foreach (all('SELECT client_id, gstin FROM ' . T('client_gst') . ' WHERE gstin IS NOT NULL') as $x) $XG[(int) $x['client_id']][] = strtoupper($x['gstin']);
   foreach ($rows as $r) { $id = (int) $r['id']; $par[$id] = $id;
     $keys = ['n:' . $norm($r['company'])];
     $ph = substr(preg_replace('/\D/', '', (string) $r['phone']), -10); if (strlen($ph) === 10) $keys[] = 'p:' . $ph;
     if ($r['email']) $keys[] = 'e:' . strtolower(trim($r['email']));
     if ($r['gst_no'] && strlen(trim($r['gst_no'])) >= 10) $keys[] = 'g:' . strtoupper(trim($r['gst_no']));
+    foreach ($XG[$id] ?? [] as $xg) $keys[] = 'g:' . $xg;
     // remember the words of the name for the "one name inside the other" check below
     $W[$id] = array_values(array_filter(preg_split('/\s+/', trim(preg_replace('/\b(pvt|private|ltd|limited|llp|inc|co|company|corp|corporation|the|m s|ms|and|of)\b/', ' ', strtolower(preg_replace('/[^a-z0-9 ]+/i', ' ', (string) $r['company'])))))));
     foreach ($keys as $k) { if ($k === 'n:') continue; if (isset($seen[$k])) $par[$find($id)] = $find($seen[$k]); else $seen[$k] = $id; } }
@@ -567,7 +587,18 @@ case 'client_merge':   // admin: move everything of a duplicate client into the 
   if ((int) $keep['id'] === (int) $dup['id']) fail('Pick two different clients.');
   require_once __DIR__ . '/lib/acc.php';
   tx();
+  // the duplicate's name / GSTIN stays as another billing name of the kept client when it is a different registration or firm name
+  // (a matching GSTIN never blocks a merge — it simply means it is the same registration)
+  $kg = gstin_clean($keep['gst_no']); $dg = gstin_clean($dup['gst_no']);
+  $known = array_map('strtoupper', array_column(all('SELECT gstin FROM ' . T('client_gst') . ' WHERE client_id = ? AND gstin IS NOT NULL', [$keep['id']]), 'gstin'));
+  $asBilling = isset($in['billing']) ? !empty($in['billing']) : ($dg !== '' && $kg !== '' && $dg !== $kg);
+  if ($asBilling && !($dg !== '' && ($dg === $kg || in_array($dg, $known, true))) && !($dg === '' && strcasecmp(trim($dup['company']), trim($keep['company'])) === 0))
+    ins('client_gst', ['client_id' => $keep['id'], 'gstin' => $dg ?: null, 'legal_name' => $dup['company'], 'address' => $dup['location'] ?: $dup['city'], 'state' => gstin_state($dg), 'added_by' => $MID, 'created_at' => now()]);
+  foreach (all('SELECT * FROM ' . T('client_gst') . ' WHERE client_id = ?', [$dup['id']]) as $xg) {   // the duplicate's own extra GSTINs come along
+    if ($xg['gstin'] && (strtoupper($xg['gstin']) === $kg || in_array(strtoupper($xg['gstin']), $known, true))) q('DELETE FROM ' . T('client_gst') . ' WHERE id = ?', [$xg['id']]);
+    else upd('client_gst', $xg['id'], ['client_id' => $keep['id']]); }
   $fill = []; foreach (['email', 'phone', 'person', 'designation', 'location', 'city', 'gst_no'] as $f) if (trim((string) $keep[$f]) === '' && trim((string) $dup[$f]) !== '') $fill[$f] = $dup[$f];
+  if (isset($fill['gst_no']) && $asBilling) unset($fill['gst_no']);   // kept as its own billing entry instead
   if (trim((string) $dup['notes']) !== '') $fill['notes'] = trim(trim((string) $keep['notes']) . "\n" . $dup['notes']);
   if ((int) $dup['dnq'] && !(int) $keep['dnq']) foreach (['dnq', 'dnq_reason', 'dnq_note', 'dnq_on', 'dnq_by'] as $f) $fill[$f] = $dup[$f];
   if ($fill) upd('clients', $keep['id'], $fill);
@@ -581,7 +612,11 @@ case 'client_merge':   // admin: move everything of a duplicate client into the 
   foreach (all('SELECT * FROM ' . T('contacts') . ' WHERE client_id = ?', [$dup['id']]) as $ct) {
     $k = strtolower(trim($ct['name'])) . '|' . preg_replace('/\D/', '', (string) $ct['phone']);
     if (isset($have[$k])) q('DELETE FROM ' . T('contacts') . ' WHERE id = ?', [$ct['id']]); else { upd('contacts', $ct['id'], ['client_id' => $keep['id']]); $have[$k] = 1; } }
-  foreach (['invoices', 'referrals'] as $tb) { try { q('UPDATE ' . T($tb) . ' SET client_id = ? WHERE client_id = ?', [$keep['id'], $dup['id']]); } catch (PDOException $e) {} }
+  // invoices move but keep the name & GSTIN they were made out to; link them to the matching billing entry of the kept client
+  try { foreach (all('SELECT id, bill_name, bill_gstin FROM ' . T('invoices') . ' WHERE client_id = ?', [$dup['id']]) as $iv) {
+      $gid = $iv['bill_gstin'] ? val('SELECT id FROM ' . T('client_gst') . ' WHERE client_id = ? AND gstin = ?', [$keep['id'], strtoupper($iv['bill_gstin'])]) : val('SELECT id FROM ' . T('client_gst') . ' WHERE client_id = ? AND legal_name = ?', [$keep['id'], $iv['bill_name']]);
+      upd('invoices', $iv['id'], ['client_id' => $keep['id'], 'bill_gst_id' => $gid ?: null]); } } catch (PDOException $e) {}
+  foreach (['referrals'] as $tb) { try { q('UPDATE ' . T($tb) . ' SET client_id = ? WHERE client_id = ?', [$keep['id'], $dup['id']]); } catch (PDOException $e) {} }
   q('UPDATE ' . T('files') . " SET entity_id = ? WHERE entity IN ('card','brief','gstcert') AND entity_id = ?", [$keep['id'], $dup['id']]);
   // books: the duplicate's ledger joins the kept client's ledger
   try {
@@ -1123,7 +1158,8 @@ case 'share_link':   // secure link for a client: quote / invoice / file
 case 'gst_known':   // is this GSTIN already in the CRM? (fills the form from the saved client)
   $g = strtoupper(preg_replace('/\s/', '', (string) ($in['gst'] ?? '')));
   if (strlen($g) !== 15) out(['found' => null]);
-  $c = one('SELECT id, company, location, city, owner_id FROM ' . T('clients') . " WHERE UPPER(REPLACE(gst_no, ' ', '')) = ? ORDER BY id DESC", [$g]);
+  $c = one('SELECT id, company, location, city, owner_id FROM ' . T('clients') . " WHERE UPPER(REPLACE(gst_no, ' ', '')) = ? ORDER BY id DESC", [$g])
+    ?: one('SELECT c.id, c.company, g.address AS location, c.city, c.owner_id FROM ' . T('client_gst') . ' g JOIN ' . T('clients') . ' c ON c.id = g.client_id WHERE g.gstin = ? ORDER BY g.id DESC', [$g]);
   if ($c) { $c['owner'] = users_map()[$c['owner_id']] ?? '—'; unset($c['owner_id']); }
   out(['found' => $c ?: null]);
 

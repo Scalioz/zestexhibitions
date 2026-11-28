@@ -238,6 +238,19 @@ function migrate() {
       'CREATE INDEX zc_expo_links ON ' . T('expo_links') . ' (expo_id)'] as $q) { try { db()->exec($q); } catch (PDOException $e) { if (stripos($q, 'CREATE TABLE') === 0) throw $e; } }
     set_setting('schema_v', 33);
   }
+  if ($v < 34) {   // one client, several GST registrations / billing names; each invoice keeps its own copy of who it was billed to
+    $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
+    $PK = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT UNSIGNED AUTO_INCREMENT PRIMARY KEY';
+    $E = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+    db()->exec('CREATE TABLE IF NOT EXISTS ' . T('client_gst') . " (id $PK, client_id INT NOT NULL, gstin VARCHAR(20), legal_name VARCHAR(200) NOT NULL, address TEXT, state VARCHAR(60), added_by INT, created_at DATETIME NOT NULL)$E");
+    try { db()->exec('CREATE INDEX zc_cgst_client ON ' . T('client_gst') . ' (client_id)'); } catch (PDOException $e) { /* already there */ }
+    foreach (['bill_gst_id INT', 'bill_name VARCHAR(200)', 'bill_gstin VARCHAR(20)', 'bill_address TEXT'] as $col) { try { db()->exec('ALTER TABLE ' . T('invoices') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ } }
+    // freeze every existing invoice exactly as it prints today, so later edits / merges of the client never change it
+    $I = T('invoices'); $Cl = T('clients');
+    db()->exec("UPDATE $I SET bill_name = (SELECT c.company FROM $Cl c WHERE c.id = $I.client_id), bill_gstin = (SELECT c.gst_no FROM $Cl c WHERE c.id = $I.client_id),
+      bill_address = (SELECT CASE WHEN c.location IS NULL OR c.location = '' THEN c.city ELSE c.location END FROM $Cl c WHERE c.id = $I.client_id) WHERE bill_name IS NULL");
+    set_setting('schema_v', 34);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';

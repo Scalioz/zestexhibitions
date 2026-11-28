@@ -666,6 +666,7 @@ routes.client = async ({ id }) => {
     ${c.contacts.length ? `<div class="tw"><table>${c.contacts.map(o => `<tr><td><b>${esc(o.name)}</b><div class="sub">${esc(o.designation || '')}</div></td><td class="sub">${esc(o.phone || '')}<br>${esc(o.email || '')}</td><td class="r"><button class="btn link" data-delcontact="${o.id}" aria-label="Remove">✕</button></td></tr>`).join('')}</table></div>` : '<div class="sub">Nobody added.</div>'}
     <form class="grid g3" id="ct-form" style="margin-top:10px"><label class="f">Name<input name="name" required></label><label class="f">Designation<input name="designation"></label><label class="f">Phone<input name="phone"></label><div style="align-self:end"><button class="btn ghost sm">+ Add</button></div></form>
    </div>
+   ${gstPanel(c)}
    <div class="panel"><h3>GST certificate</h3><div class="row">${upBtn('gstcert', c.id, 'Upload GST certificate')}${fileChips(c.gstcert, isAdmin())}</div>${c.gst_no ? `<p class="sub" style="margin-bottom:0">GSTIN ${esc(c.gst_no)}</p>` : ''}</div>
    <div class="panel"><h3>Client brief / requirements</h3><div class="row">${upBtn('brief', c.id, 'Upload brief')}${fileChips(c.briefs, isAdmin())}</div><p class="sub" style="margin-bottom:0">PDF, image, Word, Excel or PowerPoint.</p></div>
    <div class="panel"><h3>Business cards</h3><div class="row">${upBtn('card', c.id, 'Add card')}${fileChips(c.cards, isAdmin())}</div></div>
@@ -1452,6 +1453,24 @@ function refAlert() { const n = B.ref_new; if (!n) return; const w = $('.welcome
 
 // ---------- GSTIN check (free: format + check digit; state and PAN come from the number itself) ----------
 const GST_STATES = { '01': 'Jammu & Kashmir', '02': 'Himachal Pradesh', '03': 'Punjab', '04': 'Chandigarh', '05': 'Uttarakhand', '06': 'Haryana', '07': 'Delhi', '08': 'Rajasthan', '09': 'Uttar Pradesh', '10': 'Bihar', '11': 'Sikkim', '12': 'Arunachal Pradesh', '13': 'Nagaland', '14': 'Manipur', '15': 'Mizoram', '16': 'Tripura', '17': 'Meghalaya', '18': 'Assam', '19': 'West Bengal', '20': 'Jharkhand', '21': 'Odisha', '22': 'Chhattisgarh', '23': 'Madhya Pradesh', '24': 'Gujarat', '26': 'Dadra & Nagar Haveli and Daman & Diu', '27': 'Maharashtra', '29': 'Karnataka', '30': 'Goa', '31': 'Lakshadweep', '32': 'Kerala', '33': 'Tamil Nadu', '34': 'Puducherry', '35': 'Andaman & Nicobar Islands', '36': 'Telangana', '37': 'Andhra Pradesh', '38': 'Ladakh', '97': 'Other Territory', '99': 'Centre Jurisdiction' };
+// one client can bill under several firm names / GST numbers (e.g. a GSTIN in each state)
+const canGst = c => isAdmin() || (B.modules || []).includes('accounts') || +c.owner_id === +B.me.id;
+function gstPanel(c) {
+  const ed = canGst(c), st = g => GST_STATES[String(g || '').slice(0, 2)] || '';
+  const row = (name, g, addr, extra) => `<div style="padding:9px 0;border-top:1px solid var(--line,#e5e7eb)"><div class="row" style="justify-content:space-between;align-items:flex-start;gap:6px"><b>${esc(name)}</b><span>${extra}</span></div>
+     <div class="sub">${g ? 'GSTIN ' + esc(g) + (st(g) ? ' · ' + esc(st(g)) : '') : 'No GST'}</div>${addr ? `<div class="sub">${esc(addr)}</div>` : ''}</div>`;
+  return `<div class="panel" id="gst-panel"><h3>Billing names & GST numbers</h3><p class="sub" style="margin-top:0">Every firm name / GST number this client bills under. Pick the right one on each invoice — old invoices keep the name they were made out to.</p>
+   ${row(c.company, c.gst_no, c.location || c.city, '<span class="pill">Main</span>')}
+   ${(c.gsts || []).map(g => row(g.legal_name, g.gstin, g.address, ed ? `<button class="btn link" data-cgedit="${g.id}">Edit</button> <button class="btn link" data-cgdel="${g.id}">Remove</button>` : '')).join('')}
+   ${ed ? `<div id="cg-box"><button class="btn ghost" data-cgedit="0" style="margin-top:10px">+ Add firm / GST no.</button></div>` : ''}</div>`;
+}
+function gstForm(g) {
+  return `<form class="grid" id="cg-form" style="margin-top:10px"><input type="hidden" name="gid" value="${g.id || ''}">
+   <label class="f">Firm name (as on GST) *<input name="legal_name" required value="${esc(g.legal_name || '')}"></label>
+   <label class="f">GSTIN <span class="sub" style="font-weight:400">— leave blank if none</span><input name="gstin" maxlength="20" value="${esc(g.gstin || '')}" style="text-transform:uppercase"></label>
+   <label class="f">Billing address<input name="address" value="${esc(g.address || '')}"></label>
+   <div class="row"><button class="btn">Save</button><button type="button" class="btn link" data-cgx="1">Cancel</button></div></form>`;
+}
 function gstCheck(raw) {
   const g = String(raw || '').toUpperCase().replace(/\s/g, '');
   if (!g) return { ok: false, msg: 'Enter the GSTIN first.' };
@@ -2141,6 +2160,7 @@ function drawInv() {
    <label class="f">Date *<input type="date" name="inv_date" required value="${esc(i.inv_date)}"></label>
    <label class="f">Order<select name="project_id" id="inv-proj">${projOpts(m, i.project_id)}</select></label>
    <label class="f">Client *<select name="client_id" id="inv-client" required><option value="">Pick client</option>${m.clients.map(c => `<option value="${c.id}" ${+i.client_id === +c.id ? 'selected' : ''}>${esc(c.company)}</option>`).join('')}</select></label>
+   <label class="f">Bill to (firm & GST)<select name="bill_gst_id" id="inv-bill">${billOpts(m, i.client_id, i.bill_gst_id)}</select>${i.bill_name && i.status && i.status !== 'draft' && i.status !== 'requested' ? `<span class="sub">On this invoice: ${esc(i.bill_name)}${i.bill_gstin ? ' · ' + esc(i.bill_gstin) : ''}</span>` : ''}</label>
    <label class="f">Place of supply (state) *<input name="place_state" list="states" required value="${esc(i.place_state)}"></label>
    ${(() => { const au = String(i.place_state || '').trim().toLowerCase() === String(m.company.state || '').trim().toLowerCase() ? 'cgst_sgst' : 'igst', md = i.gst_mode || au; return `<label class="f">GST type *<select name="gst_mode" ${md !== au ? 'data-touched="1"' : ''}><option value="cgst_sgst" ${md === 'cgst_sgst' ? 'selected' : ''}>CGST + SGST (within ${esc(m.company.state || 'Delhi')})</option><option value="igst" ${md === 'igst' ? 'selected' : ''}>IGST (other state)</option></select></label>`; })()}<datalist id="states">${STATES.map(x => `<option value="${x}">`).join('')}</datalist>
    <label class="f">GST rate (%)<input type="number" step="any" name="gst_rate" value="${num(i.gst_rate)}" data-invcalc></label>
@@ -2221,8 +2241,14 @@ routes.myinv = async () => {
 };
 function invAlert() { const n = B.inv_attention; if (!n) return; const w = $('.welcome'); if (w) w.insertAdjacentHTML('afterend', `<div class="alert warn"><b>${n} invoice${n > 1 ? 's need' : ' needs'} your attention</b><span class="m">Admin put it on hold or rejected it. <a href="#myinv">Open my invoices →</a></span></div>`); }
 
-function invCapture() { const f = $('#invform'); if (!f) return; const g = k => f.querySelector(`[name=${k}]`).value; Object.assign(C.inv, { inv_date: g('inv_date'), project_id: g('project_id'), client_id: g('client_id'), place_state: g('place_state'), gst_mode: g('gst_mode'), gst_rate: g('gst_rate'), discount: g('discount'), round_mode: g('round_mode'), notes: g('notes'), lines: invLines() }); }
+function billOpts(m, cid, sel) {
+  const c = (m.clients || []).find(x => +x.id === +cid); if (!c) return '<option value="">— pick the client first —</option>';
+  const st = g => GST_STATES[String(g || '').slice(0, 2)] || '', lab = (n, g) => `${esc(n)}${g ? ' · ' + esc(g) + (st(g) ? ' (' + esc(st(g)) + ')' : '') : ' · no GST'}`;
+  return `<option value="" data-st="${esc(st(c.gst_no))}">${lab(c.company, c.gst_no)}</option>` + (m.client_gsts || []).filter(g => +g.client_id === +c.id).map(g => `<option value="${g.id}" data-st="${esc(st(g.gstin) || g.state || '')}" ${+sel === +g.id ? 'selected' : ''}>${lab(g.legal_name, g.gstin)}</option>`).join('');
+}
+function invCapture() { const f = $('#invform'); if (!f) return; const g = k => f.querySelector(`[name=${k}]`).value; Object.assign(C.inv, { inv_date: g('inv_date'), project_id: g('project_id'), client_id: g('client_id'), bill_gst_id: g('bill_gst_id'), place_state: g('place_state'), gst_mode: g('gst_mode'), gst_rate: g('gst_rate'), discount: g('discount'), round_mode: g('round_mode'), notes: g('notes'), lines: invLines() }); }
 function invLines() { return [...document.querySelectorAll('#invlines tr')].slice(1).map(tr => { const g = k => tr.querySelector(`[data-il="${k}"]`); return { desc: g('desc').value, sac: g('sac').value, qty: g('qty').value, rate: g('rate').value, tax: g('tax').checked ? 1 : 0 }; }); }
+function invBillState() { const o = $('#inv-bill')?.selectedOptions[0], ps = document.querySelector('#invform [name=place_state]'); if (o && o.dataset.st && ps) { ps.value = o.dataset.st; const gm = document.querySelector('#invform [name=gst_mode]'); if (gm) delete gm.dataset.touched; invCalc(); } }
 function invCalc() {
   const box = $('#inv-tot'); if (!box) return;
   const rate = +document.querySelector('#invform [name=gst_rate]').value || 0, st = (document.querySelector('#invform [name=place_state]').value || '').trim().toLowerCase();
@@ -3088,7 +3114,7 @@ routes.account = async () => {
 
 // ---------- EVENTS ----------
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-cedit],[data-cdel],[data-cnew],[data-cclose],[data-reft],[data-refadd],[data-refclose],[data-refreopen],[data-dokundo],[data-caedit],[data-cadel],[data-repedit],[data-repdel],[data-repadd],[data-reprm],[data-clt],[data-invt],[data-invreqtax],[data-invconv],[data-ildel],[data-post],[data-postskip],[data-coaedit],[data-cledit],[data-cldel],[data-adec],[data-acancel],[data-asent],[data-slt],[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
+  const t = e.target.closest('[data-cgedit],[data-cgx],[data-cgdel],[data-cedit],[data-cdel],[data-cnew],[data-cclose],[data-reft],[data-refadd],[data-refclose],[data-refreopen],[data-dokundo],[data-caedit],[data-cadel],[data-repedit],[data-repdel],[data-repadd],[data-reprm],[data-clt],[data-invt],[data-invreqtax],[data-invconv],[data-ildel],[data-post],[data-postskip],[data-coaedit],[data-cledit],[data-cldel],[data-adec],[data-acancel],[data-asent],[data-slt],[data-go],[data-ledit-open],[data-lcancel],[data-ldel],[data-delfurn],[data-editchild],[data-canceledit],[data-delchild],[data-delfile],[data-delcontact],[data-rmitem],[data-edituser],[data-fmdel],[data-fmup],[data-delhol],[data-delreason],[data-delvendor],button[id]');
   if (!t) return;
   const ds = t.dataset;
   try {
@@ -3137,6 +3163,9 @@ document.addEventListener('click', async e => {
     if (ds.canceledit) { C.editing = null; return refresh(); }
     if (ds.delchild) { const [kind, id] = ds.delchild.split(':'); if (!confirm('Delete this entry?')) return; await act(() => api('child_del', { kind, id }), 'Deleted'); return refresh(); }
     if (ds.delfile) { if (!confirm('Remove this file?')) return; await act(() => api('file_del', { id: ds.delfile }), 'File removed'); return refresh(); }
+    if (ds.cgedit !== undefined) { const g = (C.client.gsts || []).find(x => +x.id === +ds.cgedit) || {}; $('#cg-box').innerHTML = gstForm(g); $('#cg-form [name=legal_name]').focus(); return; }
+    if (ds.cgx) return refresh();
+    if (ds.cgdel) { if (!confirm('Remove this billing name / GST number? Invoices already made with it stay as they are.')) return; await act(() => api('client_gst_del', { id: ds.cgdel }), 'Removed'); return refresh(); }
     if (ds.delcontact) { if (!confirm('Remove this person?')) return; await act(() => api('contact_del', { id: ds.delcontact })); return refresh(); }
     if (ds.rmitem !== undefined) { draft.items.splice(+ds.rmitem, 1); draft.files.splice(+ds.rmitem, 1); return refresh(); }
     if (ds.edituser) { C.editUser = +ds.edituser; await refresh(); $('#uform').scrollIntoView({ behavior: 'smooth' }); return; }
@@ -3168,8 +3197,10 @@ document.addEventListener('click', async e => {
           <div class="row" style="margin-top:8px"><button class="btn">Next</button><button type="button" class="btn link" id="mg-x">Cancel</button></div><div id="mg-ok"></div></form>`;
         $('#mg-x').onclick = () => $('#merge-form').innerHTML = '';
         $('#mgf').onsubmit = ev => { ev.preventDefault(); const m = /#(\d+)\s*$/.exec(ev.target.dup.value); const dup = m && all.find(x => +x.id === +m[1]); if (!dup) return toast('Pick the company from the list', true);
-          $('#mg-ok').innerHTML = `<div class="warnbox" style="margin-top:10px"><b>${esc(dup.company)}</b>${dup.city ? ' (' + esc(dup.city) + ')' : ''} will be merged into <b>${esc(C.client.company)}</b> and removed. This cannot be undone.<div class="row" style="margin-top:8px"><button type="button" class="btn danger" id="mg-go">Yes, merge</button></div></div>`;
-          $('#mg-go').onclick = async () => { await act(() => api('client_merge', { keep: C.client.id, dup: dup.id }), 'Merged'); refresh(); }; }; return; }
+          $('#mg-ok').innerHTML = `<div class="warnbox" style="margin-top:10px"><b>${esc(dup.company)}</b>${dup.city ? ' (' + esc(dup.city) + ')' : ''} will be merged into <b>${esc(C.client.company)}</b> and removed. This cannot be undone.${dup.gst_no && C.client.gst_no && dup.gst_no.replace(/\s/g, '').toUpperCase() === C.client.gst_no.replace(/\s/g, '').toUpperCase() ? '<div class="sub" style="margin-top:6px">Both have the same GSTIN — that is fine, merging goes ahead.</div>' : ''}
+            <label class="row" style="margin-top:8px;gap:6px;align-items:center"><input type="checkbox" id="mg-bill" ${dup.gst_no && dup.gst_no.replace(/\s/g, '').toUpperCase() !== String(C.client.gst_no || '').replace(/\s/g, '').toUpperCase() ? 'checked' : ''}> Keep “${esc(dup.company)}”${dup.gst_no ? ' (GSTIN ' + esc(dup.gst_no) + ')' : ''} as another billing name of this client</label>
+            <div class="row" style="margin-top:8px"><button type="button" class="btn danger" id="mg-go">Yes, merge</button></div></div>`;
+          $('#mg-go').onclick = async () => { await act(() => api('client_merge', { keep: C.client.id, dup: dup.id, billing: $('#mg-bill').checked ? 1 : 0 }), 'Merged'); refresh(); }; }; return; }
       case 'client-del': if (!confirm(`Delete ${C.client.company} with all its orders, payments and files? This cannot be undone.`)) return; await act(() => api('client_del', { id: C.client.id }), 'Client deleted'); location.hash = '#clients'; return;
       case 'dnq-off': if (!confirm('Remove the do-not-quote flag?')) return; await act(() => api('dnq', { id: C.client.id, on: 0 }), 'Flag removed'); return refresh();
       case 'np-open': $('#np-form').hidden = false; $('#np-form [name=expo]').focus(); return;
@@ -3261,7 +3292,9 @@ document.addEventListener('change', async e => {
     if (ds.woff !== undefined) { const i = +ds.woff; const w = t.checked ? [...B.weekly_off, i] : B.weekly_off.filter(x => x !== i); await act(() => api('settings_save', { weekly_off: w }), 'Weekly off saved'); await reboot(); return; }
     if (t.id === 'fm-dept') { C.fmDept = t.value; return refresh(); }
     if (t.id === 'rcp-proj') { const c = t.selectedOptions[0]?.dataset.client; if (c) $('#rcp-client').value = c; return; }
-    if (t.id === 'inv-proj') { const c = t.selectedOptions[0]?.dataset.client; if (c) $('#inv-client').value = c; return; }
+    if (t.id === 'inv-proj') { const c = t.selectedOptions[0]?.dataset.client; if (c) { $('#inv-client').value = c; $('#inv-bill').innerHTML = billOpts(C.am, c, 0); invBillState(); } return; }
+    if (t.id === 'inv-client') { $('#inv-bill').innerHTML = billOpts(C.am, t.value, 0); invBillState(); return; }
+    if (t.id === 'inv-bill') { invBillState(); return; }
     if (ds.deptmod !== undefined) { await act(() => api('settings_save', { dept_modules: { [ds.deptmod]: t.value } }), `${ds.deptmod}: ${MOD_LABEL[t.value]}`); await reboot(); return refresh(); }
     if (ds.dsrc && C.project) { const ok = await act(() => api('design_source', { project_id: C.project.id, source: ds.dsrc }), ds.dsrc === 'client' ? 'Marked: customer gives their own design' : 'Marked: Zest designs it').catch(() => null); return refresh(); }
     if (ds.jassign) { const [kind, pid] = ds.jassign.split(':'); await act(() => api(kind === 'designer' ? 'assign_designer' : 'assign_ops', { project_id: pid, user_id: t.value }), +t.value ? 'Assigned' : 'Unassigned'); return refresh(); }
@@ -3390,6 +3423,10 @@ document.addEventListener('submit', async e => {
   }
   if (f.id === 'np-form') { e.preventDefault(); const r = await act(() => api('project_create', { client_id: C.client.id, ...Object.fromEntries(new FormData(f)) }), 'Order created').catch(() => null); if (r) { reboot().catch(() => {}); } if (r) location.hash = `#project-${r.id}-expo`; return; }
   if (f.id === 'ce-form') { e.preventDefault(); const o = Object.fromEntries(new FormData(f)); o.id = C.client.id; o.move_orders = !!o.move_orders; await act(() => api('client_save', o), 'Saved').catch(() => null); C.editClient = null; return refresh(); }
+  if (f.id === 'cg-form') { e.preventDefault(); const d = Object.fromEntries(new FormData(f));
+    if (d.gstin.trim()) { const k = gstCheck(d.gstin); if (!k.ok) return toast(k.msg, true); }
+    const r = await act(() => api('client_gst_save', { client_id: C.client.id, legal_name: d.legal_name, gstin: d.gstin, address: d.address, id: d.gid || undefined })).catch(() => null); if (!r) return;
+    toast(r.also_on && r.also_on.length ? `Saved. Note: this GSTIN is also on ${r.also_on.map(x => x.company).join(', ')} — use “Merge duplicate” if it is the same client.` : 'Saved'); return refresh(); }
   if (f.id === 'ct-form') { e.preventDefault(); await act(() => api('contact_add', { client_id: C.client.id, ...Object.fromEntries(new FormData(f)) }), 'Added').catch(() => null); return refresh(); }
 });
 

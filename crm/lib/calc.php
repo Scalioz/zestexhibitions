@@ -47,6 +47,19 @@ function bills_for($projects) {
   return $out;
 }
 
+const GST_STATE = ['01' => 'Jammu & Kashmir', '02' => 'Himachal Pradesh', '03' => 'Punjab', '04' => 'Chandigarh', '05' => 'Uttarakhand', '06' => 'Haryana', '07' => 'Delhi', '08' => 'Rajasthan', '09' => 'Uttar Pradesh',
+  '10' => 'Bihar', '11' => 'Sikkim', '12' => 'Arunachal Pradesh', '13' => 'Nagaland', '14' => 'Manipur', '15' => 'Mizoram', '16' => 'Tripura', '17' => 'Meghalaya', '18' => 'Assam', '19' => 'West Bengal',
+  '20' => 'Jharkhand', '21' => 'Odisha', '22' => 'Chhattisgarh', '23' => 'Madhya Pradesh', '24' => 'Gujarat', '25' => 'Daman & Diu', '26' => 'Dadra & Nagar Haveli and Daman & Diu', '27' => 'Maharashtra', '28' => 'Andhra Pradesh (old)',
+  '29' => 'Karnataka', '30' => 'Goa', '31' => 'Lakshadweep', '32' => 'Kerala', '33' => 'Tamil Nadu', '34' => 'Puducherry', '35' => 'Andaman & Nicobar Islands', '36' => 'Telangana', '37' => 'Andhra Pradesh', '38' => 'Ladakh', '97' => 'Other Territory'];
+function gstin_clean($g) { return strtoupper(preg_replace('/[^0-9A-Za-z]/', '', (string) $g)); }
+function gstin_state($g) { $g = gstin_clean($g); return strlen($g) === 15 ? (GST_STATE[substr($g, 0, 2)] ?? null) : null; }
+// who an invoice is billed to: the client's main name & GST, or one of its other registered firms / GST numbers
+function bill_to($cid, $gid = 0) {
+  $c = one('SELECT company, gst_no, location, city FROM ' . T('clients') . ' WHERE id = ?', [(int) $cid]); if (!$c) return [];
+  if ((int) $gid) { $g = one('SELECT * FROM ' . T('client_gst') . ' WHERE id = ? AND client_id = ?', [(int) $gid, (int) $cid]);
+    if ($g) return ['bill_gst_id' => (int) $g['id'], 'bill_name' => $g['legal_name'], 'bill_gstin' => $g['gstin'] ?: null, 'bill_address' => $g['address'] ?: ($c['location'] ?: $c['city'])]; }
+  return ['bill_gst_id' => null, 'bill_name' => $c['company'], 'bill_gstin' => $c['gst_no'] ?: null, 'bill_address' => $c['location'] ?: $c['city']];
+}
 function is_won($status) { return in_array($status, ['won', 'completed'], true); }
 
 // Working days with no report, between start and end (inclusive)
