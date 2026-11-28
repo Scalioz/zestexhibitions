@@ -537,13 +537,20 @@ case 'client_dupes':   // admin: groups of clients that look like the same compa
   $norm = function ($n) { $n = strtolower(preg_replace('/[^a-z0-9 ]+/i', ' ', (string) $n));
     $n = preg_replace('/\b(pvt|private|ltd|limited|llp|inc|co|company|corp|corporation|the|m s|ms)\b/', ' ', $n); return preg_replace('/\s+/', '', $n); };
   $par = []; $find = function ($x) use (&$par, &$find) { return $par[$x] === $x ? $x : ($par[$x] = $find($par[$x])); };
-  $seen = [];
+  $seen = []; $W = [];
   foreach ($rows as $r) { $id = (int) $r['id']; $par[$id] = $id;
     $keys = ['n:' . $norm($r['company'])];
     $ph = substr(preg_replace('/\D/', '', (string) $r['phone']), -10); if (strlen($ph) === 10) $keys[] = 'p:' . $ph;
     if ($r['email']) $keys[] = 'e:' . strtolower(trim($r['email']));
     if ($r['gst_no'] && strlen(trim($r['gst_no'])) >= 10) $keys[] = 'g:' . strtoupper(trim($r['gst_no']));
+    // remember the words of the name for the "one name inside the other" check below
+    $W[$id] = array_values(array_filter(preg_split('/\s+/', trim(preg_replace('/\b(pvt|private|ltd|limited|llp|inc|co|company|corp|corporation|the|m s|ms|and|of)\b/', ' ', strtolower(preg_replace('/[^a-z0-9 ]+/i', ' ', (string) $r['company'])))))));
     foreach ($keys as $k) { if ($k === 'n:') continue; if (isset($seen[$k])) $par[$find($id)] = $find($seen[$k]); else $seen[$k] = $id; } }
+  // same sales person, and every word of one name is in the other (e.g. "Alucraft Manufacturing LLP" inside "Alucraft Manufacturing and Marketing LLP")
+  $bk = []; foreach ($rows as $r) { $w0 = $W[(int) $r['id']] ?? []; if (count($w0) >= 2 && strlen(implode('', $w0)) >= 8) $bk[(int) $r['owner_id'] . '|' . $w0[0]][] = (int) $r['id']; }
+  foreach ($bk as $ids_) { $n_ = count($ids_); if ($n_ < 2 || $n_ > 200) continue;
+    for ($i = 0; $i < $n_; $i++) for ($j = $i + 1; $j < $n_; $j++) { $a = $W[$ids_[$i]]; $b = $W[$ids_[$j]]; [$s1, $l1] = count($a) <= count($b) ? [$a, $b] : [$b, $a];
+      if ($s1 !== $l1 && !array_diff($s1, $l1)) $par[$find($ids_[$i])] = $find($ids_[$j]); } }
   $g = []; foreach ($rows as $r) $g[$find((int) $r['id'])][] = $r;
   $g = array_values(array_filter($g, fn($x) => count($x) > 1));
   $ids = array_merge([], ...array_map(fn($x) => array_column($x, 'id'), $g)); $st = [];
