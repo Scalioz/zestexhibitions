@@ -6,7 +6,7 @@ const $ = s => document.querySelector(s);
 const view = () => $('#view');
 // Colour each dashboard box by what its figure means (money in = green, owed / missed = red, business = gold, counts = indigo, costs = amber)
 const KPI_TONES = [['info', /gst/i], ['bad', /miss|outstanding|owe|due|balance to collect|payable|late|pending/i], ['good', /received|collected|paid so far|won|profit|bonus|present|saved/i],
-  ['warn', /vendor|expense|loss|advance|spent|leave|open enquir|paid this|paid leave/i], ['gold', /business|billed|captured|total|share|salary|this month|today/i], ['info', /.*/]];
+  ['warn', /vendor|more than|expense|loss|advance|spent|leave|open enquir|paid this|paid leave/i], ['gold', /business|billed|captured|total|share|salary|this month|today/i], ['info', /.*/]];
 function toneKpis(root) { root.querySelectorAll('.kpi:not([data-tone])').forEach(k => { const t = (k.querySelector('span') || k).textContent; const m = KPI_TONES.find(([, r]) => r.test(t)); k.dataset.tone = m[0]; if (!k.classList.contains('hl')) k.classList.add('t-' + m[0]); }); }
 new MutationObserver(() => { const v = view(); if (v) toneKpis(v); }).observe(document.documentElement, { childList: true, subtree: true });
 const B = { me: null };           // boot data
@@ -268,7 +268,7 @@ async function route() {
 }
 const ADMIN_ONLY = { att: 1, invappr: 1, clientlog: 1, saleslog: 1, leadlog: 1, jobs: 1, reportlog: 1, team: 1, formats: 1, settings: 1, dnq: 1 };
 const RECORDS_ONLY = { refs: 1, clients: 1, client: 1, project: 1, newclient: 1, qgen: 1 };
-const ACC_ROUTES = { partners: 1, partner: 1, payroll: 1, payemp: 1, acc: 1, entry: 1, jv: 1, invoices: 1, invnew: 1, inv: 1, invappr: 1, claims: 1, topost: 1, books: 1, coa: 1, accset: 1 };
+const ACC_ROUTES = { vdash: 1, vendor: 1, partners: 1, partner: 1, payroll: 1, payemp: 1, acc: 1, entry: 1, jv: 1, invoices: 1, invnew: 1, inv: 1, invappr: 1, claims: 1, topost: 1, books: 1, coa: 1, accset: 1 };
 const MODULE_ONLY = { contacts: ['records', 'ops', 'leads', 'calls'], nearme: ['records', 'ops', 'leads', 'calls'], myinv: ['records'], myexp: ['records', 'ops'],  leads: ['leads', 'calls'], lexpo: ['leads', 'calls'], mydesign: ['design'], myops: ['ops'], opsjob: ['ops', 'records'] };
 const handsOver = () => !isAdmin() && !B.records && (B.modules || [B.module]).some(x => ['leads', 'calls'].includes(x));   // research / telecalling add clients for sales
 // ---- shared expo list: expo name boxes suggest saved expos; picking one fills the dates & place ----
@@ -323,10 +323,10 @@ function renderNav(cur) {
   $('#nav').innerHTML = isAdmin()
     ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('saleslog', 'Sales log', B.pending_approvals || '')}${L('invappr', 'Invoice approvals', B.inv_pending || '')}${L('leadlog', 'Expo data log')}${L('jobs', 'Design & production')}${L('reportlog', 'Daily reports', B.flags || '')}${L('att', 'Attendance', B.att_pending || '')}
        <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('vendors', 'Vendors')}${L('dnq', 'Do-not-quote list')}
-       <div class="sec">Accounts</div>${L('acc', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('payroll', 'Payroll & salaries')}${L('partners', 'Business partners')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}
+       <div class="sec">Accounts</div>${L('acc', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('payroll', 'Payroll & salaries')}${L('partners', 'Business partners')}${L('vdash', 'Vendor dashboard')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}
        <div class="sec">Admin</div>${L('team', 'Team')}${L('alerts', 'Auto WhatsApp alerts')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
     : (B.modules || []).length > 1 ? multiNav(L)
-    : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('vendors', 'Vendors')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('payroll', 'Payroll & salaries')}${L('partners', 'Business partners')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
+    : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('vendors', 'Vendors')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('payroll', 'Payroll & salaries')}${L('partners', 'Business partners')}${L('vdash', 'Vendor dashboard')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
     : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('vendors', 'Vendors')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
     : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') + L('newclient', '+ New client') + L('contacts', 'Contacts') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('vendors', 'Vendors') + L('contacts', 'Contacts') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`;
   if (B.my_leads_all && !$('#nav a[href="#myleads"]')) { const first = $('#nav a'); const h = L('myleads', 'Assigned leads', B.my_leads_n || ''); if (first) first.insertAdjacentHTML('afterend', h); else $('#nav').insertAdjacentHTML('afterbegin', h); }
@@ -343,7 +343,7 @@ function multiNav(L) {
   if (m('design')) h += sec('Design') + L('mydesign', 'My design jobs');
   if (m('ops')) h += sec('Production') + L('myops', 'My production jobs');
   if (m('ops') || m('records') || m('accounts')) h += L('vendors', 'Vendors');
-  if (m('accounts')) h += sec('Accounts') + L('acc', 'Accounts dashboard') + L('claims', 'Expense approvals', B.claims_waiting || '') + L('entry', '+ New entry') + L('invoices', 'Invoices', B.inv_todo || '') + L('topost', 'Post from orders') + L('payroll', 'Payroll & salaries') + L('partners', 'Business partners') + L('books', 'Books & reports') + L('coa', 'Chart of accounts') + L('accset', 'Company settings');
+  if (m('accounts')) h += sec('Accounts') + L('acc', 'Accounts dashboard') + L('claims', 'Expense approvals', B.claims_waiting || '') + L('entry', '+ New entry') + L('invoices', 'Invoices', B.inv_todo || '') + L('topost', 'Post from orders') + L('payroll', 'Payroll & salaries') + L('partners', 'Business partners') + L('vdash', 'Vendor dashboard') + L('books', 'Books & reports') + L('coa', 'Chart of accounts') + L('accset', 'Company settings');
   h += sec('My work');
   if (m('records') || m('ops') || m('leads') || m('calls')) h += L('contacts', 'Contacts');
   if (m('records') || m('ops')) h += L('myexp', 'My expenses', B.claims_attention || '');
@@ -2512,7 +2512,7 @@ routes.partner = async ({ id }) => {
 routes.vendors = async () => {
   const q = (C.vq || '').trim().toLowerCase(), ed = C.vEdit ? B.vendors.find(v => +v.id === +C.vEdit) : null;
   const list = B.vendors.filter(v => !q || [v.name, v.city, v.phone, v.email, v.notes].join(' ').toLowerCase().includes(q));
-  view().innerHTML = `<div class="head"><div><h1>Vendors</h1><p>Fabricators, carpenters, printers, transporters and other suppliers. Vendors added here appear in every order's vendor quotes and in accounts.</p></div></div>
+  view().innerHTML = `<div class="head"><div><h1>Vendors</h1><p>Fabricators, carpenters, printers, transporters and other suppliers. Vendors added here appear in every order's vendor quotes and in accounts.</p></div>${B.acc ? '<div class="row"><a class="btn" href="#vdash">Vendor dashboard — paid &amp; outstanding</a></div>' : ''}</div>
   <form class="panel" id="vform"><h2>${ed ? 'Edit ' + esc(ed.name) : 'Add a vendor'}</h2><input type="hidden" name="id" value="${ed ? ed.id : ''}">
    <div class="grid g3"><label class="f">Vendor name *<input name="name" required value="${esc(ed?.name || '')}"></label><label class="f">Phone *<input name="phone" type="tel" required value="${esc(ed?.phone || '')}"></label><label class="f">City *<input name="city" required value="${esc(ed?.city || '')}"></label>
     <label class="f">Email<input name="email" type="email" value="${esc(ed?.email || '')}"></label><label class="f wide">What they do / notes<input name="notes" value="${esc(ed?.notes || '')}" placeholder="e.g. Carpentry & laminate, flex printing, transport to Pragati Maidan"></label></div>
@@ -2525,6 +2525,38 @@ routes.vendors = async () => {
   if ($('#v-cancel')) $('#v-cancel').onclick = () => { C.vEdit = null; refresh(); };
   $('#vq').oninput = e => { C.vq = e.target.value; clearTimeout(C.vqT); C.vqT = setTimeout(() => { refresh().then(() => { const i = $('#vq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 250); };
   view().querySelectorAll('[data-vedit]').forEach(b => b.onclick = () => { C.vEdit = b.dataset.vedit; refresh().then(() => $('#vform').scrollIntoView({ behavior: 'smooth', block: 'start' })); });
+};
+// ---------- vendor dashboard: agreed (chosen quote) · paid · outstanding ----------
+const vStat = r => !r.live ? `<span class="sub">${esc(r.status)} — not counted</span>` : r.agreed === null ? '<span class="pill p-pending">no quote chosen</span>' : r.settled ? '<span class="pill p-ok">settled</span>' : r.outstanding > 0.5 ? `<span class="pill p-rejected">${inr(r.outstanding)} due</span>` : '<span class="pill p-ok">fully paid</span>';
+routes.vdash = async () => {
+  const d = await api('acc_vendors'), t = d.totals;
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#acc">← Accounts</a></div><h1>Vendor dashboard</h1><p>What we agreed with each vendor (the vendor quote chosen on the order), what we have paid, and what is still to pay. Click a vendor for order-by-order details.</p></div><div class="row"><a class="btn ghost" href="#vendors">Vendor list</a></div></div>
+  <div class="kpis"><div class="kpi hl"><span>Outstanding to vendors</span><b>${inr(t.outstanding)}</b><small>${t.with_dues} vendor${t.with_dues === 1 ? '' : 's'} with dues</small></div>
+   <div class="kpi"><span>Agreed with vendors</span><b>${inr(t.agreed)}</b><small>chosen quotes on won orders</small></div>
+   <div class="kpi"><span>Paid to vendors</span><b>${inr(t.paid)}</b><small>${t.orders} order${t.orders === 1 ? '' : 's'}</small></div>
+   ${t.over > 0.5 ? `<div class="kpi"><span>Paid more than agreed</span><b>${inr(t.over)}</b><small>check these orders</small></div>` : ''}</div>
+  <div class="panel"><div class="ph"><h2>Vendors</h2><input id="vdq" placeholder="Search vendor…" value="${esc(C.vdq || '')}" style="max-width:240px"></div>
+   ${d.vendors.length ? `<div class="tw"><table><tr><th>Vendor</th><th class="r">Orders</th><th class="r">Agreed</th><th class="r">Paid</th><th class="r">Outstanding</th><th>Last paid</th></tr>
+   ${d.vendors.filter(x => !C.vdq || x.vendor.name.toLowerCase().includes(C.vdq.toLowerCase())).map(({ vendor: v, totals: x }) => `<tr class="click" data-go="vendor-${v.id}"><td><b>${esc(v.name)}</b>${v.city || v.notes ? `<div class="sub">${esc([v.city, v.notes].filter(Boolean).join(' · '))}</div>` : ''}</td><td class="r num">${x.orders}</td><td class="r num">${inr(x.agreed)}</td><td class="r num">${inr(x.paid)}</td>
+     <td class="r num" style="${x.outstanding > 0.5 ? 'color:var(--bad);font-weight:700' : ''}">${x.outstanding > 0.5 ? inr(x.outstanding) : '<span class="pill p-ok">clear</span>'}${x.over > 0.5 ? `<div class="sub" style="color:var(--amb)">paid ${inr(x.over)} over</div>` : ''}</td><td class="num">${x.last ? fd(x.last) : '—'}</td></tr>`).join('')}
+   <tr class="tot"><td><b>Total</b></td><td class="r num">${t.orders}</td><td class="r num">${inr(t.agreed)}</td><td class="r num">${inr(t.paid)}</td><td class="r num"><b>${inr(t.outstanding)}</b></td><td></td></tr></table></div>
+   <p class="sub">Agreed = the vendor quote chosen on each won order. Outstanding = agreed − paid, for won orders not yet marked “vendor settled” or completed. Vendor payments come from each order's Payments &amp; costs tab and from accounts entries tagged to an order.${d.idle ? ` ${d.idle} vendor${d.idle === 1 ? ' has' : 's have'} no orders yet and ${d.idle === 1 ? 'is' : 'are'} not shown.` : ''}</p>` : blank('No vendor has been chosen or paid on any order yet.')}</div>`;
+  $('#vdq').oninput = e => { C.vdq = e.target.value; clearTimeout(C.vdqT); C.vdqT = setTimeout(() => refresh().then(() => { const i = $('#vdq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }), 250); };
+};
+routes.vendor = async ({ id }) => {
+  const d = await api('acc_vendor', { id }), v = d.vendor, t = d.totals;
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#vdash">← Vendor dashboard</a></div><h1>${esc(v.name)}</h1><p>${esc([v.city, v.phone, v.email, v.notes].filter(Boolean).join(' · ')) || 'Vendor'}</p></div>${v.phone ? `<div class="row">${waBtn(v.phone, '', 'WhatsApp')}</div>` : ''}</div>
+  <div class="kpis"><div class="kpi hl"><span>Outstanding</span><b>${inr(t.outstanding)}</b><small>still to pay</small></div>
+   <div class="kpi"><span>Agreed</span><b>${inr(t.agreed)}</b><small>${t.orders} order${t.orders === 1 ? '' : 's'}</small></div>
+   <div class="kpi"><span>Paid to vendor</span><b>${inr(t.paid)}</b><small>${t.last ? 'last on ' + fd(t.last) : 'nothing paid yet'}</small></div>
+   ${t.over > 0.5 ? `<div class="kpi"><span>Paid more than agreed</span><b>${inr(t.over)}</b><small>check the orders below</small></div>` : ''}</div>
+  <div class="panel"><h2>Orders</h2>${d.orders.length ? `<div class="tw"><table><tr><th>Order</th><th>Status</th><th class="r">Agreed</th><th class="r">Paid</th><th class="r">Outstanding</th><th>Last paid</th></tr>
+   ${d.orders.map(r => `<tr style="${r.live ? '' : 'opacity:.6'}"><td><a href="#project-${r.project_id}-money"><b>${esc(r.company)}</b></a><div class="sub">${esc(r.expo)}${r.location ? ', ' + esc(r.location) : ''} · ${fd(r.start_date)}</div></td><td>${vStat(r)}</td>
+     <td class="r num">${r.agreed === null ? '—' : inr(r.agreed)}</td><td class="r num">${inr(r.paid)}${r.over > 0.5 ? `<div class="sub" style="color:var(--amb)">${inr(r.over)} over agreed</div>` : ''}</td><td class="r num" style="${r.outstanding > 0.5 ? 'color:var(--bad);font-weight:700' : ''}">${inr(r.outstanding)}</td><td class="num">${r.last ? fd(r.last) : '—'}</td></tr>`).join('')}
+   <tr class="tot"><td><b>Total</b></td><td></td><td class="r num">${inr(t.agreed)}</td><td class="r num">${inr(t.paid)}</td><td class="r num"><b>${inr(t.outstanding)}</b></td><td></td></tr></table></div>
+   <p class="sub">To record a payment, open the order (click its name) → Payments &amp; costs, or use + New entry → Payment to vendor. Tick “vendor settled” on the order when the final amount is paid even if it is less than agreed.</p>` : blank('No orders with this vendor yet.')}</div>
+  <div class="panel"><h2>Payments made</h2>${d.payments.length ? `<div class="tw"><table><tr><th>Date</th><th>Order</th><th>Mode</th><th>Reference</th><th class="r">Amount</th></tr>
+   ${d.payments.map(x => `<tr><td class="num">${fd(x.pdate)}</td><td><a href="#project-${x.project_id}-money">${esc(x.company)}</a><div class="sub">${esc(x.expo)}</div></td><td>${esc(x.mode)}</td><td class="sub">${esc(x.reference || '')}</td><td class="r num">${inr(x.amount)}</td></tr>`).join('')}</table></div>` : '<div class="sub">No payments yet.</div>'}</div>`;
 };
 routes.accset = async () => {
   const m = await accMeta(true); const c = m.company;
