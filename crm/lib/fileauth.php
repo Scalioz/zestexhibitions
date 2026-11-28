@@ -14,6 +14,7 @@ function file_allowed($me, $f) {
         || has_mod($me, 'accounts'); break;
       case 'cardscan': $allowed = (int) val('SELECT user_id FROM ' . T('card_scans') . ' WHERE id = ?', [$f['entity_id']]) === $uid; break;
       case 'voucher': $allowed = has_mod($me, 'accounts'); break;
+      case 'expo': $allowed = (bool) val('SELECT COUNT(*) FROM ' . T('expo_assign') . ' WHERE expo_id = ? AND user_id = ?', [$f['entity_id'], $uid]); break;
       case 'appr': $pid = val('SELECT project_id FROM ' . T('approvals') . ' WHERE id = ?', [$f['entity_id']]); break;
       case 'revision': $pid = val('SELECT project_id FROM ' . T('revisions') . ' WHERE id = ?', [$f['entity_id']]); break;
       case 'ritem': $allowed = (int) val('SELECT r.user_id FROM ' . T('report_items') . ' i JOIN ' . T('reports') . ' r ON r.id = i.report_id WHERE i.id = ?', [$f['entity_id']]) === $uid; break;

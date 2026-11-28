@@ -8,7 +8,7 @@ const SHRINK_LEVELS = [
   'balanced' => ['max' => 2000, 'q' => 80, 'label' => 'Balanced — recommended'],
   'small' => ['max' => 1600, 'q' => 72, 'label' => 'Smallest files'],
 ];
-const SHRINK_DESIGN = ['final', 'wd', 'appr'];   // design files may be printed: kept at a higher resolution
+const SHRINK_DESIGN = ['expo', 'final', 'wd', 'appr'];   // design files may be printed: kept at a higher resolution
 function shrink_cfg($entity = '') {
   $l = setting('file_quality', 'balanced'); $c = SHRINK_LEVELS[$l] ?? SHRINK_LEVELS['balanced'];
   if (in_array($entity, SHRINK_DESIGN, true)) { $c['max'] = (int) round($c['max'] * 1.5); $c['q'] = min(90, $c['q'] + 5); }

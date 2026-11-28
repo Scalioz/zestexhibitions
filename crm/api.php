@@ -145,6 +145,7 @@ if (in_array($A, ['lexpos', 'lexpo', 'lexpo_save', 'lead_add', 'lead_bulk', 'lea
   'ops_jobs', 'ops_job', 'ops_save', 'jobs_board'], true)) require __DIR__ . '/lib/work_api.php';
 if (str_starts_with($A, 'acc_') || str_starts_with($A, 'inv_') || str_starts_with($A, 'claim_')) require __DIR__ . '/lib/acc_api.php';
 if (str_starts_with($A, 'att_')) require __DIR__ . '/lib/att_api.php';
+if (str_starts_with($A, 'xp_')) require __DIR__ . '/lib/expo_api.php';
 if (in_array($A, ['appr_request', 'appr_cancel', 'appr_decide', 'appr_sent', 'sales_log', 'design_client_ok', 'design_source', 'quote_prefill', 'quote_save'], true)) require __DIR__ . '/lib/appr_api.php';
 
 // ---------- actions ----------
@@ -162,6 +163,8 @@ case 'boot':
     'vendors' => all('SELECT id, name, phone, email, city, notes FROM ' . T('vendors') . ' WHERE active = 1 ORDER BY name'),
     'expos' => expo_list(),
     'my_leads_n' => (function () use ($MID) { try { return (int) val('SELECT COUNT(*) FROM ' . T('leads') . " WHERE assigned_to = ? AND (heat IS NULL OR heat NOT IN ('no', 'cold')) AND follow IS NULL", [$MID]); } catch (Throwable $e) { return 0; } })(),
+    'my_expos_n' => (function () use ($MID) { try { return (int) val('SELECT COUNT(*) FROM ' . T('expo_assign') . ' WHERE user_id = ? AND done_at IS NULL', [$MID]); } catch (Throwable $e) { return 0; } })(),
+    'my_expos_all' => (function () use ($MID) { try { return (int) val('SELECT COUNT(*) FROM ' . T('expo_assign') . ' WHERE user_id = ?', [$MID]); } catch (Throwable $e) { return 0; } })(),
     'my_leads_all' => (function () use ($MID) { try { return (int) val('SELECT COUNT(*) FROM ' . T('leads') . ' WHERE assigned_to = ?', [$MID]); } catch (Throwable $e) { return 0; } })(),
     'partners' => ($ADMIN || $ACC) ? (function () { try { return all('SELECT id, name, rev_pct, exp_pct FROM ' . T('partners') . ' WHERE active = 1 ORDER BY name'); } catch (Throwable $e) { return []; } })() : [],
     'profile' => profile_info(),
@@ -772,6 +775,9 @@ case 'upload':
     case 'profile':   // admin: company profile PDF sent to new clients
       need_admin(); $eid = 0;
       if (strtolower(pathinfo($_FILES['file']['name'] ?? '', PATHINFO_EXTENSION)) !== 'pdf') fail('Please upload the company profile as a PDF.'); break;
+    case 'expo':   // exhibitor list for an expo: admin, or someone the expo is assigned to
+      if (!val('SELECT COUNT(*) FROM ' . T('expos') . ' WHERE id = ?', [$eid])) fail('Expo not found.', 404);
+      if (!$ADMIN && !val('SELECT COUNT(*) FROM ' . T('expo_assign') . ' WHERE expo_id = ? AND user_id = ?', [$eid, $MID])) fail('This expo is not assigned to you.', 403); break;
     case 'ritem':
       $r = one('SELECT r.user_id, r.submitted_at FROM ' . T('report_items') . ' i JOIN ' . T('reports') . ' r ON r.id = i.report_id WHERE i.id = ?', [$eid]);
       if (!$r || (int) $r['user_id'] !== $MID || strtotime($r['submitted_at']) < time() - 900) fail('This report is locked.', 403); break;

@@ -279,3 +279,6 @@ input[readonly]{background:var(--bg);border-style:dashed}
 .btn.ghost:hover{background:var(--navy-soft)}
 .badge{background:var(--bad);color:#fff}
 #vkdet:empty{display:none}
+/* expo calendar: AI working indicator */
+.xspin{width:16px;height:16px;border-radius:50%;border:2px solid var(--gold-soft);border-top-color:var(--gold);animation:xspin .8s linear infinite;flex:none}
+@keyframes xspin{to{transform:rotate(360deg)}}

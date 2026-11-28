@@ -226,6 +226,18 @@ function migrate() {
     foreach (['disc_val DECIMAL(14,2)', 'disc_type VARCHAR(4)', 'round_to INT'] as $col) { try { db()->exec('ALTER TABLE ' . T('projects') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ } }
     set_setting('schema_v', 32);
   }
+  if ($v < 33) {   // expo calendar: details read from web pages, exhibitor-list links, and who works on each expo
+    foreach (['country VARCHAR(60)', 'halls VARCHAR(200)', 'organiser VARCHAR(200)', 'industry VARCHAR(250)', 'description TEXT', 'list_url VARCHAR(500)', 'source_url VARCHAR(500)', 'updated_at DATETIME'] as $col) {
+      try { db()->exec('ALTER TABLE ' . T('expos') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ } }
+    $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
+    $PK = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT UNSIGNED AUTO_INCREMENT PRIMARY KEY';
+    $E = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+    foreach (['CREATE TABLE IF NOT EXISTS ' . T('expo_assign') . " (id $PK, expo_id INT NOT NULL, user_id INT NOT NULL, note TEXT, due DATE, assigned_by INT, assigned_at DATETIME, seen_at DATETIME, done_at DATETIME, done_note TEXT)$E",
+      'CREATE INDEX zc_expo_asg ON ' . T('expo_assign') . ' (user_id, expo_id)',
+      'CREATE TABLE IF NOT EXISTS ' . T('expo_links') . " (id $PK, expo_id INT NOT NULL, url VARCHAR(500) NOT NULL, label VARCHAR(200), added_by INT, created_at DATETIME NOT NULL)$E",
+      'CREATE INDEX zc_expo_links ON ' . T('expo_links') . ' (expo_id)'] as $q) { try { db()->exec($q); } catch (PDOException $e) { if (stripos($q, 'CREATE TABLE') === 0) throw $e; } }
+    set_setting('schema_v', 33);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';

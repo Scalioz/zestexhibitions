@@ -317,11 +317,11 @@ function tabBar(cur) {
 }
 document.addEventListener('click', e => { if (e.target.closest('#tbMenu')) { e.preventDefault(); e.stopPropagation(); document.body.classList.toggle('menu-open'); } }, true);
 function renderNav(cur) {
-  const map = { qgen: 'clients', jv: 'books', inv: 'invoices', invnew: 'invoices', invd: B.acc ? 'invoices' : 'myinv', acc: isAdmin() ? 'acc' : 'home', client: 'clients', project: 'clients', lexpo: isAdmin() ? 'leadlog' : 'leads', opsjob: isAdmin() ? 'jobs' : 'myops' };
+  const map = { qgen: 'clients', jv: 'books', inv: 'invoices', invnew: 'invoices', invd: B.acc ? 'invoices' : 'myinv', acc: isAdmin() ? 'acc' : 'home', client: 'clients', project: 'clients', lexpo: isAdmin() ? 'leadlog' : 'leads', expo: isAdmin() ? 'expocal' : 'myexpos', opsjob: isAdmin() ? 'jobs' : 'myops' };
   const on = map[cur] || cur;
   const L = (k, l, b) => `<a href="#${k}" class="${on === k ? 'on' : ''}">${l}${b ? `<span class="badge">${b}</span>` : ''}</a>`;
   $('#nav').innerHTML = isAdmin()
-    ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('saleslog', 'Sales log', B.pending_approvals || '')}${L('invappr', 'Invoice approvals', B.inv_pending || '')}${L('leadlog', 'Expo data log')}${L('jobs', 'Design & production')}${L('reportlog', 'Daily reports', B.flags || '')}${L('att', 'Attendance', B.att_pending || '')}
+    ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('saleslog', 'Sales log', B.pending_approvals || '')}${L('invappr', 'Invoice approvals', B.inv_pending || '')}${L('expocal', 'Expo calendar')}${L('leadlog', 'Expo data log')}${L('jobs', 'Design & production')}${L('reportlog', 'Daily reports', B.flags || '')}${L('att', 'Attendance', B.att_pending || '')}
        <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('vendors', 'Vendors')}${L('dnq', 'Do-not-quote list')}
        <div class="sec">Accounts</div>${L('acc', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('payroll', 'Payroll & salaries')}${L('partners', 'Business partners')}${L('vdash', 'Vendor dashboard')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}
        <div class="sec">Admin</div>${L('team', 'Team')}${L('alerts', 'Auto WhatsApp alerts')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
@@ -329,6 +329,7 @@ function renderNav(cur) {
     : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('vendors', 'Vendors')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('payroll', 'Payroll & salaries')}${L('partners', 'Business partners')}${L('vdash', 'Vendor dashboard')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
     : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('vendors', 'Vendors')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
     : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') + L('newclient', '+ New client') + L('contacts', 'Contacts') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('vendors', 'Vendors') + L('contacts', 'Contacts') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`;
+  if (!isAdmin() && B.my_expos_all && !$('#nav a[href="#myexpos"]')) { const first = $('#nav a'); const h = L('myexpos', 'My expos', B.my_expos_n || ''); if (first) first.insertAdjacentHTML('afterend', h); else $('#nav').insertAdjacentHTML('afterbegin', h); }
   if (B.my_leads_all && !$('#nav a[href="#myleads"]')) { const first = $('#nav a'); const h = L('myleads', 'Assigned leads', B.my_leads_n || ''); if (first) first.insertAdjacentHTML('afterend', h); else $('#nav').insertAdjacentHTML('afterbegin', h); }
   $('#nav').insertAdjacentHTML('beforeend', `<div class="nav-acc"><div class="sec">${esc(B.me.name)}</div><a href="#account">Account</a><a href="logout.php">Sign out</a></div>`);
   tabBar(cur);
@@ -2526,6 +2527,232 @@ routes.vendors = async () => {
   $('#vq').oninput = e => { C.vq = e.target.value; clearTimeout(C.vqT); C.vqT = setTimeout(() => { refresh().then(() => { const i = $('#vq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 250); };
   view().querySelectorAll('[data-vedit]').forEach(b => b.onclick = () => { C.vEdit = b.dataset.vedit; refresh().then(() => $('#vform').scrollIntoView({ behavior: 'smooth', block: 'start' })); });
 };
+// ---------- EXPO CALENDAR: AI reads expo pages and exhibitor lists; admin assigns expos to the team ----------
+const xpDates = x => x.edate ? fd(x.edate) + (x.end_date && x.end_date !== x.edate ? ' – ' + fd(x.end_date) : '') : '<span class="sub">dates not known</span>';
+const xpPlace = x => [x.venue, x.city, x.country && !/^india$/i.test(x.country) ? x.country : ''].filter(Boolean).map(esc).join(', ') || '—';
+const xpWhen = x => { if (!x.edate) return ''; const end = x.end_date || x.edate; if (end < B.today) return '<span class="pill p-off">over</span>'; if (x.edate <= B.today) return '<span class="pill p-won">on now</span>';
+  const d = Math.round((new Date(x.edate) - new Date(B.today)) / 864e5); return d <= 30 ? `<span class="pill p-quoted">in ${d} day${d === 1 ? '' : 's'}</span>` : d <= 90 ? `<span class="pill p-enquiry">in ${Math.round(d / 7)} weeks</span>` : ''; };
+const xpProg = (el, t) => { if (el) el.innerHTML = t ? `<div class="inset" style="display:flex;gap:10px;align-items:center"><span class="xspin"></span><span>${t}</span></div>` : ''; };
+let PDFJS = null;
+async function pdfLib() { if (!PDFJS) { PDFJS = await import(new URL('assets/pdfjs/pdf.js?v=4.10.38', location.href).href); PDFJS.GlobalWorkerOptions.workerSrc = new URL('assets/pdfjs/pdf.worker.js?v=4.10.38', location.href).href; } return PDFJS; }
+// a PDF exhibitor list → jobs for the AI: text of the pages (grouped), and photos of scanned pages
+async function pdfJobs(fileId, prog) {
+  const lib = await pdfLib(); const buf = await (await fetch('file.php?id=' + fileId + '&dl=1', { credentials: 'same-origin' })).arrayBuffer();
+  const doc = await lib.getDocument({ data: buf, isEvalSupported: false }).promise; const n = doc.numPages, jobs = []; let txt = '', from = 1, imgs = [], imgFrom = 0;
+  const flushT = to => { if (txt.trim()) jobs.push({ text: txt, label: `pages ${from}–${to}` }); txt = ''; from = to + 1; };
+  const flushI = to => { if (imgs.length) jobs.push({ images: imgs, label: `pages ${imgFrom}–${to} (scanned)` }); imgs = []; };
+  for (let i = 1; i <= Math.min(n, 400); i++) {
+    prog(`Opening the PDF — page ${i} of ${n}…`);
+    const pg = await doc.getPage(i), tc = await pg.getTextContent(); let lastY = null, s = '';
+    for (const it of tc.items) { const y = it.transform ? Math.round(it.transform[5]) : null; if (lastY !== null && y !== null && Math.abs(y - lastY) > 2) s += '\n'; else if (s && !s.endsWith(' ')) s += ' '; s += it.str; lastY = y; if (it.hasEOL) { s += '\n'; lastY = null; } }
+    if (s.replace(/\s/g, '').length < 40) {   // scanned page: send a picture of it
+      const vp0 = pg.getViewport({ scale: 1 }), sc = Math.min(2.2, 1700 / vp0.width), vp = pg.getViewport({ scale: sc }), cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
+      await pg.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise; if (!imgs.length) imgFrom = i; imgs.push(cv.toDataURL('image/jpeg', 0.82)); if (imgs.length >= 3) flushI(i); flushT(i - 1); from = i + 1; continue;
+    }
+    flushI(i - 1);
+    if (txt.length + s.length > 24000) flushT(i - 1);
+    txt += `\n--- page ${i} ---\n` + s;
+  }
+  flushT(Math.min(n, 400)); flushI(Math.min(n, 400));
+  return { jobs, note: n > 400 ? `Only the first 400 of ${n} pages were read.` : '' };
+}
+// read an exhibitor list (file / link / pasted text) → rows, part by part, with progress
+async function xpReadList(expoId, src, el) {
+  const prog = t => xpProg(el, t); let jobs = [], note = '';
+  prog('Getting the list ready…');
+  if (src.text) jobs = src.text.match(/[\s\S]{1,24000}(\n|$)/g).map((t, i, a) => ({ text: t, label: a.length > 1 ? `part ${i + 1} of ${a.length}` : 'the whole list' }));
+  else {
+    const r = await api('xp_src', { expo_id: expoId, ...src });
+    if (r.saved) toast(`Saved a copy of the file: ${r.saved}`);
+    if (r.kind === 'pdf') ({ jobs, note } = await pdfJobs(r.file_id, prog));
+    else if (r.kind === 'image') jobs = [{ file_id: r.file_id, label: 'the photo' }];
+    else { jobs = r.parts.map((t, i) => ({ text: t, label: r.parts.length > 1 ? `part ${i + 1} of ${r.parts.length}` : 'the whole list' })); if (r.more) note = `The list was very long — only the first ${r.parts.length} parts were read.`; }
+  }
+  if (!jobs.length) throw new Error('No readable text or pages found in this list.');
+  const seen = new Map(), errs = [];
+  for (let i = 0; i < jobs.length; i++) {
+    prog(`AI is reading ${jobs[i].label} (${i + 1} of ${jobs.length})… ${seen.size} exhibitors found so far. Keep this page open.`);
+    try { const r = await api('xp_rows', { expo_id: expoId, label: jobs[i].label, text: jobs[i].text, images: jobs[i].images, file_id: jobs[i].file_id }); r.rows.forEach(x => { const k = x.company.toLowerCase(); if (!seen.has(k)) seen.set(k, x); }); }
+    catch (e) { errs.push(`${jobs[i].label}: ${e.message}`); }
+  }
+  prog('');
+  return { rows: [...seen.values()], errs, note };
+}
+function xpRowsPreview(rows, have) {
+  const hv = new Set((have || []).map(x => x.company.toLowerCase()));
+  return `<div class="panel" id="xr-prev" style="border-color:var(--gold)"><div class="ph"><h2>AI found ${rows.length} exhibitor${rows.length === 1 ? '' : 's'}</h2><label class="row" style="gap:6px"><input type="checkbox" id="xr-all" checked> Select all</label></div>
+   <p class="sub" style="margin-top:0">Check the list, untick anything wrong, then add. Companies already in this expo are skipped automatically.</p>
+   <div class="tw tall"><table><thead><tr><th></th><th>Company</th><th>Contact</th><th>Phone</th><th>Email</th><th>Hall / stall</th><th>City / country</th><th>Website · products</th></tr></thead>
+   ${rows.map((x, i) => `<tr style="${hv.has(x.company.toLowerCase()) ? 'opacity:.5' : ''}"><td><input type="checkbox" data-xr="${i}" ${hv.has(x.company.toLowerCase()) ? '' : 'checked'}></td><td><b>${esc(x.company)}</b>${hv.has(x.company.toLowerCase()) ? '<div class="sub">already in this expo</div>' : ''}</td><td>${esc(x.person)}</td><td class="num">${esc(x.phone)}</td><td>${esc(x.email)}</td><td>${esc(x.stall)}</td><td>${esc(x.place)}</td><td class="sub">${esc([x.website, x.products].filter(Boolean).join(' · '))}</td></tr>`).join('')}</table></div>
+   <div class="row" style="margin-top:10px"><button class="btn" id="xr-add">+ Add ticked exhibitors to this expo</button><button class="btn ghost" id="xr-cancel">Discard</button></div></div>`;
+}
+
+routes.expocal = async () => {
+  const f = C.xf || (C.xf = { when: 'upcoming', q: '', india: 1 });
+  const d = await api('xp_list', f);
+  const A = C.xadd;   // the "add from links" panel state
+  view().innerHTML = `<div class="head"><div><h1>Expo calendar</h1><p>Major expos to target. Paste expo web links and the AI fills in the name, venue, dates and halls. Open an expo to add its exhibitor list and assign it to the team.</p></div>
+   <div class="row"><button class="btn" id="xa-open">✨ Add expos from web links</button></div></div>
+  ${A ? `<div class="panel" style="border-color:var(--gold)"><div class="ph"><h2>Add expos from web links</h2><button type="button" class="btn link sm" id="xa-x">Close ✕</button></div>
+   <div class="tabs" style="margin-bottom:12px"><a href="#expocal" data-xamode="links" class="${A.mode !== 'paste' ? 'on' : ''}">Web links</a><a href="#expocal" data-xamode="paste" class="${A.mode === 'paste' ? 'on' : ''}">Paste page text</a></div>
+   ${A.mode === 'paste' ? `<label class="f">Page text <span class="sub" style="font-weight:400">open the expo page, press Ctrl+A then Ctrl+C, and paste here</span><textarea id="xa-text" style="min-height:160px">${esc(A.text || '')}</textarea></label>
+     <label class="f" style="margin-top:8px">Page link (optional)<input id="xa-src" value="${esc(A.src || '')}" placeholder="https://…"></label>`
+   : `<label class="f">Web links <span class="sub" style="font-weight:400">one per line — a single expo page, or an events calendar page that lists many expos</span><textarea id="xa-links" style="min-height:110px" placeholder="https://www.example-expo.com/&#10;https://www.organiser.com/events-calendar">${esc(A.links || '')}</textarea></label>`}
+   <div class="row" style="margin-top:10px"><button class="btn" id="xa-go">✨ Read with AI</button><span class="sub">Each page takes 20–60 seconds. The AI uses your business-card AI key.</span></div>
+   <div id="xa-prog" style="margin-top:10px"></div>
+   ${A.errs && A.errs.length ? `<div class="warnbox" style="margin-top:10px">${A.errs.map(e => `<div>⚠ ${esc(e)}</div>`).join('')}</div>` : ''}
+   ${A.found ? (A.found.length ? `<h3 style="margin:14px 0 6px">Found ${A.found.length} expo${A.found.length === 1 ? '' : 's'} — tick the ones to save</h3>
+    <div class="row" style="gap:12px;margin-bottom:6px"><label class="row" style="gap:6px"><input type="checkbox" id="xa-all"> Select all</label><span class="sub">Expos in India are ticked for you.</span></div>
+    <div class="tw tall"><table><thead><tr><th></th><th>Expo</th><th>Dates</th><th>Venue</th><th>Halls</th><th>Industry</th><th></th></tr></thead>${A.found.map((x, i) => `<tr><td><input type="checkbox" data-xa="${i}" ${x.pick ? 'checked' : ''}></td>
+     <td><b>${esc(x.name)}</b>${x.organiser ? `<div class="sub">${esc(x.organiser)}</div>` : ''}${x.website ? `<div class="sub">${link(x.website)}</div>` : ''}</td><td class="num" style="white-space:nowrap">${x.start_date ? fd(x.start_date) + (x.end_date && x.end_date !== x.start_date ? ' – ' + fd(x.end_date) : '') : '<span class="sub">not given</span>'}</td>
+     <td>${esc([x.venue, x.city, x.country].filter(Boolean).join(', ')) || '—'}</td><td>${esc(x.halls || '—')}</td><td class="sub">${esc(x.industry || '')}</td><td>${x.existing_id ? '<span class="pill p-off">already in list</span>' : '<span class="pill p-enquiry">new</span>'}</td></tr>`).join('')}</table></div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="xa-save">Save ticked expos</button><span class="sub">An expo already in the list only gets its missing details filled in.</span></div>` : '<p class="sub">No expos were found on that page.</p>') : ''}
+  </div>` : ''}
+  <div class="panel"><div class="ph"><h2>${f.when === 'past' ? 'Past expos' : f.when === 'all' ? 'All expos' : 'Upcoming expos'} <span class="sub">(${d.expos.length})</span></h2>
+    <div class="row" style="gap:8px"><select id="xf-when" style="width:auto"><option value="upcoming" ${f.when === 'upcoming' ? 'selected' : ''}>Upcoming</option><option value="past" ${f.when === 'past' ? 'selected' : ''}>Past</option><option value="all" ${f.when === 'all' ? 'selected' : ''}>All</option></select>
+    <label class="row" style="gap:6px;font-size:13px"><input type="checkbox" id="xf-india" ${f.india ? 'checked' : ''}> India only</label><input id="xf-q" placeholder="Search expo, city, venue, industry…" value="${esc(f.q)}" style="max-width:260px"></div></div>
+   ${d.expos.length ? `<div class="tw"><table><tr><th>Expo</th><th>Dates</th><th>Venue</th><th>Halls</th><th class="r">Exhibitors</th><th>Assigned to</th></tr>
+   ${d.expos.map(x => `<tr class="click" data-go="expo-${x.id}"><td><b>${esc(x.name)}</b> ${xpWhen(x)}${x.industry ? `<div class="sub">${esc(x.industry)}</div>` : ''}</td><td class="num" style="white-space:nowrap">${xpDates(x)}</td><td>${xpPlace(x)}</td><td style="white-space:nowrap">${esc(x.halls || '—')}</td>
+     <td class="r num">${x.exhibitors || (x.lists ? '<span class="sub">list added</span>' : '—')}</td><td>${x.people.length ? x.people.map(p => `<span class="chip" style="margin:1px">${p.done ? '✓ ' : ''}${esc(p.name)}</span>`).join(' ') : '<span class="sub">—</span>'}</td></tr>`).join('')}</table></div>`
+   : blank(f.q ? 'No expo matches your search.' : 'No expos here yet. Use “Add expos from web links” to bring them in.')}
+   <p class="sub">This is the same expo list used on orders and in Expo data, so expos typed there show up here too.</p></div>`;
+  $('#xa-open').onclick = () => { C.xadd = C.xadd ? null : { mode: 'links' }; refresh(); };
+  if (!A) { xpCalWire(f); return; }
+  $('#xa-x').onclick = () => { C.xadd = null; refresh(); };
+  view().querySelectorAll('[data-xamode]').forEach(a => a.onclick = e => { e.preventDefault(); A.mode = a.dataset.xamode; refresh(); });
+  if ($('#xa-all')) $('#xa-all').onchange = e => { A.found.forEach(x => x.pick = e.target.checked); view().querySelectorAll('[data-xa]').forEach(c => c.checked = e.target.checked); };
+  view().querySelectorAll('[data-xa]').forEach(c => c.onchange = () => { A.found[+c.dataset.xa].pick = c.checked; });
+  $('#xa-go').onclick = async () => {
+    const b = $('#xa-go'); b.disabled = true; A.errs = []; const found = []; const el = $('#xa-prog');
+    const take = (list, src) => list.forEach(x => { if (!found.some(y => y.name.toLowerCase() === x.name.toLowerCase() && y.start_date === x.start_date)) found.push({ ...x, pick: !x.existing_id && (!x.country || /india/i.test(x.country)) }); });
+    try {
+      if (A.mode === 'paste') {
+        A.text = $('#xa-text').value; A.src = $('#xa-src').value.trim(); if (A.text.trim().length < 50) throw new Error('Paste the page text first.');
+        const parts = A.text.match(/[\s\S]{1,45000}(\n|$)/g);
+        for (let i = 0; i < parts.length; i++) { xpProg(el, `AI is reading the pasted text${parts.length > 1 ? ` (part ${i + 1} of ${parts.length})` : ''}…`); take((await api('xp_extract', { text: parts[i], url: A.src })).expos); }
+      } else {
+        A.links = $('#xa-links').value; const urls = [...new Set(A.links.split(/\s+/).map(u => u.trim()).filter(u => /^(https?:\/\/)?[\w-]+(\.[\w-]+)+/i.test(u)))];
+        if (!urls.length) throw new Error('Paste at least one web link.');
+        for (let u = 0; u < urls.length; u++) {
+          try {
+            xpProg(el, `Opening ${esc(urls[u])} (${u + 1} of ${urls.length})…`); const pg = await api('xp_fetch', { url: urls[u] });
+            for (let i = 0; i < pg.parts.length; i++) { xpProg(el, `AI is reading ${esc(urls[u])}${pg.parts.length > 1 ? ` — part ${i + 1} of ${pg.parts.length}` : ''} (${u + 1} of ${urls.length})… ${found.length} expo${found.length === 1 ? '' : 's'} found so far`); take((await api('xp_extract', { text: pg.parts[i], url: pg.url })).expos); }
+            if (pg.more) A.errs.push(`${urls[u]}: the page was very long, only the first part was read.`);
+          } catch (e) { A.errs.push(`${urls[u]}: ${e.message}`); }
+        }
+      }
+      A.found = found;
+    } catch (e) { toast(e.message, true); }
+    xpProg(el, ''); b.disabled = false; refresh();
+  };
+  if ($('#xa-save')) $('#xa-save').onclick = async () => {
+    const pick = A.found.filter(x => x.pick); if (!pick.length) return toast('Tick at least one expo', true);
+    const r = await act(() => api('xp_save', { expos: pick }), '').catch(() => null); if (!r) return;
+    toast(`${r.new} new expo${r.new === 1 ? '' : 's'} added${r.updated ? `, ${r.updated} updated` : ''}${r.same ? `, ${r.same} already up to date` : ''}`);
+    C.xadd = null; await reboot().catch(() => {}); refresh();
+  };
+  xpCalWire(f);
+};
+function xpCalWire(f) {
+  $('#xf-when').onchange = e => { f.when = e.target.value; refresh(); };
+  $('#xf-india').onchange = e => { f.india = e.target.checked ? 1 : 0; refresh(); };
+  let t; $('#xf-q').oninput = e => { clearTimeout(t); t = setTimeout(() => { f.q = e.target.value.trim(); refresh().then(() => { const i = $('#xf-q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 350); };
+}
+
+routes.expo = async ({ id }) => {
+  const d = await api('xp_get', { id }), x = d.expo, admin = isAdmin(), mine = d.mine;
+  const R = C.xrows && +C.xrows.id === +id ? C.xrows : null;   // AI result waiting to be added
+  const people = (B.users || []).filter(u => +u.active && +u.id !== +B.me.id || d.people.some(p => +p.user_id === +u.id));
+  const deps = [...new Set(people.map(u => u.department || 'Other'))].sort();
+  const asg = new Set(d.people.map(p => +p.user_id)), first = d.people[0] || {};
+  const F = (l, v) => v ? `<div class="l"><span>${l}</span><span style="text-align:right">${v}</span></div>` : '';
+  const aiBtn = (k, v) => `<button class="btn ghost sm" data-xread="${k}" data-v="${v}">✨ Read with AI</button>`;
+  const readable = n => /\.(pdf|xlsx|xlsm|csv|txt|docx|jpe?g|png|webp|gif|heic)$/i.test(n);
+  view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#${admin ? 'expocal' : 'myexpos'}">← ${admin ? 'Expo calendar' : 'My expos'}</a></div><h1>${esc(x.name)} ${xpWhen(x)}</h1><p>${xpDates(x)} · ${xpPlace(x)}${x.halls ? ' · ' + esc(x.halls) : ''}</p></div>
+   <div class="row">${x.website ? `<a class="btn ghost" href="${esc(x.website)}" target="_blank" rel="noopener">Expo website ↗</a>` : ''}${admin ? '<button class="btn ghost" id="xe-edit-open">Edit details</button>' : ''}</div></div>
+  ${mine ? `<div class="panel" style="border-color:${mine.done_at ? 'var(--ok)' : 'var(--gold)'}"><div class="ph"><h2>Your task on this expo</h2>${mine.done_at ? '<span class="pill p-won">done</span>' : mine.due ? `<span class="pill p-quoted">target ${fd(mine.due)}</span>` : ''}</div>
+    ${mine.note ? `<p style="margin-top:0;white-space:pre-wrap">${esc(mine.note)}</p>` : '<p class="sub" style="margin-top:0">No instructions added.</p>'}
+    <div class="row" style="align-items:flex-end;gap:8px"><label class="f" style="flex:1;min-width:220px">Your note to admin<input id="xm-note" value="${esc(mine.done_note || '')}" placeholder="e.g. Exhibitor list collected, 240 companies added"></label>
+     <button class="btn ${mine.done_at ? 'ghost' : ''}" id="xm-done">${mine.done_at ? 'Mark as not done' : '✓ Mark my work done'}</button></div></div>` : ''}
+  <div class="split"><div style="display:flex;flex-direction:column;gap:18px;min-width:0">
+   <form class="panel" id="xe-edit" hidden><h2>Expo details</h2><div class="grid g3">
+     ${[['name', 'Expo name *'], ['venue', 'Venue'], ['city', 'City'], ['country', 'Country'], ['halls', 'Halls'], ['organiser', 'Organiser'], ['industry', 'Industry / sectors'], ['website', 'Expo website'], ['list_url', 'Exhibitor list page']].map(([k, l]) => `<label class="f">${l}<input name="${k}" value="${esc(x[k] || '')}" ${k === 'name' ? 'required' : ''}></label>`).join('')}
+     <label class="f">Starts<input type="date" name="edate" value="${esc(x.edate || '')}"></label><label class="f">Ends<input type="date" name="end_date" value="${esc(x.end_date || '')}"></label>
+     <label class="f wide">Description<textarea name="description">${esc(x.description || '')}</textarea></label></div>
+    <div class="row" style="margin-top:10px"><button class="btn">Save</button><button type="button" class="btn ghost" id="xe-edit-x">Cancel</button><span style="flex:1"></span><button type="button" class="btn link" id="xe-del">Delete expo</button></div></form>
+
+   <div class="panel"><div class="ph"><h2>Exhibitor list</h2><span class="sub">PDF, Excel, Word, photo or web link — the AI turns it into exhibitor rows</span></div>
+    ${d.files.length || d.links.length || x.list_url ? `<div class="tw"><table><tr><th>List</th><th>Added by</th><th></th></tr>
+     ${x.list_url && !d.links.some(l => l.url === x.list_url) ? `<tr><td>🔗 ${link(x.list_url)}<div class="sub">exhibitor list page found by the AI</div></td><td class="sub">—</td><td class="r">${admin || mine ? `<button class="btn ghost sm" data-xlistpage="1">Use this link</button>` : ''}</td></tr>` : ''}
+     ${d.files.map(f => `<tr><td>📄 <a href="file.php?id=${f.id}" target="_blank" rel="noopener">${esc(f.orig_name)}</a> <span class="sub">${Math.max(1, Math.round(f.size / 1024))} KB</span></td><td class="sub">${esc(f.by)} · ${fd(f.created_at.slice(0, 10))}</td><td class="r" style="white-space:nowrap">${readable(f.orig_name) ? aiBtn('file_id', f.id) : '<span class="sub">save as PDF to read</span>'}${admin || +f.uploaded_by === +B.me.id ? ` <button class="btn link" data-xfdel="${f.id}" aria-label="Remove">✕</button>` : ''}</td></tr>`).join('')}
+     ${d.links.map(l => `<tr><td>🔗 ${link(l.url)}${l.label ? `<div class="sub">${esc(l.label)}</div>` : ''}</td><td class="sub">${esc(l.by)} · ${fd(l.created_at.slice(0, 10))}</td><td class="r" style="white-space:nowrap">${aiBtn('link_id', l.id)}${admin || +l.added_by === +B.me.id ? ` <button class="btn link" data-xldel="${l.id}" aria-label="Remove">✕</button>` : ''}</td></tr>`).join('')}</table></div>` : '<p class="sub" style="margin-top:0">No exhibitor list yet.</p>'}
+    <div class="row" style="margin-top:10px;gap:8px;align-items:flex-end;flex-wrap:wrap">${upBtn('expo', x.id, 'Upload list (PDF / Excel / Word / photo)', '.pdf,.xlsx,.xlsm,.csv,.txt,.docx,.doc,.xls,.jpg,.jpeg,.png,.webp,.heic')}
+     <form class="row" id="xl-add" style="gap:6px;flex:1;min-width:260px"><input name="url" placeholder="or paste the exhibitor list web link" style="flex:1"><button class="btn ghost sm">+ Add link</button></form></div>
+    <details style="margin-top:10px"><summary class="sub"><b>Paste list text</b> — for sites that block reading, copy the list and paste here</summary><textarea id="xl-text" style="min-height:120px;margin-top:6px"></textarea><div style="margin-top:6px"><button class="btn ghost sm" data-xread="text" data-v="1">✨ Read with AI</button></div></details>
+    <div id="xr-prog" style="margin-top:10px"></div>
+    ${R && R.errs.length ? `<div class="warnbox" style="margin-top:10px">${R.errs.map(e => `<div>⚠ ${esc(e)}</div>`).join('')}</div>` : ''}${R && R.note ? `<p class="sub">${esc(R.note)}</p>` : ''}</div>
+   ${R ? (R.rows.length ? xpRowsPreview(R.rows, d.rows) : '<div class="panel"><p class="sub">The AI did not find any exhibitors in that list.</p></div>') : ''}
+
+   <div class="panel"><div class="ph"><h2>Exhibitors <span class="sub">(${d.rows.length})</span></h2>${admin || (B.modules || []).some(m => ['leads', 'calls'].includes(m)) ? `<a class="btn ghost sm" href="#lexpo-${x.id}">Open in Expo data — edit, assign calls</a>` : ''}</div>
+    ${d.rows.length ? `<div class="tw tall"><table><thead><tr><th>#</th><th>Company</th><th>Contact</th><th>Phone</th><th>Email</th><th>Details</th><th>Added by</th></tr></thead>${d.rows.map((r, i) => `<tr><td class="num">${i + 1}</td><td><b>${esc(r.company)}</b></td><td>${esc(r.person || '')}</td><td class="num" style="white-space:nowrap">${esc(r.phone || '')}${r.phone ? ` <a class="btn link wa-ico" href="${esc(waUrl(r.phone, ''))}" target="_blank" rel="noopener" title="WhatsApp">💬</a>` : ''}</td><td>${r.email ? `<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : ''}</td><td class="sub">${esc(r.notes || '')}</td><td class="sub">${esc(r.by)}</td></tr>`).join('')}</table></div>`
+     : '<p class="sub" style="margin-top:0">No exhibitors yet. Upload the exhibitor list above and click “Read with AI”.</p>'}</div>
+  </div>
+  <aside style="display:flex;flex-direction:column;gap:18px;min-width:0">
+   <div class="panel sum" style="position:static"><h3>Expo details</h3>
+    ${F('Dates', xpDates(x))}${F('Venue', esc(x.venue || ''))}${F('City', esc([x.city, x.country].filter(Boolean).join(', ')))}${F('Halls', esc(x.halls || ''))}${F('Organiser', esc(x.organiser || ''))}${F('Industry', esc(x.industry || ''))}
+    ${F('Website', x.website ? link(x.website) : '')}${F('Read from', x.source_url ? link(x.source_url) : '')}
+    ${x.description ? `<p class="sub" style="margin:8px 0 0">${esc(x.description)}</p>` : ''}
+    ${d.orders.length ? `<h3 style="margin-top:14px">Our orders at this expo</h3>${d.orders.map(o => `<div class="l"><a href="#project-${o.id}">${esc(o.company)}</a><span class="pill p-${esc(o.status)}">${esc(o.status)}</span></div>`).join('')}` : ''}</div>
+   <div class="panel"><h3>${admin ? 'Assign to the team' : 'Working on this expo'}</h3>
+    ${d.people.length ? d.people.map(p => `<div class="l" style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid var(--line)"><span><b>${esc(p.name)}</b><span class="sub"> · ${esc(p.department || '')}</span>${p.done_note ? `<div class="sub">“${esc(p.done_note)}”</div>` : ''}</span><span>${p.done_at ? '<span class="pill p-won">done</span>' : p.seen_at ? '<span class="pill p-quoted">working</span>' : '<span class="pill p-off">not opened</span>'}</span></div>`).join('') : '<p class="sub" style="margin-top:0">Nobody assigned yet.</p>'}
+    ${admin ? `<form id="xa-form" style="margin-top:12px"><div class="sub" style="margin-bottom:6px"><b>Pick people</b> — tick or untick, then save</div>
+     <div style="max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px">${deps.map(dp => `<div class="sub" style="margin:6px 0 2px"><b>${esc(dp)}</b></div>${people.filter(u => (u.department || 'Other') === dp).map(u => `<label class="row" style="gap:6px;font-size:13px;padding:2px 0"><input type="checkbox" name="u" value="${u.id}" ${asg.has(+u.id) ? 'checked' : ''}> ${esc(u.name)}${u.designation ? ` <span class="sub">· ${esc(u.designation)}</span>` : ''}</label>`).join('')}`).join('')}</div>
+     <label class="f" style="margin-top:8px">What to do<textarea name="note" placeholder="e.g. Collect the full exhibitor list with phone numbers, then call the top 50">${esc(first.note || '')}</textarea></label>
+     <label class="f" style="margin-top:8px">Target date<input type="date" name="due" value="${esc(first.due || '')}"></label>
+     <button class="btn" style="margin-top:10px;width:100%;justify-content:center">Save assignment</button></form>` : ''}</div>
+  </aside></div>`;
+
+  // details: edit / delete
+  if ($('#xe-edit-open')) {
+    $('#xe-edit-open').onclick = () => { $('#xe-edit').hidden = false; $('#xe-edit').scrollIntoView({ behavior: 'smooth' }); };
+    $('#xe-edit-x').onclick = () => { $('#xe-edit').hidden = true; };
+    $('#xe-edit').onsubmit = async e => { e.preventDefault(); const ok = await act(() => api('xp_update', { id: x.id, fields: Object.fromEntries(new FormData(e.target)) }), 'Saved').catch(() => null); if (ok) refresh(); };
+    $('#xe-del').onclick = async () => { if (!confirm(`Delete “${x.name}” from the expo list? Its assignments and exhibitor-list files are removed too.`)) return; const ok = await act(() => api('xp_del', { id: x.id }), 'Expo deleted').catch(() => null); if (ok) location.hash = '#expocal'; };
+  }
+  // assignment
+  if ($('#xa-form')) $('#xa-form').onsubmit = async e => { e.preventDefault(); const fd_ = new FormData(e.target);
+    const ok = await act(() => api('xp_assign', { id: x.id, user_ids: fd_.getAll('u'), note: fd_.get('note'), due: fd_.get('due') }), 'Assignment saved').catch(() => null); if (ok) refresh(); };
+  if ($('#xm-done')) $('#xm-done').onclick = async () => { const ok = await act(() => api('xp_done', { id: x.id, done: mine.done_at ? 0 : 1, note: $('#xm-note').value }), mine.done_at ? 'Marked as not done' : 'Marked done').catch(() => null); if (ok) { await reboot().catch(() => {}); refresh(); } };
+  // exhibitor list sources
+  $('#xl-add').onsubmit = async e => { e.preventDefault(); const url = e.target.url.value.trim(); if (!url) return; const ok = await act(() => api('xp_link_add', { id: x.id, url }), 'Link added').catch(() => null); if (ok) refresh(); };
+  if ($('[data-xlistpage]')) $('[data-xlistpage]').onclick = async () => { const ok = await act(() => api('xp_link_add', { id: x.id, url: x.list_url, label: 'Exhibitor list page' }), 'Link added').catch(() => null); if (ok) refresh(); };
+  view().querySelectorAll('[data-xldel]').forEach(b => b.onclick = async () => { if (!confirm('Remove this link?')) return; await act(() => api('xp_link_del', { id: b.dataset.xldel }), 'Removed').catch(() => null); refresh(); });
+  view().querySelectorAll('[data-xfdel]').forEach(b => b.onclick = async () => { if (!confirm('Remove this file?')) return; await act(() => api('file_del', { id: b.dataset.xfdel }), 'Removed').catch(() => null); refresh(); });
+  view().querySelectorAll('[data-xread]').forEach(b => b.onclick = async () => {
+    const k = b.dataset.xread, src = k === 'text' ? { text: $('#xl-text').value } : { [k]: +b.dataset.v };
+    if (k === 'text' && src.text.trim().length < 30) return toast('Paste the list text first', true);
+    view().querySelectorAll('[data-xread]').forEach(z => z.disabled = true);
+    try { const r = await xpReadList(x.id, src, $('#xr-prog')); C.xrows = { id: x.id, ...r }; refresh().then(() => $('#xr-prev') && $('#xr-prev').scrollIntoView({ behavior: 'smooth', block: 'start' })); }
+    catch (e) { xpProg($('#xr-prog'), ''); toast(e.message, true); view().querySelectorAll('[data-xread]').forEach(z => z.disabled = false); }
+  });
+  if (R && $('#xr-add')) {
+    $('#xr-all').onchange = e => view().querySelectorAll('[data-xr]').forEach(c => c.checked = e.target.checked);
+    $('#xr-cancel').onclick = () => { C.xrows = null; refresh(); };
+    $('#xr-add').onclick = async () => { const rows = [...view().querySelectorAll('[data-xr]:checked')].map(c => R.rows[+c.dataset.xr]); if (!rows.length) return toast('Tick at least one exhibitor', true);
+      const r = await act(() => api('xp_rows_add', { expo_id: x.id, rows }), '').catch(() => null); if (!r) return;
+      toast(`${r.added} exhibitor${r.added === 1 ? '' : 's'} added${r.skipped ? ` · ${r.skipped} already there` : ''}`); C.xrows = null; refresh(); };
+  }
+};
+
+routes.myexpos = async () => {
+  const d = await api('xp_mine');
+  view().innerHTML = `<div class="head"><div><h1>My expos</h1><p>Expos admin has asked you to work on. Open one to see the details, add its exhibitor list and mark your work done.</p></div></div>
+  <div class="panel">${d.expos.length ? `<div class="tw"><table><tr><th>Expo</th><th>Dates</th><th>Venue</th><th>What to do</th><th>Target</th><th class="r">Exhibitors</th><th>Status</th></tr>
+   ${d.expos.map(x => `<tr class="click" data-go="expo-${x.id}" style="${x.done_at ? 'opacity:.65' : ''}"><td><b>${esc(x.name)}</b> ${xpWhen(x)}</td><td class="num" style="white-space:nowrap">${xpDates(x)}</td><td>${xpPlace(x)}${x.halls ? `<div class="sub">${esc(x.halls)}</div>` : ''}</td>
+    <td class="sub" style="max-width:280px">${esc(x.a_note || '')}</td><td class="num">${x.due ? fd(x.due) : '—'}</td><td class="r num">${x.exhibitors}</td><td>${x.done_at ? '<span class="pill p-won">done</span>' : x.seen_at ? '<span class="pill p-quoted">working</span>' : '<span class="pill p-enquiry">new</span>'}</td></tr>`).join('')}</table></div>`
+   : blank('No expos assigned to you yet.')}</div>`;
+};
+
 // ---------- vendor dashboard: agreed (chosen quote) · paid · outstanding ----------
 const vStat = r => !r.live ? `<span class="sub">${esc(r.status)} — not counted</span>` : r.agreed === null ? '<span class="pill p-pending">no quote chosen</span>' : r.settled ? '<span class="pill p-ok">settled</span>' : r.outstanding > 0.5 ? `<span class="pill p-rejected">${inr(r.outstanding)} due</span>` : '<span class="pill p-ok">fully paid</span>';
 routes.vdash = async () => {
