@@ -66,7 +66,7 @@ function quote_prefill($p, $c, $me) {
       ['l' => 'Stall Status', 'v' => ['bare' => 'Raw Space', 'bare space' => 'Raw Space', 'shell' => 'Shell Scheme', 'shell scheme' => 'Shell Scheme'][strtolower((string) $p['space_type'])] ?? (string) $p['space_type']], ['l' => 'Scope of Work', 'v' => $D['scope']],
     ],
     'items' => $items, 'show_rates' => 0,
-    'total' => (float) ($p['agreed'] ?: $p['offered'] ?: 0), 'discount' => 0, 'gst_rate' => (float) ($p['gst_rate'] ?: 18), 'gst_mode' => $same ? 'cgst_sgst' : 'igst',
+    'total' => (float) ($p['agreed'] ?: $p['offered'] ?: 0), 'discount' => $p['agreed'] ? order_discount($p) : 0, 'gst_rate' => (float) ($p['gst_rate'] ?: 18), 'gst_mode' => $same ? 'cgst_sgst' : 'igst',
     'payment_terms' => $D['payment_terms'], 'notes' => $D['notes'], 'client_resp' => $D['client_resp'], 'excludes' => $D['excludes'],
     'prepared_by' => $me['name'], 'prepared_phone' => (string) ($me['phone'] ?? ''),
   ];

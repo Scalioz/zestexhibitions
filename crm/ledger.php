@@ -38,9 +38,11 @@ foreach ($ps as $p) {
   $rows[] = ['head' => $title];
   $inv = $p['invoice_date']; $vno = $p['invoice_no'];
   $add = function ($date, $part, $sub, $type, $dr, $cr) use (&$rows, &$bal, &$TD, &$TC) { $bal += $dr - $cr; $TD += $dr; $TC += $cr; $rows[] = compact('date', 'part', 'sub', 'type', 'dr', 'cr') + ['bal' => $bal]; };
-  $add($inv, 'To Stall Fabrication A/c', 'Incl. erection, labour & transport charges' . ($p['area_sqm'] ? ' · Stall area ' . rtrim(rtrim($p['area_sqm'], '0'), '.') . ' sqm' : '') . ($vno ? ' · Inv ' . $vno : ''), 'Sales', $b['base'], 0);
+  $add($inv, 'To Stall Fabrication A/c', 'Incl. erection, labour & transport charges' . ($p['area_sqm'] ? ' · Stall area ' . rtrim(rtrim($p['area_sqm'], '0'), '.') . ' sqm' : '') . ($vno ? ' · Inv ' . $vno : ''), 'Sales', $b['agreed'], 0);
+  if ($b['discount'] > 0) $add($inv, 'By Discount allowed', ($p['disc_type'] ?? '') === 'pct' ? 'Discount ' . rtrim(rtrim($p['disc_val'], '0'), '.') . '% on agreed price' : 'Discount on agreed price', 'Sales', 0, $b['discount']);
   foreach ($ex as $x) $add($inv, 'To ' . $x['item'] . ' A/c', 'Extra: ' . rtrim(rtrim($x['qty'], '0'), '.') . ' × ₹' . inr($x['rate']), 'Sales', $x['rate'] * $x['qty'], 0);
   $add($inv, 'To Output GST @ ' . rtrim(rtrim($p['gst_rate'], '0'), '.') . '% A/c', 'On ₹' . inr($b['taxable']), 'Sales', $b['gst'], 0);
+  if ($b['round_off'] != 0) $add($inv, $b['round_off'] > 0 ? 'To Round off' : 'By Round off', 'Bill total rounded to ₹' . inr($b['total']), 'Sales', max($b['round_off'], 0), max(-$b['round_off'], 0));
   foreach ($pay as $i => $py) $add($py['pdate'], 'By ' . ($py['mode'] === 'Cash' ? 'Cash' : 'Bank') . ' A/c', 'Payment received' . ($py['mode'] !== 'Bank' && $py['mode'] !== 'Cash' ? ' (' . $py['mode'] . ')' : '') . ($py['reference'] ? ' · ' . $py['reference'] : ''), 'Receipt', 0, $py['amount']);
   $sum[] = ['t' => $title, 'b' => $b['total'], 'r' => $b['received']];
 }

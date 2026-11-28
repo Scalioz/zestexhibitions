@@ -670,9 +670,11 @@ routes.project = async ({ id, tab }) => {
    <h1>${esc(p.expo)}${p.location ? ', ' + esc(p.location) : ''}</h1><p>${fd(p.start_date)} – ${fd(p.end_date)}${p.area_sqm ? ' · ' + num(p.area_sqm) + ' sqm' : ''}${p.space_type ? ' · ' + esc(p.space_type) : ''}${p.stall_no ? ' · Stall ' + esc(p.stall_no) : ''} · ${esc(p.owner)}</p></div>${pill(p.status)}</div>
   <div class="split"><div class="panel" style="padding-top:4px"><div class="tabs">${TABS.map(([k, l]) => `<a href="#project-${p.id}-${k}" class="${tab === k ? 'on' : ''}">${l}</a>`).join('')}</div><div style="padding-top:16px">${PT[tab](p)}</div></div>
   <aside class="panel sum"><h3>Bill summary</h3>
-   <div class="l"><span>Stall fabrication (agreed)</span><span class="num">${inr(b.base)}</span></div>
+   <div class="l"><span>Stall fabrication (agreed)</span><span class="num">${inr(b.agreed ?? b.base)}</span></div>
+   ${+b.discount ? `<div class="l"><span>Discount${p.disc_type === 'pct' ? ' ' + num(p.disc_val) + '%' : ''}</span><span class="num">− ${inr2(b.discount)}</span></div>` : ''}
    <div class="l"><span>Extras (${p.extras.length})</span><span class="num">${inr(b.extras)}</span></div>
-   <div class="l"><span>GST ${num(p.gst_rate)}%${p.gst_on !== null && p.gst_on !== '' ? ' on ' + inr(p.gst_on) : ''}</span><span class="num">${inr(b.gst)}</span></div>
+   <div class="l"><span>GST ${num(p.gst_rate)}%${p.gst_on !== null && p.gst_on !== '' ? ' on ' + inr(p.gst_on) : ''}</span><span class="num">${inr2(b.gst)}</span></div>
+   ${+b.round_off ? `<div class="l"><span>Round off</span><span class="num">${b.round_off > 0 ? '+ ' : '− '}${inr2(Math.abs(b.round_off))}</span></div>` : ''}
    <div class="l tot big"><span>Bill total</span><span class="num">${inr(b.total)}</span></div>
    <div class="l"><span>Received</span><span class="num">${inr(b.received)}</span></div>
    <div class="l tot"><span>Balance</span><span class="num" style="color:${b.balance > 0.5 ? 'var(--bad)' : 'var(--ok)'}">${inr(b.balance)}</span></div>
@@ -756,10 +758,12 @@ PT.production = p => `<div class="inset" style="margin-bottom:14px"><div class="
    <div class="sub"><b>Vendor assigned</b><br>${p.chosen_vendor ? `${esc(p.chosen_vendor.name)} · ${inr(p.chosen_vendor.amount)}` : 'Choose one in <a href="#project-' + p.id + '-vendors">Vendor quotes</a>'}</div></div></div>
   ${opsForm({ id: p.id, expo: p.expo, location: p.location, start_date: p.start_date, company: p.client.company, area_sqm: p.area_sqm, sides_open: p.sides_open, stall_no: p.stall_no, status: p.status,
     ops_person: p.ops_person, ops_assigned_by: p.ops_assigned_by, ops_assigned_on: p.ops_assigned_on, ops_updated_at: p.ops_updated_at, vendor: p.chosen_vendor, ops: p.ops })}`;
-PT.order = p => { const c = calcBill(p); return `<div class="grid">${PF(p, 'offered', 'Offered price (₹)', 'number')}${PF(p, 'agreed', 'Agreed price (₹)', 'number')}
+PT.order = p => { const c = calcBill(p), pct = p.disc_type === 'pct', rt = p.round_to === null || p.round_to === undefined || p.round_to === '' ? 1 : +p.round_to; return `<div class="grid">${PF(p, 'offered', 'Offered price (₹)', 'number')}${PF(p, 'agreed', 'Agreed price (₹)', 'number')}
+  <label class="f">Discount <span class="sub" style="font-weight:400">off agreed price, before GST</span><span class="row" style="gap:6px;flex-wrap:nowrap"><input data-pf="disc_val" type="number" min="0" step="any" value="${+p.disc_val ? num(p.disc_val) : ''}" placeholder="0" style="flex:1;min-width:0"><select data-pf="disc_type" style="width:auto"><option value="rs" ${pct ? '' : 'selected'}>₹</option><option value="pct" ${pct ? 'selected' : ''}>%</option></select></span><span class="sub" id="calc-disc">${c.disc ? '= ' + inr2(c.disc) + ' off · price after discount ' + inr2(c.base) : ''}</span></label>
   ${PF(p, 'gst_rate', 'GST rate (%)', 'number')}
-  <label class="f">GST amount (auto)<input id="calc-gst" readonly tabindex="-1" value="${inr(c.gst)}"></label>
-  <label class="f">Total incl. GST (auto)<input id="calc-total" readonly tabindex="-1" value="${inr(c.total)}" style="font-weight:700"></label>
+  <label class="f">GST amount (auto)<input id="calc-gst" readonly tabindex="-1" value="${inr2(c.gst)}"></label>
+  <label class="f">Round off bill total to<select data-pf="round_to">${[[1, 'Nearest ₹1'], [10, 'Nearest ₹10'], [100, 'Nearest ₹100'], [1000, 'Nearest ₹1,000'], [0, 'No rounding']].map(([v, l]) => `<option value="${v}" ${rt === v ? 'selected' : ''}>${l}</option>`).join('')}</select><span class="sub" id="calc-ro">${c.ro ? 'Round off ' + (c.ro > 0 ? '+ ' : '− ') + inr2(Math.abs(c.ro)) : ''}</span></label>
+  <label class="f">Total incl. GST (auto)<input id="calc-total" readonly tabindex="-1" value="${inr2(c.total)}" style="font-weight:700"></label>
   <label class="f">GST only on part amount (₹) <span class="sub" style="font-weight:400">optional · blank = GST on full amount</span><input data-pf="gst_on" type="number" value="${num(p.gst_on)}"></label>
   ${PF(p, 'approved_by', 'Quote approved by (Zest)')}
   <label class="f">Order status<select data-pf="status">${['enquiry', 'quoted', 'won', 'rejected', 'completed'].map(s => `<option value="${s}" ${p.status === s ? 'selected' : ''}>${cap(s)}</option>`).join('')}</select></label>
@@ -775,11 +779,14 @@ PT.order = p => { const c = calcBill(p); return `<div class="grid">${PF(p, 'offe
    <div class="row" style="margin-top:8px"><label class="up">⬆ Attach quote PDF<input type="file" name="file" multiple accept=".pdf,.jpg,.jpeg,.png,.docx,.xlsx"></label><button class="btn ghost sm">+ Add quote version</button></div></form></details>` : ''}`; };
 // Same maths as the server (lib/calc.php), used to update totals while typing
 function calcBill(p, over = {}) {
-  const v = k => (k in over ? over[k] : p[k]);
-  const base = +v('agreed') || 0, ext = p.extras.reduce((s, x) => s + x.rate * x.qty, 0);
+  const v = k => (k in over ? over[k] : p[k]), r2 = x => Math.round(x * 100) / 100;
+  const agreed = +v('agreed') || 0, dv = +v('disc_val') || 0;
+  const disc = dv <= 0 || agreed <= 0 ? 0 : v('disc_type') === 'pct' ? r2(agreed * Math.min(dv, 100) / 100) : Math.min(r2(dv), agreed);
+  const base = r2(agreed - disc), ext = p.extras.reduce((s, x) => s + x.rate * x.qty, 0);
   const on = v('gst_on'), taxable = on !== null && on !== '' && on !== undefined ? +on : base + ext;
-  const gst = Math.round(taxable * (+v('gst_rate') || 0)) / 100;
-  return { gst, total: base + ext + gst, ext };
+  const gst = Math.round(taxable * (+v('gst_rate') || 0)) / 100, pre = r2(base + ext + gst);
+  const rs = v('round_to'), step = rs === null || rs === undefined || rs === '' ? 1 : +rs, total = step > 0 ? r2(Math.round(pre / step) * step) : pre;
+  return { gst, total, ext, disc, base, ro: r2(total - pre) };
 }
 PT.vendors = p => { const min = p.vquotes.length ? Math.min(...p.vquotes.map(v => +v.amount)) : 0; return `<p class="sub" style="margin-top:0">Collect quotes from all vendors. L1 (lowest) is marked automatically. ${isAdmin() ? 'Choose the vendor who gets the job.' : 'Admin chooses the vendor.'}</p>
   ${p.vquotes.length ? `<div class="tw"><table><tr><th>Vendor</th><th class="r">Quote</th><th>Quality note</th><th>File</th><th>Chosen</th><th></th></tr>${p.vquotes.map(v => rowOr('vquote', v, 6, `<tr><td>${esc(v.vendor)}${+v.amount === min ? '<span class="l1">L1</span>' : ''}</td><td class="r num">${inr(v.amount)}</td><td>${esc(v.note || '')}</td><td>${fileChips(p.files.vquote[v.id], isAdmin())}${upBtn('vquote', v.id, 'Add')}</td><td>${isAdmin() ? `<input type="radio" name="vqsel" data-vqsel="${v.id}" ${+v.selected ? 'checked' : ''} aria-label="Choose ${esc(v.vendor)}">` : +v.selected ? '<span class="pill p-ok">chosen by admin</span>' : '<span class="sub">—</span>'}</td><td class="r">${acts('vquote', v.id)}</td></tr>`)).join('')}</table></div>` : '<div class="sub">No vendor quotes yet.</div>'}
@@ -2827,7 +2834,7 @@ document.addEventListener('click', async e => {
       }
       case 'inv-addline': invCapture(); C.inv.lines.push({ desc: '', sac: C.am.company.sac || '998596', qty: 1, rate: '', tax: 1 }); return drawInv();
       case 'inv-fill': { invCapture(); const pid = C.inv.project_id; if (!pid) return toast('Pick the order first', true);
-        const r = await act(() => api('inv_prefill', { project_id: pid })); Object.assign(C.inv, { client_id: r.client_id, gst_rate: r.gst_rate, lines: r.lines }); return drawInv(); }
+        const r = await act(() => api('inv_prefill', { project_id: pid })); Object.assign(C.inv, { client_id: r.client_id, gst_rate: r.gst_rate, lines: r.lines, discount: +r.discount || 0 }); return drawInv(); }
       case 'jv-rev-open': $('#jv-rev').hidden = false; $('#jv-edit') && ($('#jv-edit').hidden = true); return;
       case 'jv-edit-open': $('#jv-edit').hidden = false; $('#jv-rev').hidden = true; return;
       case 'coa-cancel': C.coaEdit = null; return refresh();
@@ -2868,9 +2875,10 @@ document.addEventListener('input', e => {
   if (ds.clc !== undefined) clCalc();
   if (ds.jl) { let dr = 0, cr = 0; document.querySelectorAll('#jl [data-jl=dr]').forEach(i => dr += +i.value || 0); document.querySelectorAll('#jl [data-jl=cr]').forEach(i => cr += +i.value || 0); $('#jl-tot').textContent = `Debit ${inr2(dr)} · Credit ${inr2(cr)}${Math.abs(dr - cr) > 0.009 ? ' · not equal yet' : ' · balanced'}`; }
   if (ds.furnq !== undefined && C.ops) { const f = C.ops.furniture.find(x => x.item === ds.furnq); if (f) f.qty = t.value; }
-  if (['agreed', 'gst_rate', 'gst_on'].includes(ds.pf) && C.project && $('#calc-total')) {
-    const over = {}; ['agreed', 'gst_rate', 'gst_on'].forEach(k => { const el = document.querySelector(`[data-pf="${k}"]`); if (el) over[k] = el.value; });
-    const c = calcBill(C.project, over); $('#calc-gst').value = inr(c.gst); $('#calc-total').value = inr(c.total);
+  if (['agreed', 'gst_rate', 'gst_on', 'disc_val', 'disc_type', 'round_to'].includes(ds.pf) && C.project && $('#calc-total')) {
+    const over = {}; ['agreed', 'gst_rate', 'gst_on', 'disc_val', 'disc_type', 'round_to'].forEach(k => { const el = document.querySelector(`[data-pf="${k}"]`); if (el) over[k] = el.value; });
+    const c = calcBill(C.project, over); $('#calc-gst').value = inr2(c.gst); $('#calc-total').value = inr2(c.total);
+    $('#calc-disc').textContent = c.disc ? '= ' + inr2(c.disc) + ' off · price after discount ' + inr2(c.base) : ''; $('#calc-ro').textContent = c.ro ? 'Round off ' + (c.ro > 0 ? '+ ' : '− ') + inr2(Math.abs(c.ro)) : '';
   }
 });
 

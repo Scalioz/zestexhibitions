@@ -93,15 +93,17 @@ function inv_prefill_lines($pid) {
   $sac = setting('company', [])['sac'] ?? '998596';
   $desc = 'Stall fabrication incl. erection, labour & transport — ' . $p['expo'] . ($p['location'] ? ", {$p['location']}" : '') . ($p['area_sqm'] ? ', ' . rtrim(rtrim($p['area_sqm'], '0'), '.') . ' sqm' : '') . ($p['stall_no'] ? ", stall {$p['stall_no']}" : '');
   $base = (float) ($p['agreed'] ?: $p['offered']); $lines = [];
+  $disc = $p['agreed'] ? order_discount($p) : 0.0;   // discount given on the order
   $ext = all('SELECT * FROM ' . T('extras') . ' WHERE project_id = ?', [$p['id']]); $extT = array_sum(array_map(fn($x) => $x['rate'] * $x['qty'], $ext));
-  if ($p['gst_on'] !== null && $p['gst_on'] !== '' && (float) $p['gst_on'] < $base + $extT) {   // GST charged only on part of the amount
+  if ($p['gst_on'] !== null && $p['gst_on'] !== '' && (float) $p['gst_on'] < $base - $disc + $extT) {   // GST charged only on part of the amount
     $lines[] = ['desc' => $desc, 'sac' => $sac, 'qty' => 1, 'rate' => (float) $p['gst_on'], 'tax' => 1];
-    $lines[] = ['desc' => 'Balance amount (no GST, as agreed)', 'sac' => '', 'qty' => 1, 'rate' => round($base + $extT - (float) $p['gst_on'], 2), 'tax' => 0];
+    $lines[] = ['desc' => 'Balance amount (no GST, as agreed)', 'sac' => '', 'qty' => 1, 'rate' => round($base - $disc + $extT - (float) $p['gst_on'], 2), 'tax' => 0];
+    $disc = 0.0;   // already taken off the balance line
   } else {
     $lines[] = ['desc' => $desc, 'sac' => $sac, 'qty' => 1, 'rate' => $base, 'tax' => 1];
     foreach ($ext as $x) $lines[] = ['desc' => 'Extra: ' . $x['item'], 'sac' => $sac, 'qty' => (float) $x['qty'], 'rate' => (float) $x['rate'], 'tax' => 1];
   }
-  return ['client_id' => (int) $p['client_id'], 'project_id' => (int) $p['id'], 'gst_rate' => (float) ($p['gst_rate'] ?: 18), 'lines' => $lines, 'owner_id' => (int) $p['owner_id']];
+  return ['client_id' => (int) $p['client_id'], 'project_id' => (int) $p['id'], 'gst_rate' => (float) ($p['gst_rate'] ?: 18), 'lines' => $lines, 'discount' => $disc, 'owner_id' => (int) $p['owner_id']];
 }
 function inv_issue_do($i) {   // gives the number (kept if a proforma is being revised) and posts a tax invoice to the books
   global $MID;
@@ -470,9 +472,9 @@ case 'inv_request':   // sales asks accounts for a proforma / tax invoice
       'lines_json' => $f['lines_json'], 'discount' => $f['discount'] ?? 0, 'round_off' => $f['round_off'] ?? 0, 'round_mode' => $f['round_mode'] ?? 'auto', 'taxable' => $f['taxable'], 'gst' => $f['gst'], 'total' => $f['total'], 'notes' => $f['notes'], 'from_id' => $f['id']];
   } elseif (!empty($in['project_id'])) {
     $pf = inv_prefill_lines($in['project_id']); if (!$ADMIN && $pf['owner_id'] !== $MID) fail('This order is not yours.', 403);
-    [$lines, $taxable, $gst, $total, , , $ro] = inv_totals($pf['lines'], $pf['gst_rate']);
+    [$lines, $taxable, $gst, $total, , $pdisc, $ro] = inv_totals($pf['lines'], $pf['gst_rate'], $pf['discount']);
     $data = ['kind' => $kind, 'inv_date' => today(), 'client_id' => $pf['client_id'], 'project_id' => $pf['project_id'], 'place_state' => $state, 'gst_mode' => 'cgst_sgst', 'gst_rate' => $pf['gst_rate'],
-      'lines_json' => json_encode($lines, JSON_UNESCAPED_UNICODE), 'round_off' => $ro, 'taxable' => $taxable, 'gst' => $gst, 'total' => $total];
+      'lines_json' => json_encode($lines, JSON_UNESCAPED_UNICODE), 'discount' => $pdisc, 'round_off' => $ro, 'taxable' => $taxable, 'gst' => $gst, 'total' => $total];
   } else {
     $cid = (int) ($in['client_id'] ?? 0); if (!val('SELECT COUNT(*) FROM ' . T('clients') . ' WHERE id = ?' . ($ADMIN ? '' : ' AND owner_id = ' . $MID), [$cid])) fail('Pick the order or the client.');
     $data = ['kind' => $kind, 'inv_date' => today(), 'client_id' => $cid, 'project_id' => null, 'place_state' => $state, 'gst_mode' => 'cgst_sgst', 'gst_rate' => 18, 'lines_json' => '[]', 'taxable' => 0, 'gst' => 0, 'total' => 0];

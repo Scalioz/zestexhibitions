@@ -134,7 +134,7 @@ $KINDS = [
 ];
 $ADMIN_DELETE_ONLY = ['payment', 'vpayment'];
 $PROJECT_FIELDS = ['expo' => 's', 'location' => 's', 'start_date' => 'd', 'end_date' => 'd', 'area_sqm' => 'n', 'space_type' => 's', 'sides_open' => 'i', 'stall_no' => 's',
-  'designed_by' => 's', 'assigned_on' => 'd', 'design_approved_by' => 's', 'status' => 's', 'offered' => 'n', 'agreed' => 'n',
+  'designed_by' => 's', 'assigned_on' => 'd', 'design_approved_by' => 's', 'status' => 's', 'offered' => 'n', 'agreed' => 'n', 'disc_val' => 'n', 'disc_type' => 's', 'round_to' => 'i',
   'gst_rate' => 'n', 'gst_on' => 'n', 'approved_by' => 's', 'invoice_no' => 's', 'invoice_date' => 'd', 'rejected_by' => 's', 'reason' => 's', 'rejection_note' => 's', 'vendor_settled' => 'i'];
 $CLIENT_FIELDS = ['company', 'email', 'phone', 'person', 'designation', 'location', 'city', 'gst_no', 'notes'];
 function clean($type, $v) { return match ($type) { 'd' => d($v), 'n' => n($v), 'i' => ($v === null || $v === '') ? null : (int) $v, default => s($v) }; }
@@ -674,6 +674,12 @@ case 'project_save':
   if (array_key_exists('expo', $data) && !$data['expo']) fail('Expo name cannot be empty.');
   if (isset($data['status']) && !in_array($data['status'], ['enquiry', 'quoted', 'won', 'rejected', 'completed'], true)) fail('Unknown status.');
   if (isset($data['rejected_by']) && !in_array($data['rejected_by'], ['us', 'client'], true)) $data['rejected_by'] = null;
+  if (array_key_exists('disc_type', $data) && !in_array($data['disc_type'], ['rs', 'pct'], true)) $data['disc_type'] = 'rs';
+  if (array_key_exists('round_to', $data) && !in_array($data['round_to'], [0, 1, 10, 100, 1000], true)) fail('Round off can be ₹1, ₹10, ₹100, ₹1,000 or off.');
+  if (array_intersect(['disc_val', 'disc_type', 'agreed'], array_keys($data))) { $np = $data + $p;
+    if ((float) ($np['disc_val'] ?? 0) < 0) fail('Discount cannot be negative.');
+    if (($np['disc_type'] ?? '') === 'pct' && (float) $np['disc_val'] >= 100) fail('Discount must be less than 100%.');
+    if (($np['disc_type'] ?? '') !== 'pct' && (float) ($np['disc_val'] ?? 0) > 0 && (float) $np['disc_val'] >= (float) ($np['agreed'] ?? 0)) fail('Discount must be less than the agreed price.'); }
   if ($ADMIN && !empty($in['fields']['owner_id'])) $data['owner_id'] = (int) $in['fields']['owner_id'];
   if (isset($data['status']) && is_won($data['status']) && !is_won($p['status']) && empty($p['won_on'])) $data['won_on'] = today();   // for the daily sales alert
   try { upd('projects', $p['id'], $data); }

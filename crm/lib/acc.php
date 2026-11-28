@@ -267,7 +267,7 @@ function partner_calc($pt, $withLedger = false) {
   $rows = [];
   foreach ($projects as $p) {
     $b = $bills[$p['id']]; $rp = $p['p_rev_pct'] !== null ? (float) $p['p_rev_pct'] : (float) $pt['rev_pct']; $ep = $p['p_exp_pct'] !== null ? (float) $p['p_exp_pct'] : (float) $pt['exp_pct'];
-    $rev = round($b['base'] + $b['extras'], 2); $vend = (!empty($p['vendor_settled']) || $p['status'] === 'completed') ? (float) $b['vendor_paid'] : max((float) $b['vendor_paid'], $vq[$p['id']] ?? 0); $cost = round($vend + $b['expenses'] + $b['losses'], 2);   // vendor: final paid when settled, else full agreed cost (or paid if more)
+    $rev = round($b['base'] + $b['extras'] + ($b['round_off'] ?? 0), 2); $vend = (!empty($p['vendor_settled']) || $p['status'] === 'completed') ? (float) $b['vendor_paid'] : max((float) $b['vendor_paid'], $vq[$p['id']] ?? 0); $cost = round($vend + $b['expenses'] + $b['losses'], 2);   // vendor: final paid when settled, else full agreed cost (or paid if more)
     $counts = is_won($p['status']);   // only orders actually won count towards his share
     $rs = $counts ? round($rev * $rp / 100, 2) : 0; $es = $counts ? round($cost * $ep / 100, 2) : 0; $net = round($rs - $es, 2); $po = round($posted[$p['id']] ?? 0, 2);
     $rows[] = ['id' => (int) $p['id'], 'expo' => $p['expo'], 'company' => $p['company'], 'status' => $p['status'], 'start_date' => $p['start_date'], 'rev_pct' => $rp, 'exp_pct' => $ep,

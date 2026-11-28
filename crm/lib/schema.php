@@ -222,6 +222,10 @@ function migrate() {
     try { db()->exec('ALTER TABLE ' . T('expenses') . ' ADD COLUMN created_by INT'); } catch (PDOException $e) { /* already there */ }
     set_setting('schema_v', 31);
   }
+  if ($v < 32) {   // order discount (₹ or %) and round off of the bill total
+    foreach (['disc_val DECIMAL(14,2)', 'disc_type VARCHAR(4)', 'round_to INT'] as $col) { try { db()->exec('ALTER TABLE ' . T('projects') . ' ADD COLUMN ' . $col); } catch (PDOException $e) { /* already there */ } }
+    set_setting('schema_v', 32);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';

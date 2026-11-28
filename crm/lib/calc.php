@@ -1,20 +1,29 @@
 <?php
 // Money maths for one project. All amounts in rupees.
+// Discount on the agreed price (before GST): typed as ₹ or as %
+function order_discount($p) {
+  $a = (float) ($p['agreed'] ?? 0); $v = (float) ($p['disc_val'] ?? 0); if ($v <= 0 || $a <= 0) return 0.0;
+  return ($p['disc_type'] ?? '') === 'pct' ? round($a * min($v, 100) / 100, 2) : min(round($v, 2), $a);
+}
+// Bill total rounded to the nearest ₹1 (default), ₹10, ₹100 or ₹1,000 — 0 = no rounding
+function order_round_to($p) { $r = $p['round_to'] ?? null; return ($r === null || $r === '') ? 1 : (int) $r; }
 function project_bill($p, $extras, $pay, $vpay, $exp, $loss) {
-  $base = (float) ($p['agreed'] ?? 0);
+  $agreed = (float) ($p['agreed'] ?? 0); $disc = order_discount($p);
+  $base = round($agreed - $disc, 2);   // price after discount
   $ext = 0; foreach ($extras as $x) $ext += $x['rate'] * $x['qty'];
   $taxable = ($p['gst_on'] !== null && $p['gst_on'] !== '') ? (float) $p['gst_on'] : $base + $ext;
   $gst = round($taxable * ((float) $p['gst_rate']) / 100, 2);
-  $total = $base + $ext + $gst;
+  $pre = round($base + $ext + $gst, 2); $step = order_round_to($p);
+  $total = $step > 0 ? round(round($pre / $step) * $step, 2) : $pre; $ro = round($total - $pre, 2);
   $rec = array_sum(array_column($pay, 'amount'));
   $vend = array_sum(array_column($vpay, 'amount'));
   $e = array_sum(array_column($exp, 'amount'));
   $l = array_sum(array_column($loss, 'amount'));
   return [
-    'base' => $base, 'extras' => $ext, 'taxable' => $taxable, 'gst' => $gst, 'total' => $total,
+    'agreed' => $agreed, 'discount' => $disc, 'base' => $base, 'extras' => $ext, 'taxable' => $taxable, 'gst' => $gst, 'round_off' => $ro, 'round_to' => $step, 'total' => $total,
     'received' => $rec, 'balance' => round($total - $rec, 2),
     'vendor_paid' => $vend, 'expenses' => $e, 'losses' => $l,
-    'profit' => round($base + $ext - $vend - $e - $l, 2),
+    'profit' => round($base + $ext + $ro - $vend - $e - $l, 2),
     'gst_received' => $total > 0 ? round($rec * $gst / $total, 2) : 0,
   ];
 }
