@@ -145,7 +145,7 @@ function claim_post($c, $exp, $credit, $mode, $payTo, $uname) {   // books an ap
   $lines[] = [$payTo, 0, $c['grand'], $c['particular']];
   $jid = post_journal($c['edate'], 'Claim', "Expense by $uname: {$c['particular']}", $lines, 'claim', $c['id'], $c['project_id'], $MID);
   if ($c['project_id']) {
-    ins('expenses', ['project_id' => $c['project_id'], 'edate' => $c['edate'], 'category' => pexp_cat(acc_get($exp)['sub']), 'description' => mb_substr("{$c['particular']} ($uname, claim #{$c['id']})", 0, 250), 'amount' => $c['total'] + ($credit ? 0 : $c['gst'])]);
+    ins('expenses', ['project_id' => $c['project_id'], 'edate' => $c['edate'], 'category' => pexp_cat(acc_get($exp)['sub']), 'description' => mb_substr("{$c['particular']} ($uname, claim #{$c['id']})", 0, 250), 'amount' => $c['total'] + ($credit ? 0 : $c['gst']), 'created_by' => (int) $c['user_id']]);
     ins('post_skip', ['ref_type' => 'pexp', 'ref_id' => (int) db()->lastInsertId()]);   // already in the books through this claim
   }
   return $jid;
@@ -260,6 +260,7 @@ case 'acc_entry':
   $pid = (int) ($in['project_id'] ?? 0) ?: null; $proj = $pid ? one('SELECT p.*, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . ' c ON c.id = p.client_id WHERE p.id = ?', [$pid]) : null;
   if ($pid && !$proj) fail('Order not found.');
   if (in_array($k, ['expense', 'vendor_pay'], true) && !$pid && ($in['project_id'] ?? '') !== 'none') fail('Pick which order this is for — or “None — general office / company overhead”.');
+  if ($k === 'expense' && $proj && $amt > 0) dup_guard($pid, [$amt, $amt + (n($in['gst'] ?? 0) ?? 0)]);
   tx();
   switch ($k) {
     case 'expense': {   // company overhead or order expense, paid or owed to a vendor
@@ -269,7 +270,7 @@ case 'acc_entry':
       $lines = [[$exp, $amt + ($credit ? 0 : $gst), 0, $narr]]; if ($credit) $lines = array_merge($lines, gst_lines($gst, $mode, 'in'));
       $lines[] = [$credAcc, 0, $amt + $gst, $narr];
       $jid = post_journal($date, 'Expense', $narr ?: acc_get($exp)['name'], $lines, null, null, $pid, $MID);
-      if ($proj) { $eid = ins('expenses', ['project_id' => $pid, 'edate' => $date, 'category' => pexp_cat(acc_get($exp)['sub']), 'description' => mb_substr($narr ?: acc_get($exp)['name'], 0, 250), 'amount' => $amt + ($credit ? 0 : $gst), 'paid_by_partner' => $byP]); upd('journal', $jid, ['ref_type' => 'pexp', 'ref_id' => $eid]); }
+      if ($proj) { $eid = ins('expenses', ['project_id' => $pid, 'edate' => $date, 'category' => pexp_cat(acc_get($exp)['sub']), 'description' => mb_substr($narr ?: acc_get($exp)['name'], 0, 250), 'amount' => $amt + ($credit ? 0 : $gst), 'paid_by_partner' => $byP, 'created_by' => $MID]); upd('journal', $jid, ['ref_type' => 'pexp', 'ref_id' => $eid]); }
       break; }
     case 'vendor_pay': {
       $vid = (int) ($in['vendor_id'] ?? 0); $vn = val('SELECT name FROM ' . T('vendors') . ' WHERE id = ?', [$vid]) ?? fail('Pick the vendor.');
@@ -416,7 +417,7 @@ case 'acc_inbox':
   $c = setting('company', []); $bf = $c['books_from'] ?? '2000-01-01';
   $nj = fn($t) => "NOT EXISTS (SELECT 1 FROM " . T('journal') . " j WHERE j.ref_type = '$t' AND j.ref_id = x.id) AND NOT EXISTS (SELECT 1 FROM " . T('post_skip') . " s WHERE s.ref_type = '$t' AND s.ref_id = x.id)";
   $q = fn($tbl, $t, $dcol, $extra) => all("SELECT x.*, p.expo, p.client_id, c.company $extra FROM " . T($tbl) . ' x JOIN ' . T('projects') . ' p ON p.id = x.project_id JOIN ' . T('clients') . " c ON c.id = p.client_id WHERE x.$dcol >= ? AND " . $nj($t) . " ORDER BY x.$dcol", [$bf]);
-  out(['cpay' => $q('client_payments', 'cpay', 'pdate', ''), 'vpay' => $q('vendor_payments', 'vpay', 'pdate', ', (SELECT name FROM ' . T('vendors') . ' v WHERE v.id = x.vendor_id) AS vendor'), 'pexp' => $q('expenses', 'pexp', 'edate', ''), 'books_from' => $bf]);
+  out(['cpay' => $q('client_payments', 'cpay', 'pdate', ''), 'vpay' => $q('vendor_payments', 'vpay', 'pdate', ', (SELECT name FROM ' . T('vendors') . ' v WHERE v.id = x.vendor_id) AS vendor'), 'pexp' => array_map(fn($x) => $x + ['dups' => exp_dups($x['project_id'], [$x['amount']], 0, $x['id'])], $q('expenses', 'pexp', 'edate', '')), 'books_from' => $bf]);
 
 case 'acc_post_crm':
   need_acc();
@@ -593,6 +594,7 @@ case 'claim_save':
   $pid = (int) ($in['project_id'] ?? 0);
   if ($pid && !$ADMIN && !val('SELECT COUNT(*) FROM ' . T('projects') . ' WHERE id = ? AND (owner_id = ? OR ops_id = ?)', [$pid, $MID, $MID])) fail('Pick one of your own orders.');
   $data['project_id'] = $pid ?: null;
+  if ($pid) dup_guard($pid, [$data['total'], $data['grand']], (int) ($in['id'] ?? 0));
   if (!empty($in['id'])) {
     claim_row($in['id']); $c = lock_row('claims', $in['id']); if ((int) $c['user_id'] !== $MID) fail('Not yours.', 403);
     if (!in_array($c['status'], ['rejected', 'on_hold'], true)) fail('Only a rejected or on-hold expense can be changed.');
@@ -624,7 +626,9 @@ case 'acc_claims':
   if (!empty($in['user_id'])) { $w .= ' AND c.user_id = ?'; $p[] = (int) $in['user_id']; }
   if ($qs = s($in['q'] ?? null, 100)) { $w .= ' AND (c.particular LIKE ? OR u.name LIKE ?)'; $p[] = "%$qs%"; $p[] = "%$qs%"; }
   $counts = []; foreach (['submitted', 'on_hold', 'approved', 'rejected'] as $k) $counts[$k] = (int) val('SELECT COUNT(*) FROM ' . T('claims') . ' WHERE status = ?', [$k]);
-  out(['claims' => claims_out($w, $p), 'counts' => $counts, 'cat_acc' => array_map(fn($s) => acc_sub($s), CLAIM_CATS)]);
+  $cl = claims_out($w, $p);
+  foreach ($cl as &$r) $r['dups'] = ($r['project_id'] && in_array($r['status'], ['submitted', 'on_hold'], true)) ? exp_dups($r['project_id'], [$r['total'], $r['grand']], $r['id']) : []; unset($r);
+  out(['claims' => $cl, 'counts' => $counts, 'cat_acc' => array_map(fn($s) => acc_sub($s), CLAIM_CATS)]);
 
 case 'claim_decide':
   need_acc();
@@ -789,9 +793,10 @@ case 'acc_partner_pay_expense': {   // money given to the partner for expenses, 
   $exp = acc_sub(PEXP_SUB[$cat] ?? 'exp_misc');
   $narr = s($in['note'] ?? null, 300) ?: preg_replace('/^Advance paid to [^—]+— ?/u', '', (string) $pay['narration']);
   $date = d($in['date'] ?? null) ?? $pay['jdate'];
+  if ($proj) dup_guard($pid, [$amt]);
   tx();
   $jid = post_journal($date, 'Expense', $narr . ' (paid from ' . $pt['name'] . "'s advance)", [[$exp, $amt, 0, $narr], [$acc, 0, $amt, $narr]], null, null, $pid, $MID);
-  if ($proj) { $eid = ins('expenses', ['project_id' => $pid, 'edate' => $date, 'category' => $cat, 'description' => mb_substr($narr, 0, 250), 'amount' => $amt, 'paid_by_partner' => $pt['id']]); upd('journal', $jid, ['ref_type' => 'pexp', 'ref_id' => $eid]); }
+  if ($proj) { $eid = ins('expenses', ['project_id' => $pid, 'edate' => $date, 'category' => $cat, 'description' => mb_substr($narr, 0, 250), 'amount' => $amt, 'paid_by_partner' => $pt['id'], 'created_by' => $MID]); upd('journal', $jid, ['ref_type' => 'pexp', 'ref_id' => $eid]); }
   $map[$pay['id']] = array_values(array_merge((array) ($map[$pay['id']] ?? []), [$jid])); set_setting('ppay_exp', $map);
   $t = (array) setting('ppay_tag', []); $t[$pay['id']] = 'exp'; set_setting('ppay_tag', $t);
   db()->commit(); out(['id' => $jid]);

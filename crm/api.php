@@ -140,6 +140,7 @@ $CLIENT_FIELDS = ['company', 'email', 'phone', 'person', 'designation', 'locatio
 function clean($type, $v) { return match ($type) { 'd' => d($v), 'n' => n($v), 'i' => ($v === null || $v === '') ? null : (int) $v, default => s($v) }; }
 
 define('ZEST_API', 1);
+require_once __DIR__ . '/lib/dup.php';
 if (in_array($A, ['lexpos', 'lexpo', 'lexpo_save', 'lead_add', 'lead_bulk', 'lead_import', 'lead_heat', 'lead_assign', 'my_leads', 'lead_follow', 'lead_update', 'lead_del', 'design_jobs', 'design_save', 'assign_designer', 'assign_ops',
   'ops_jobs', 'ops_job', 'ops_save', 'jobs_board'], true)) require __DIR__ . '/lib/work_api.php';
 if (str_starts_with($A, 'acc_') || str_starts_with($A, 'inv_') || str_starts_with($A, 'claim_')) require __DIR__ . '/lib/acc_api.php';
@@ -696,6 +697,7 @@ case 'child_add':
   if ($k === 'extra' && !$row['added_on']) $row['added_on'] = today();
   if ($k === 'vquote' && !$row['qdate']) $row['qdate'] = today();
   if (in_array($k, ['payment', 'vpayment']) && !$row['mode']) $row['mode'] = 'Bank';
+  if ($k === 'expense') { dup_guard($p['id'], [$row['amount']]); $row['created_by'] = $MID; }
   $id = ins($table, $row);
   if ($k === 'quote') { // latest quote = offered price; enquiry becomes quoted
     $upd = ['offered' => $row['amount']]; if ($p['status'] === 'enquiry') $upd['status'] = 'quoted';

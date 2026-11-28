@@ -218,6 +218,10 @@ function migrate() {
     try { db()->exec('ALTER TABLE ' . T('projects') . ' ADD COLUMN vendor_settled TINYINT NOT NULL DEFAULT 0'); } catch (PDOException $e) { /* already there */ }
     set_setting('schema_v', 30);
   }
+  if ($v < 31) {   // who entered each order expense (for the possible-duplicate warning)
+    try { db()->exec('ALTER TABLE ' . T('expenses') . ' ADD COLUMN created_by INT'); } catch (PDOException $e) { /* already there */ }
+    set_setting('schema_v', 31);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';

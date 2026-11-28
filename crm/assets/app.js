@@ -37,8 +37,14 @@ async function api(a, data = {}) {
   if (r.status === 401) { location.href = 'login.php'; throw new Error('signed out'); }
   let j; try { j = await r.json(); } catch { throw new Error('Server error. Please try again.'); }
   if (!r.ok || j.error) throw new Error(j.error || 'Request failed');
+  if (j.dup_exp && !data.dup_ok) {   // possible duplicate expense on this order: ask first, save only if it is a separate purchase
+    if (!confirm('POSSIBLE DUPLICATE — this order already has the same amount:\n\n' + j.dup_exp.map(dupLine).join('\n') + '\n\nPress OK only if this is a separate purchase. Press Cancel to stop.')) throw new Error('Not saved — possible duplicate');
+    return api(a, { ...data, dup_ok: 1 });
+  }
   return j;
 }
+const dupLine = x => `• ${inr2(x.amount)} already entered${x.by ? ' by ' + x.by : ''} on ${fd(x.date)} — ${x.what || ''} (${x.where})`;
+const dupTag = list => list && list.length ? `<div class="dupx" style="margin-top:8px;padding:8px 10px;border:1px solid #e5484d;background:#fff1f1;border-radius:8px;color:#b4232a"><span class="pill" style="background:#e5484d;color:#fff">Possible duplicate</span> <span class="sub" style="color:#b4232a">Same order, same amount — check before approving:</span>${list.map(x => `<div style="font-size:13px;margin-top:3px">${esc(dupLine(x))}</div>`).join('')}</div>` : '';
 // Photos are made smaller in the browser before sending (quick uploads on mobile data). PDFs and Office files are compressed on the server.
 const mb = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
 async function shrinkPhoto(file, entity) {
@@ -2224,7 +2230,7 @@ routes.claims = async () => {
   const money = moneyOf(m);
   view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#acc">← Accounts</a></div><h1>Expense approvals</h1><p>Claims from sales and production. Approving posts the expense to the books.</p></div><a class="btn ghost" href="acc_export.php?r=claims&from=${m.company.books_from || ''}&to=${B.today}">⬇ Export claims</a></div>
   <div class="tabs" style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:0 8px">${[['submitted', 'Waiting'], ['on_hold', 'On hold'], ['approved', 'Approved'], ['rejected', 'Rejected'], ['all', 'All']].map(([k, l]) => `<a href="#claims" data-clt="${k}" class="${f.status === k ? 'on' : ''}">${l}${d.counts[k] ? ` <span class="badge" style="${k === 'submitted' ? '' : 'background:var(--navy-soft);color:var(--navy)'}">${d.counts[k]}</span>` : ''}</a>`).join('')}</div>
-  ${d.claims.length ? d.claims.map(c => `<div class="panel"><div class="ph"><h3>${esc(c.particular)} <span class="sub">· ${esc(c.category || '')}</span></h3>${claimPill(c)}</div>
+  ${d.claims.length ? d.claims.map(c => `<div class="panel"${c.dups && c.dups.length ? ' style="border-color:#e5484d"' : ''}><div class="ph"><h3>${esc(c.particular)} <span class="sub">· ${esc(c.category || '')}</span></h3><div class="row" style="gap:6px">${c.dups && c.dups.length ? '<span class="pill" style="background:#e5484d;color:#fff">Possible duplicate</span>' : ''}${claimPill(c)}</div></div>${dupTag(c.dups)}
     <div class="grid g3 sub"><div><b>Employee</b><br>${esc(c.user_name)} · ${esc(c.department)}</div><div><b>Date of expense</b><br>${fd(c.edate)}</div><div><b>Order</b><br>${c.expo ? esc(c.company + ' · ' + c.expo) : '—'}</div>
      <div><b>Unit rate × qty</b><br>${inr2(c.rate)} × ${num(c.qty)} = ${inr2(c.total)}</div><div><b>GST</b><br>${inr2(c.gst)}</div><div><b>Grand total</b><br><span style="font-size:15px;color:var(--ink)"><b>${inr2(c.grand)}</b></span></div></div>
     ${c.note ? `<p class="sub"><b>Note:</b> ${esc(c.note)}</p>` : ''}<div class="row" style="margin-top:8px"><span class="sub">Bill / proof:</span>${fileChips(c.files)}</div>${claimThread(c)}
@@ -2250,7 +2256,7 @@ routes.claims = async () => {
 routes.topost = async () => {
   const [d, m] = await Promise.all([api('acc_inbox'), accMeta()]); const money = moneyOf(m);
   const def = mode => (money.find(a => a.sub === (mode === 'Bank' || mode === 'UPI' || mode === 'Cheque' ? 'bank' : 'cash')) || money[0] || {}).id;
-  const row = (t, x, who, cat) => `<tr><td class="num">${fd(x.pdate || x.edate)}</td><td>${esc(x.company)}<div class="sub">${esc(x.expo)}</div></td><td>${esc(who)}</td><td class="r num">${inr2(x.amount)}</td><td>${esc(x.mode || x.category || '')}</td>
+  const row = (t, x, who, cat) => `<tr><td class="num">${fd(x.pdate || x.edate)}</td><td>${esc(x.company)}<div class="sub">${esc(x.expo)}</div></td><td>${esc(who)}${x.dups && x.dups.length ? dupTag(x.dups) : ''}</td><td class="r num">${inr2(x.amount)}</td><td>${esc(x.mode || x.category || '')}</td>
     <td><select data-pm="${t}:${x.id}">${accOpts(money, def(x.mode))}${t !== 'cpay' ? partnerOpts(m) : ''}</select></td><td>${cat ? `<select data-pa="${t}:${x.id}">${accOpts(expOf(m), cat)}</select>` : ''}</td>
     <td class="r" style="white-space:nowrap"><button class="btn sm" data-post="${t}:${x.id}">Post</button><button class="btn link" data-postskip="${t}:${x.id}" title="Already entered in the books another way">Skip</button></td></tr>`;
   const sec = (title, list, head, fn) => `<div class="panel"><h2>${title} <span class="sub">(${list.length})</span></h2>${list.length ? `<div class="tw"><table><tr><th>Date</th><th>Client · expo</th><th>${head}</th><th class="r">Amount</th><th>Mode</th><th>Bank / cash</th><th>Expense head</th><th></th></tr>${list.map(fn).join('')}</table></div>` : '<div class="sub">Nothing to post.</div>'}</div>`;
