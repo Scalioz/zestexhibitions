@@ -2598,16 +2598,17 @@ routes.expocal = async () => {
    ${A.mode === 'paste' ? `<label class="f">Page text <span class="sub" style="font-weight:400">open the expo page, press Ctrl+A then Ctrl+C, and paste here</span><textarea id="xa-text" style="min-height:160px">${esc(A.text || '')}</textarea></label>
      <label class="f" style="margin-top:8px">Page link (optional)<input id="xa-src" value="${esc(A.src || '')}" placeholder="https://…"></label>`
    : `<label class="f">Web links <span class="sub" style="font-weight:400">one per line — a single expo page, or an events calendar page that lists many expos</span><textarea id="xa-links" style="min-height:110px" placeholder="https://www.example-expo.com/&#10;https://www.organiser.com/events-calendar">${esc(A.links || '')}</textarea></label>`}
-   <div class="row" style="margin-top:10px"><button class="btn" id="xa-go">✨ Read with AI</button><span class="sub">Each page takes 20–60 seconds. The AI uses your business-card AI key.</span></div>
+   ${A.mode !== 'paste' ? `<label class="row" style="gap:6px;margin-top:8px;font-size:13px"><input type="checkbox" id="xa-explore" ${A.explore !== false ? 'checked' : ''}> Also explore the website — follow its Events / Exhibition calendar / Upcoming shows pages <span class="sub">(up to 15 pages per website)</span></label>` : ''}
+   <div class="row" style="margin-top:10px"><button class="btn" id="xa-go">✨ Read with AI</button><span class="sub">Each page takes 20–60 seconds — exploring a whole website can take several minutes. Only expos are picked up, not stand-alone conferences.</span></div>
    <div id="xa-prog" style="margin-top:10px"></div>
    ${A.errs && A.errs.length ? `<div class="warnbox" style="margin-top:10px">${A.errs.map(e => `<div>⚠ ${esc(e)}</div>`).join('')}</div>` : ''}
    ${A.found ? (A.found.length ? `<h3 style="margin:14px 0 6px">Found ${A.found.length} expo${A.found.length === 1 ? '' : 's'} — tick the ones to save</h3>
     <div class="row" style="gap:12px;margin-bottom:6px"><label class="row" style="gap:6px"><input type="checkbox" id="xa-all"> Select all</label><span class="sub">Expos in India are ticked for you.</span></div>
     <div class="tw tall"><table><thead><tr><th></th><th>Expo</th><th>Dates</th><th>Venue</th><th>Halls</th><th>Industry</th><th></th></tr></thead>${A.found.map((x, i) => `<tr><td><input type="checkbox" data-xa="${i}" ${x.pick ? 'checked' : ''}></td>
-     <td><b>${esc(x.name)}</b>${x.organiser ? `<div class="sub">${esc(x.organiser)}</div>` : ''}${x.website ? `<div class="sub">${link(x.website)}</div>` : ''}</td><td class="num" style="white-space:nowrap">${x.start_date ? fd(x.start_date) + (x.end_date && x.end_date !== x.start_date ? ' – ' + fd(x.end_date) : '') : '<span class="sub">not given</span>'}</td>
+     <td><b>${esc(x.name)}</b>${x.organiser ? `<div class="sub">${esc(x.organiser)}</div>` : ''}${/Alongside:/.test(x.description || '') ? `<div class="sub">🎤 ${esc(x.description.split('Alongside:').pop().trim())}</div>` : ''}${x.website ? `<div class="sub">${link(x.website)}</div>` : ''}</td><td class="num" style="white-space:nowrap">${x.start_date ? fd(x.start_date) + (x.end_date && x.end_date !== x.start_date ? ' – ' + fd(x.end_date) : '') : '<span class="sub">not given</span>'}</td>
      <td>${esc([x.venue, x.city, x.country].filter(Boolean).join(', ')) || '—'}</td><td>${esc(x.halls || '—')}</td><td class="sub">${esc(x.industry || '')}</td><td>${x.existing_id ? '<span class="pill p-off">already in list</span>' : '<span class="pill p-enquiry">new</span>'}</td></tr>`).join('')}</table></div>
     <div class="row" style="margin-top:10px"><button class="btn" id="xa-save">Save ticked expos</button><span class="sub">An expo already in the list only gets its missing details filled in.</span></div>` : '<p class="sub">No expos were found on that page.</p>') : ''}
-   ${A.more && A.more.length ? `<div class="inset" style="margin-top:14px;border-color:var(--gold)"><b>More pages found on these sites</b> <span class="sub">— other editions / shows whose dates were not on the page you gave. Tick and read them to add those too.</span>
+   ${A.more && A.more.length ? `<div class="inset" style="margin-top:14px;border-color:var(--gold)"><b>More pages you can read</b> <span class="sub">— pages on other websites (e.g. a show's own site), or pages past the 15-page limit. Tick and read them to add more expos.</span>
     <div style="margin:8px 0;display:grid;gap:4px">${A.more.map((m, i) => `<label class="row" style="gap:6px;font-size:13px"><input type="checkbox" data-xm="${i}" ${m.pick ? 'checked' : ''}> ${esc(m.title || '')} <span class="sub">${esc(m.url)}</span></label>`).join('')}</div>
     <button class="btn ghost sm" id="xm-go">✨ Read ticked pages too</button><div id="xm-prog" style="margin-top:8px"></div></div>` : ''}
   </div>` : ''}
@@ -2625,16 +2626,28 @@ routes.expocal = async () => {
   view().querySelectorAll('[data-xamode]').forEach(a => a.onclick = e => { e.preventDefault(); A.mode = a.dataset.xamode; refresh(); });
   if ($('#xa-all')) $('#xa-all').onchange = e => { A.found.forEach(x => x.pick = e.target.checked); view().querySelectorAll('[data-xa]').forEach(c => c.checked = e.target.checked); };
   view().querySelectorAll('[data-xa]').forEach(c => c.onchange = () => { A.found[+c.dataset.xa].pick = c.checked; });
-  // reads web links one by one; expos found are added to A.found, links to other edition pages to A.more
+  // reads web links; with "explore" on it also follows the same website's events / calendar / show pages (up to 15 pages per site).
+  // Pages on other websites, and anything past the limit, are offered in the "More pages" box.
+  const SITE_MAX = 15, hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, '').toLowerCase(); } catch (e) { return ''; } };
+  const siteOf = u => { const h = hostOf(u), p = h.split('.'); return p.slice(/\.(co|com|org|net|gov|ac)\.[a-z]{2}$/.test(h) ? -3 : -2).join('.'); };
   const readUrls = async (urls, found, el) => {
-    A.done = A.done || [];
-    for (let u = 0; u < urls.length; u++) {
+    A.done = A.done || []; const queue = urls.map(u => ({ url: /^https?:\/\//i.test(u) ? u : 'https://' + u, depth: 0 })), used = {}, queued = new Set(queue.map(q => q.url));
+    while (queue.length) {
+      const { url, depth, title } = queue.shift(), site = siteOf(url);
+      if (A.done.includes(url)) continue;
+      if ((used[site] || 0) >= SITE_MAX) { addMore([{ url, title }]); continue; }
+      used[site] = (used[site] || 0) + 1;
       try {
-        xpProg(el, `Opening ${esc(urls[u])} (${u + 1} of ${urls.length})…`); const pg = await api('xp_fetch', { url: urls[u] }); A.done.push(urls[u], pg.url);
-        for (let i = 0; i < pg.parts.length; i++) { xpProg(el, `AI is reading ${esc(urls[u])}${pg.parts.length > 1 ? ` — part ${i + 1} of ${pg.parts.length}` : ''} (${u + 1} of ${urls.length})… ${found.length} expo${found.length === 1 ? '' : 's'} found so far`);
-          const r = await api('xp_extract', { text: pg.parts[i], url: pg.url }); take(r.expos, found); addMore(r.other_pages); }
-        if (pg.more) A.errs.push(`${urls[u]}: the page was very long, only the first part was read.`);
-      } catch (e) { A.errs.push(`${urls[u]}: ${e.message}`); }
+        xpProg(el, `Reading ${esc(site)} — page ${used[site]}${A.explore !== false ? ` of up to ${SITE_MAX}` : ''}: ${esc(title || url)}… ${found.length} expo${found.length === 1 ? '' : 's'} found so far. Keep this page open.`);
+        const pg = await api('xp_fetch', { url }); A.done.push(url, pg.url); let ai = [];
+        for (let i = 0; i < pg.parts.length; i++) { const r = await api('xp_extract', { text: pg.parts[i], url: pg.url }); take(r.expos, found); ai = ai.concat(r.other_pages || []); }
+        if (pg.more) A.errs.push(`${url}: the page was very long, only the first part was read.`);
+        for (const c of [...ai, ...(pg.links || [])]) {   // the AI's picks first, then the site's own events / calendar links
+          if (A.done.includes(c.url) || queued.has(c.url)) continue;
+          if (A.explore !== false && siteOf(c.url) === site && depth < 3) { queue.push({ url: c.url, depth: depth + 1, title: c.title }); queued.add(c.url); }
+          else if (ai.includes(c)) addMore([c]);
+        }
+      } catch (e) { if (depth === 0) A.errs.push(`${url}: ${e.message}`); }
     }
   };
   const key = x => [x.name, x.start_date, x.city].join('|').toLowerCase();
@@ -2646,6 +2659,7 @@ routes.expocal = async () => {
     await readUrls(urls, found, $('#xm-prog')); A.found = found; xpProg($('#xm-prog'), ''); refresh();
   };
   view().querySelectorAll('[data-xm]').forEach(c => c.onchange = () => { A.more[+c.dataset.xm].pick = c.checked; });
+  if ($('#xa-explore')) $('#xa-explore').onchange = e => { A.explore = e.target.checked; };
   $('#xa-go').onclick = async () => {
     const b = $('#xa-go'); b.disabled = true; A.errs = []; A.more = []; A.done = []; const found = []; const el = $('#xa-prog');
     try {

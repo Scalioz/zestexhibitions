@@ -79,6 +79,27 @@ function xp_html_text($html, $base) {
   $t = preg_replace("/[ \t\x{00A0}]+/u", ' ', $t); $t = preg_replace("/ *\n[ \n]*/", "\n", $t);
   return trim(($title ? "PAGE TITLE: $title\n" : '') . ($ld ? "STRUCTURED DATA:\n$ld\n" : '') . "PAGE TEXT:\n" . trim($t));
 }
+// Links on the same website that may lead to more exhibitions (events page, calendar, next page of a list, single show pages)
+function xp_site_links($html, $base) {
+  $bh = preg_replace('/^www\./', '', strtolower((string) parse_url($base, PHP_URL_HOST))); $root = implode('.', array_slice(explode('.', $bh), -2));
+  if (preg_match('/\.(co|com|org|net|gov|ac)\.[a-z]{2}$/', $bh)) $root = implode('.', array_slice(explode('.', $bh), -3));
+  $out = [];
+  if (!preg_match_all('~<a\b[^>]*href\s*=\s*["\']([^"\']+)["\'][^>]*>(.*?)</a>~is', $html, $m, PREG_SET_ORDER)) return [];
+  foreach ($m as $a) {
+    $h = html_entity_decode(trim($a[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8'); if ($h === '' || $h[0] === '#' || preg_match('~^(javascript|mailto|tel|data):~i', $h)) continue;
+    if (!preg_match('~^https?://~i', $h)) { $b = parse_url($base); $r = ($b['scheme'] ?? 'https') . '://' . ($b['host'] ?? '') . (isset($b['port']) ? ':' . $b['port'] : ''); $h = str_starts_with($h, '//') ? ($b['scheme'] ?? 'https') . ':' . $h : ($h[0] === '/' ? $r . $h : $r . preg_replace('~/[^/]*$~', '/', $b['path'] ?? '/') . $h); }
+    $h = preg_replace('~#.*$~', '', $h); $host = preg_replace('/^www\./', '', strtolower((string) parse_url($h, PHP_URL_HOST)));
+    if ($host === '' || ($host !== $root && !str_ends_with($host, '.' . $root))) continue;
+    $t = trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($a[2]), ENT_QUOTES | ENT_HTML5, 'UTF-8'))); $path = strtolower((string) parse_url($h, PHP_URL_PATH) . '?' . (string) parse_url($h, PHP_URL_QUERY));
+    if (preg_match('~(login|signin|register|registration|contact|career|privacy|terms|cookie|gallery|photo|video|news|blog|press|media|download|sitemap|tender|feedback|faq|book-?(a)?-?stand|visitor-?reg|\.(pdf|jpe?g|png|zip|docx?|xlsx?))~', $path)) continue;
+    if (!preg_match('~(event|exhibit|expo|fair|calendar|upcoming|show|trade|edition|schedule|programme|program|forthcoming|next|page[=/-]?\d|^\d+$)~i', $t . ' ' . $path)) continue;
+    if (preg_match('~(conference|summit|symposium|seminar|webinar|award|past|archive|previous|post-?show)~i', $t . ' ' . $path)) continue;
+    $out[$h] = ['url' => mb_substr($h, 0, 500), 'title' => mb_substr($t, 0, 100)];
+    if (count($out) >= 30) break;
+  }
+  unset($out[$base]);
+  return array_values($out);
+}
 function xp_chunks($text, $size) {
   $out = []; $cur = '';
   foreach (preg_split("/\n/", $text) as $line) {
@@ -120,9 +141,11 @@ const XP_EXPO_PROMPT = 'Below is text taken from a web page about trade exhibiti
   . '- website: the official website of that exhibition, if a link is given' . "\n"
   . '- exhibitor_list_url: a link to its exhibitor list / exhibitor directory / floor plan, if the page has one' . "\n"
   . '- description: one or two short sentences, from the page' . "\n"
-  . 'Use only what the text says. Never invent details; use "" when something is not on the page. Skip conferences or webinars without an exhibition.' . "\n"
-  . 'Also list in "other_pages" up to 12 links from this text (they appear as [https://...] after link words) that lead to OTHER editions or shows whose full details (dates, venue) are NOT given here — e.g. the page of each city edition, or an events / show calendar page. Leave it empty if there are none.' . "\n"
-  . 'Reply with JSON only: {"expos":[{"name":"","venue":"","city":"","country":"","start_date":"","end_date":"","halls":"","organiser":"","industry":"","website":"","exhibitor_list_url":"","description":""}],"other_pages":[{"url":"","title":""}]}';
+  . '- conference: if a conference / summit / seminar runs alongside this exhibition, its name and dates in a few words; otherwise ""' . "\n"
+  . 'ONLY list exhibitions where companies take stalls / booths to show products (expo, exhibition, trade fair, trade show, mela). Do NOT list stand-alone conferences, summits, symposiums, seminars, webinars, workshops, award nights, meetings or B2B meet-ups — even if the page lists them as events. If a conference is attached to an exhibition, list the exhibition and put the conference in "conference".' . "\n"
+  . 'Use only what the text says. Never invent details; use "" when something is not on the page.' . "\n"
+  . 'Also list in "other_pages" up to 12 links from this text (they appear as [https://...] after link words) that are likely to list MORE exhibitions or give their full details: the events / exhibitions / trade-fair calendar page, "upcoming events", the next page of an events list, or the page of a single exhibition or city edition whose dates and venue are not given here. Do not include conference-only, news, gallery, contact or registration pages. Leave it empty if there are none.' . "\n"
+  . 'Reply with JSON only: {"expos":[{"name":"","venue":"","city":"","country":"","start_date":"","end_date":"","halls":"","organiser":"","industry":"","website":"","exhibitor_list_url":"","description":"","conference":""}],"other_pages":[{"url":"","title":""}]}';
 
 const XP_ROWS_PROMPT = 'This is %s of the exhibitor list for the exhibition "%s". Pick out EVERY exhibitor company in it.' . "\n"
   . 'Reply with one line per exhibitor and nothing else — no header, no numbering, no notes. Separate the columns with a TAB character:' . "\n"
@@ -177,7 +200,7 @@ case 'xp_fetch':   // a web page → text parts for the AI (the browser sends ea
   $text = xp_html_text($r['body'], $r['url']);
   if (mb_strlen($text) < 200) fail('The page loaded but had almost no text (the site probably builds the page in the browser). Open it, select all (Ctrl+A), copy, and use “Paste page text”.');
   $parts = xp_chunks($text, 45000);
-  out(['url' => $r['url'], 'parts' => array_slice($parts, 0, 12), 'more' => max(0, count($parts) - 12), 'chars' => mb_strlen($text)]);
+  out(['url' => $r['url'], 'parts' => array_slice($parts, 0, 12), 'more' => max(0, count($parts) - 12), 'chars' => mb_strlen($text), 'links' => xp_site_links($r['body'], $r['url'])]);
 
 case 'xp_extract':   // one part of page text → expos found
   need_admin();
@@ -189,6 +212,8 @@ case 'xp_extract':   // one part of page text → expos found
   foreach (array_slice((array) $d['expos'], 0, 150) as $x) { $x = (array) $x; if (trim((string) ($x['name'] ?? '')) === '') continue;
     $row = []; foreach (['name', 'venue', 'city', 'country', 'start_date', 'end_date', 'halls', 'organiser', 'industry', 'website', 'exhibitor_list_url', 'description'] as $k) $row[$k] = mb_substr(trim((string) ($x[$k] ?? '')), 0, $k === 'description' ? 2000 : 300);
     foreach (['start_date', 'end_date'] as $k) $row[$k] = xp_date($row[$k]) ?? '';
+    if ($cf = mb_substr(trim((string) ($x['conference'] ?? '')), 0, 300)) $row['description'] = trim($row['description'] . ' Alongside: ' . $cf . '.');
+    if (preg_match('/\b(conference|summit|symposium|seminar|webinar|conclave|awards?)\b/i', $row['name']) && !preg_match('/\b(expo|exhibition|fair|show|mela|exhibitions?)\b/i', $row['name'])) continue;   // safety net: conference-only events
     $row['website'] = xp_url($row['website']) ?? ''; $row['exhibitor_list_url'] = xp_url($row['exhibitor_list_url']) ?? '';
     $ex = $row['start_date'] ? val('SELECT id FROM ' . T('expos') . ' WHERE LOWER(name) = LOWER(?) AND (edate = ? OR edate IS NULL)', [$row['name'], $row['start_date']]) : val('SELECT id FROM ' . T('expos') . ' WHERE LOWER(name) = LOWER(?)', [$row['name']]);
     $out[] = $row + ['source_url' => $url === 'pasted text' ? '' : $url, 'existing_id' => $ex ? (int) $ex : null];
