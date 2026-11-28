@@ -376,7 +376,14 @@ case 'clients':
   if (!empty($in['dnq'])) $w .= ' AND dnq = 1';
   if ($qs && $everyone) { $w .= ' AND (company LIKE ? OR person LIKE ? OR city LIKE ? OR (owner_id = ? AND (email LIKE ? OR phone LIKE ?)))'; array_push($p, "%$qs%", "%$qs%", "%$qs%", $MID, "%$qs%", "%$qs%"); }
   elseif ($qs) { $w .= ' AND (company LIKE ? OR person LIKE ? OR city LIKE ? OR email LIKE ? OR phone LIKE ?)'; array_push($p, "%$qs%", "%$qs%", "%$qs%", "%$qs%", "%$qs%"); }
-  $cs = all('SELECT id, company, person, designation, city, email, phone, owner_id, dnq, dnq_reason, dnq_note, dnq_on, dnq_by FROM ' . T('clients') . " WHERE $w ORDER BY company LIMIT 500", $p);
+  // which tab: won = converted (an order won or completed), open = orders but none won yet, none = no orders (just a contact), all
+  $P = T('projects'); $WON = "(SELECT COUNT(*) FROM $P p WHERE p.client_id = c.id AND p.status IN ('won','completed'))"; $ORD = "(SELECT COUNT(*) FROM $P p WHERE p.client_id = c.id)";
+  $kinds = ['won' => "$WON > 0", 'open' => "$ORD > 0 AND $WON = 0", 'none' => "$ORD = 0"];
+  $counts = ['all' => 0, 'won' => 0, 'open' => 0, 'none' => 0];
+  if (empty($in['dnq'])) foreach (all("SELECT CASE WHEN $WON > 0 THEN 'won' WHEN $ORD > 0 THEN 'open' ELSE 'none' END AS k, COUNT(*) AS n FROM " . T('clients') . " c WHERE $w GROUP BY 1", $p) as $r) { $counts[$r['k']] = (int) $r['n']; $counts['all'] += (int) $r['n']; }
+  $kind = $in['kind'] ?? 'all'; $kw = isset($kinds[$kind]) && empty($in['dnq']) ? " AND {$kinds[$kind]}" : '';
+  $LIM = 1500;
+  $cs = all('SELECT c.id, c.company, c.person, c.designation, c.city, c.email, c.phone, c.owner_id, c.dnq, c.dnq_reason, c.dnq_note, c.dnq_on, c.dnq_by FROM ' . T('clients') . " c WHERE $w$kw ORDER BY c.company LIMIT $LIM", $p);
   if ($cs) {
     $ids = implode(',', array_map('intval', array_column($cs, 'id')));
     $ps = all('SELECT * FROM ' . T('projects') . " WHERE client_id IN ($ids)"); $b = bills_for($ps);
@@ -393,7 +400,7 @@ case 'clients':
         $c = ['id' => (int) $c['id'], 'company' => $c['company'], 'person' => $c['person'], 'designation' => $c['designation'], 'city' => $c['city'], 'owner' => $c['owner'], 'owner_id' => (int) $c['owner_id'], 'dnq' => $c['dnq'], 'locked' => 1]; }
     unset($c);
   }
-  out(['clients' => $cs]);
+  out(['clients' => $cs, 'counts' => $counts, 'kind' => isset($kinds[$kind]) ? $kind : 'all', 'capped' => count($cs) >= $LIM ? $LIM : 0]);
 
 case 'client':
   $c = client_row($in['id'] ?? 0);

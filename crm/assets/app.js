@@ -477,23 +477,30 @@ function projTable(ps, showOwner, showClient = true) {
 // ---------- CLIENTS ----------
 routes.clients = async () => {
   const qv = C.cq || '', ow = isAdmin() ? (C.cown || '') : '', every = !isAdmin() && C.cscope !== 'mine';
-  const d = await api('clients', { q: qv, owner_id: ow, all: every ? 1 : '' });
+  const kind = C.ckind || 'won';
+  const d = await api('clients', { q: qv, owner_id: ow, all: every ? 1 : '', kind }), n = d.counts;
+  const KT = [['won', 'Converted', 'won an order'], ['open', 'Orders in progress', 'enquiry / quoted, none won yet'], ['none', 'No orders yet', 'contacts only'], ['all', 'All', '']];
   const mine = d.clients.filter(c => !c.locked);
   const tot = mine.reduce((a, c) => (a.b += +c.business || 0, a.o += +c.due || +c.outstanding || 0, a), { b: 0, o: 0 });
   const showOwner = isAdmin() || every;
   view().innerHTML = `
-  <div class="head"><div><h1>${isAdmin() ? 'All clients' : every ? 'All company clients' : 'My clients'}</h1><p>${d.clients.length} client${d.clients.length === 1 ? '' : 's'}${ow ? ` handled by ${esc((B.users.find(u => +u.id === +ow) || {}).name || '')}` : ''}${qv ? ` matching “${esc(qv)}”` : ''}${ow ? ` · business ${inr(tot.b)} · outstanding ${inr(tot.o)}` : ''}${every ? ` · ${mine.length} handled by you` : ''}</p></div>
+  <div class="head"><div><h1>${isAdmin() ? 'All clients' : every ? 'All company clients' : 'My clients'}</h1><p>${n.won} converted client${n.won === 1 ? '' : 's'} · ${n.all} in total${ow ? ` handled by ${esc((B.users.find(u => +u.id === +ow) || {}).name || '')}` : ''}${qv ? ` matching “${esc(qv)}”` : ''}${ow ? ` · business ${inr(tot.b)} · outstanding ${inr(tot.o)}` : ''}${every ? ` · ${mine.length} handled by you` : ''}</p></div>
    <div class="row">${isAdmin() ? `<select id="cown" aria-label="Handled by" style="min-width:200px"><option value="">All sales people</option>${B.users.filter(u => +u.active && (u.role === 'admin' || (B.dept_modules || {})[u.department] === 'records')).map(u => `<option value="${u.id}" ${+ow === +u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`
      : `<div class="seg" role="group"><button class="btn ${every ? '' : 'ghost'} sm" data-cscope="all">All clients</button><button class="btn ${every ? 'ghost' : ''} sm" data-cscope="mine">Only mine</button></div>`}<input id="cq" placeholder="Search company, person, city${every ? '' : ', phone'}" value="${esc(qv)}" style="min-width:260px">${isAdmin() ? '<a class="btn ghost" href="#dupes">Find duplicates</a>' : ''}<a class="btn" href="#newclient">+ New client</a></div></div>
   ${every ? '<p class="sub" style="margin:-6px 0 10px">🔒 Clients handled by others show only the name, city and who handles them. Their details, orders and payments are visible only to that person and admin.</p>' : ''}
+  <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:10px">${KT.map(([k, l, h]) => `<button type="button" class="btn sm ${kind === k ? '' : 'ghost'}" data-ckind="${k}" title="${esc(h)}">${l} <span style="opacity:.75">${n[k]}</span></button>`).join('')}</div>
+  ${kind !== 'all' && qv && !d.clients.length && n.all ? `<div class="inset" style="margin-bottom:10px">No match under <b>${KT.find(x => x[0] === kind)[1]}</b>, but ${n.all} match${n.all === 1 ? '' : 'es'} elsewhere — <button type="button" class="btn link" data-ckind="all">show all matches</button></div>` : ''}
+  ${kind === 'none' ? `<p class="sub" style="margin:-2px 0 10px">These have no order yet — they are really contacts. They also appear in <a href="#contacts">Contacts</a>. Once an order is won for one, it moves to <b>Converted</b> by itself.</p>` : ''}
+  ${d.capped ? `<p class="sub" style="margin:-2px 0 10px">Showing the first ${d.capped} — type in the search box to find others.</p>` : ''}
   <div class="panel">${d.clients.length ? `<div class="tw"><table><tr><th>Company</th><th>Contact</th><th>City</th>${showOwner ? '<th>Handled by</th>' : ''}<th class="r">Won / orders</th><th class="r">Business</th><th class="r">Outstanding</th></tr>
   ${d.clients.map(c => c.locked
     ? `<tr class="locked" title="Handled by ${esc(c.owner)} — only they and admin can open it" style="opacity:.75"><td><b>${esc(c.company)}</b> <span aria-label="locked">🔒</span>${+c.dnq ? '<div class="dnq">⛔ DO NOT QUOTE</div>' : ''}</td><td>${esc(c.person || '')}<div class="sub">${esc(c.designation || '')}</div></td><td>${esc(c.city || '')}</td><td>${esc(c.owner)}</td><td class="r sub">—</td><td class="r sub">—</td><td class="r sub">—</td></tr>`
     : `<tr class="click" data-go="client-${c.id}"><td><b>${esc(c.company)}</b>${+c.dnq ? '<div class="dnq">⛔ DO NOT QUOTE</div>' : ''}</td><td>${esc(c.person || '')}<div class="sub">${esc(c.designation || '')}</div></td><td>${esc(c.city || '')}</td>${showOwner ? `<td>${isAdmin() ? esc(c.owner) : '<b>You</b>'}</td>` : ''}<td class="r num">${c.won} / ${c.orders}</td><td class="r num">${inr(c.business)}</td>
   <td class="r num">${+c.due > 0 ? `<b>${inr(c.due)}</b>` : inr(0)}</td></tr>`).join('')}
-  </table></div>` : blank(qv ? 'No client matches that search.' : 'No clients yet. Add your first one.', '<a class="btn sm" href="#newclient">+ New client</a>')}</div>`;
+  </table></div>` : blank(qv ? 'No client matches that search.' : kind === 'won' ? 'No converted clients here yet.' : kind === 'open' ? 'No clients with orders in progress.' : kind === 'none' ? 'Every client here has at least one order.' : 'No clients yet. Add your first one.', kind === 'all' ? '<a class="btn sm" href="#newclient">+ New client</a>' : '')}</div>`;
   if ($('#cown')) $('#cown').onchange = e => { C.cown = e.target.value; refresh(); };
   view().querySelectorAll('[data-cscope]').forEach(b => b.onclick = () => { C.cscope = b.dataset.cscope; refresh(); });
+  view().querySelectorAll('[data-ckind]').forEach(b => b.onclick = () => { C.ckind = b.dataset.ckind; refresh(); });
   view().querySelectorAll('tr.locked').forEach(r => r.onclick = () => toast(r.title, true));
   let t; $('#cq').oninput = e => { clearTimeout(t); t = setTimeout(() => { C.cq = e.target.value.trim(); refresh().then(() => { const i = $('#cq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 350); };
 };
