@@ -106,8 +106,11 @@ function xp_sheet_text($path, $name) {
 }
 
 const XP_EXPO_PROMPT = 'Below is text taken from a web page about trade exhibitions (expos / trade fairs / shows). Today is %s. Page address: %s.' . "\n"
-  . 'List EVERY exhibition the page describes (one page can be a single expo, or a calendar listing many). For each give:' . "\n"
-  . '- name: the official exhibition name (with the edition or year if shown)' . "\n"
+  . 'List EVERY exhibition the page describes (one page can be a single expo, or a calendar listing many).' . "\n"
+  . 'IMPORTANT: many shows run several editions in different cities on different dates (e.g. ACETECH Mumbai, ACETECH Delhi, ACETECH Bengaluru, ACETECH Hyderabad). '
+  . 'List EACH city edition as its own entry with its own dates and venue, and put the city in the name (e.g. "ACETECH Mumbai 2026"). Look at the whole text, including menus, "upcoming shows" lists, tickers, banners and footers. Include future editions; skip editions that are clearly over.' . "\n"
+  . 'For each give:' . "\n"
+  . '- name: the official exhibition name with the city (for multi-city shows) and the year or edition if shown' . "\n"
   . '- venue: the exhibition centre / venue name' . "\n"
   . '- city, country' . "\n"
   . '- start_date, end_date: YYYY-MM-DD. Work out the year from the page and today\'s date. If the exact day is not given leave it ""' . "\n"
@@ -118,7 +121,8 @@ const XP_EXPO_PROMPT = 'Below is text taken from a web page about trade exhibiti
   . '- exhibitor_list_url: a link to its exhibitor list / exhibitor directory / floor plan, if the page has one' . "\n"
   . '- description: one or two short sentences, from the page' . "\n"
   . 'Use only what the text says. Never invent details; use "" when something is not on the page. Skip conferences or webinars without an exhibition.' . "\n"
-  . 'Reply with JSON only: {"expos":[{"name":"","venue":"","city":"","country":"","start_date":"","end_date":"","halls":"","organiser":"","industry":"","website":"","exhibitor_list_url":"","description":""}]}';
+  . 'Also list in "other_pages" up to 12 links from this text (they appear as [https://...] after link words) that lead to OTHER editions or shows whose full details (dates, venue) are NOT given here — e.g. the page of each city edition, or an events / show calendar page. Leave it empty if there are none.' . "\n"
+  . 'Reply with JSON only: {"expos":[{"name":"","venue":"","city":"","country":"","start_date":"","end_date":"","halls":"","organiser":"","industry":"","website":"","exhibitor_list_url":"","description":""}],"other_pages":[{"url":"","title":""}]}';
 
 const XP_ROWS_PROMPT = 'This is %s of the exhibitor list for the exhibition "%s". Pick out EVERY exhibitor company in it.' . "\n"
   . 'Reply with one line per exhibitor and nothing else — no header, no numbering, no notes. Separate the columns with a TAB character:' . "\n"
@@ -189,7 +193,9 @@ case 'xp_extract':   // one part of page text → expos found
     $ex = $row['start_date'] ? val('SELECT id FROM ' . T('expos') . ' WHERE LOWER(name) = LOWER(?) AND (edate = ? OR edate IS NULL)', [$row['name'], $row['start_date']]) : val('SELECT id FROM ' . T('expos') . ' WHERE LOWER(name) = LOWER(?)', [$row['name']]);
     $out[] = $row + ['source_url' => $url === 'pasted text' ? '' : $url, 'existing_id' => $ex ? (int) $ex : null];
   }
-  out(['expos' => $out]);
+  $more = [];
+  foreach (array_slice((array) ($d['other_pages'] ?? []), 0, 12) as $m) { $u = xp_url(((array) $m)['url'] ?? ''); if ($u && $u !== $url) $more[$u] = ['url' => $u, 'title' => mb_substr(trim((string) (((array) $m)['title'] ?? '')), 0, 120)]; }
+  out(['expos' => $out, 'other_pages' => array_values($more)]);
 
 case 'xp_save':   // ticked expos from the preview → expo list (an expo already there only gets its empty details filled)
   need_admin();

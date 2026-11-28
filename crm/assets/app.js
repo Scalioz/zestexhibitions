@@ -2607,6 +2607,9 @@ routes.expocal = async () => {
      <td><b>${esc(x.name)}</b>${x.organiser ? `<div class="sub">${esc(x.organiser)}</div>` : ''}${x.website ? `<div class="sub">${link(x.website)}</div>` : ''}</td><td class="num" style="white-space:nowrap">${x.start_date ? fd(x.start_date) + (x.end_date && x.end_date !== x.start_date ? ' – ' + fd(x.end_date) : '') : '<span class="sub">not given</span>'}</td>
      <td>${esc([x.venue, x.city, x.country].filter(Boolean).join(', ')) || '—'}</td><td>${esc(x.halls || '—')}</td><td class="sub">${esc(x.industry || '')}</td><td>${x.existing_id ? '<span class="pill p-off">already in list</span>' : '<span class="pill p-enquiry">new</span>'}</td></tr>`).join('')}</table></div>
     <div class="row" style="margin-top:10px"><button class="btn" id="xa-save">Save ticked expos</button><span class="sub">An expo already in the list only gets its missing details filled in.</span></div>` : '<p class="sub">No expos were found on that page.</p>') : ''}
+   ${A.more && A.more.length ? `<div class="inset" style="margin-top:14px;border-color:var(--gold)"><b>More pages found on these sites</b> <span class="sub">— other editions / shows whose dates were not on the page you gave. Tick and read them to add those too.</span>
+    <div style="margin:8px 0;display:grid;gap:4px">${A.more.map((m, i) => `<label class="row" style="gap:6px;font-size:13px"><input type="checkbox" data-xm="${i}" ${m.pick ? 'checked' : ''}> ${esc(m.title || '')} <span class="sub">${esc(m.url)}</span></label>`).join('')}</div>
+    <button class="btn ghost sm" id="xm-go">✨ Read ticked pages too</button><div id="xm-prog" style="margin-top:8px"></div></div>` : ''}
   </div>` : ''}
   <div class="panel"><div class="ph"><h2>${f.when === 'past' ? 'Past expos' : f.when === 'all' ? 'All expos' : 'Upcoming expos'} <span class="sub">(${d.expos.length})</span></h2>
     <div class="row" style="gap:8px"><select id="xf-when" style="width:auto"><option value="upcoming" ${f.when === 'upcoming' ? 'selected' : ''}>Upcoming</option><option value="past" ${f.when === 'past' ? 'selected' : ''}>Past</option><option value="all" ${f.when === 'all' ? 'selected' : ''}>All</option></select>
@@ -2622,24 +2625,38 @@ routes.expocal = async () => {
   view().querySelectorAll('[data-xamode]').forEach(a => a.onclick = e => { e.preventDefault(); A.mode = a.dataset.xamode; refresh(); });
   if ($('#xa-all')) $('#xa-all').onchange = e => { A.found.forEach(x => x.pick = e.target.checked); view().querySelectorAll('[data-xa]').forEach(c => c.checked = e.target.checked); };
   view().querySelectorAll('[data-xa]').forEach(c => c.onchange = () => { A.found[+c.dataset.xa].pick = c.checked; });
+  // reads web links one by one; expos found are added to A.found, links to other edition pages to A.more
+  const readUrls = async (urls, found, el) => {
+    A.done = A.done || [];
+    for (let u = 0; u < urls.length; u++) {
+      try {
+        xpProg(el, `Opening ${esc(urls[u])} (${u + 1} of ${urls.length})…`); const pg = await api('xp_fetch', { url: urls[u] }); A.done.push(urls[u], pg.url);
+        for (let i = 0; i < pg.parts.length; i++) { xpProg(el, `AI is reading ${esc(urls[u])}${pg.parts.length > 1 ? ` — part ${i + 1} of ${pg.parts.length}` : ''} (${u + 1} of ${urls.length})… ${found.length} expo${found.length === 1 ? '' : 's'} found so far`);
+          const r = await api('xp_extract', { text: pg.parts[i], url: pg.url }); take(r.expos, found); addMore(r.other_pages); }
+        if (pg.more) A.errs.push(`${urls[u]}: the page was very long, only the first part was read.`);
+      } catch (e) { A.errs.push(`${urls[u]}: ${e.message}`); }
+    }
+  };
+  const key = x => [x.name, x.start_date, x.city].join('|').toLowerCase();
+  const take = (list, found) => list.forEach(x => { if (!found.some(y => key(y) === key(x))) found.push({ ...x, pick: !x.existing_id && (!x.country || /india/i.test(x.country)) }); });
+  const addMore = list => { A.more = A.more || []; (list || []).forEach(m => { if (!A.done.includes(m.url) && !A.more.some(y => y.url === m.url)) A.more.push({ ...m, pick: true }); }); };
+  if ($('#xm-go')) $('#xm-go').onclick = async () => {
+    const urls = A.more.filter(m => m.pick).map(m => m.url); if (!urls.length) return toast('Tick at least one page', true);
+    $('#xm-go').disabled = true; A.errs = []; A.more = A.more.filter(m => !m.pick); const found = A.found || [];
+    await readUrls(urls, found, $('#xm-prog')); A.found = found; xpProg($('#xm-prog'), ''); refresh();
+  };
+  view().querySelectorAll('[data-xm]').forEach(c => c.onchange = () => { A.more[+c.dataset.xm].pick = c.checked; });
   $('#xa-go').onclick = async () => {
-    const b = $('#xa-go'); b.disabled = true; A.errs = []; const found = []; const el = $('#xa-prog');
-    const take = (list, src) => list.forEach(x => { if (!found.some(y => y.name.toLowerCase() === x.name.toLowerCase() && y.start_date === x.start_date)) found.push({ ...x, pick: !x.existing_id && (!x.country || /india/i.test(x.country)) }); });
+    const b = $('#xa-go'); b.disabled = true; A.errs = []; A.more = []; A.done = []; const found = []; const el = $('#xa-prog');
     try {
       if (A.mode === 'paste') {
         A.text = $('#xa-text').value; A.src = $('#xa-src').value.trim(); if (A.text.trim().length < 50) throw new Error('Paste the page text first.');
         const parts = A.text.match(/[\s\S]{1,45000}(\n|$)/g);
-        for (let i = 0; i < parts.length; i++) { xpProg(el, `AI is reading the pasted text${parts.length > 1 ? ` (part ${i + 1} of ${parts.length})` : ''}…`); take((await api('xp_extract', { text: parts[i], url: A.src })).expos); }
+        for (let i = 0; i < parts.length; i++) { xpProg(el, `AI is reading the pasted text${parts.length > 1 ? ` (part ${i + 1} of ${parts.length})` : ''}…`); const r = await api('xp_extract', { text: parts[i], url: A.src }); take(r.expos, found); addMore(r.other_pages); }
       } else {
         A.links = $('#xa-links').value; const urls = [...new Set(A.links.split(/\s+/).map(u => u.trim()).filter(u => /^(https?:\/\/)?[\w-]+(\.[\w-]+)+/i.test(u)))];
         if (!urls.length) throw new Error('Paste at least one web link.');
-        for (let u = 0; u < urls.length; u++) {
-          try {
-            xpProg(el, `Opening ${esc(urls[u])} (${u + 1} of ${urls.length})…`); const pg = await api('xp_fetch', { url: urls[u] });
-            for (let i = 0; i < pg.parts.length; i++) { xpProg(el, `AI is reading ${esc(urls[u])}${pg.parts.length > 1 ? ` — part ${i + 1} of ${pg.parts.length}` : ''} (${u + 1} of ${urls.length})… ${found.length} expo${found.length === 1 ? '' : 's'} found so far`); take((await api('xp_extract', { text: pg.parts[i], url: pg.url })).expos); }
-            if (pg.more) A.errs.push(`${urls[u]}: the page was very long, only the first part was read.`);
-          } catch (e) { A.errs.push(`${urls[u]}: ${e.message}`); }
-        }
+        await readUrls(urls, found, el);
       }
       A.found = found;
     } catch (e) { toast(e.message, true); }
