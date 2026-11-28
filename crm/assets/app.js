@@ -4,6 +4,11 @@
 const CSRF = document.querySelector('meta[name=csrf]').content;
 const $ = s => document.querySelector(s);
 const view = () => $('#view');
+// Colour each dashboard box by what its figure means (money in = green, owed / missed = red, business = gold, counts = indigo, costs = amber)
+const KPI_TONES = [['info', /gst/i], ['bad', /miss|outstanding|owe|due|balance to collect|payable|late|pending/i], ['good', /received|collected|paid so far|won|profit|bonus|present|saved/i],
+  ['warn', /vendor|expense|loss|advance|spent|leave|open enquir|paid this|paid leave/i], ['gold', /business|billed|captured|total|share|salary|this month|today/i], ['info', /.*/]];
+function toneKpis(root) { root.querySelectorAll('.kpi:not([data-tone])').forEach(k => { const t = (k.querySelector('span') || k).textContent; const m = KPI_TONES.find(([, r]) => r.test(t)); k.dataset.tone = m[0]; if (!k.classList.contains('hl')) k.classList.add('t-' + m[0]); }); }
+new MutationObserver(() => { const v = view(); if (v) toneKpis(v); }).observe(document.documentElement, { childList: true, subtree: true });
 const B = { me: null };           // boot data
 const C = {};                      // per-view cache
 let draft = null;                  // daily report draft
@@ -677,12 +682,12 @@ routes.project = async ({ id, tab }) => {
    ${+b.round_off ? `<div class="l"><span>Round off</span><span class="num">${b.round_off > 0 ? '+ ' : '− '}${inr2(Math.abs(b.round_off))}</span></div>` : ''}
    <div class="l tot big"><span>Bill total</span><span class="num">${inr(b.total)}</span></div>
    <div class="l"><span>Received</span><span class="num">${inr(b.received)}</span></div>
-   <div class="l tot"><span>Balance</span><span class="num" style="color:${b.balance > 0.5 ? 'var(--bad)' : 'var(--ok)'}">${inr(b.balance)}</span></div>
+   <div class="l tot ${b.balance > 0.5 ? 'bal-due' : 'bal-ok'}"><span>Balance</span><span class="num" style="color:${b.balance > 0.5 ? 'var(--bad)' : 'var(--ok)'}">${inr(b.balance)}</span></div>
    <h3 style="margin-top:14px">Profit (excl. GST)</h3>
    <div class="l"><span>Vendor paid</span><span class="num">${inr(b.vendor_paid)}</span></div>
    <div class="l"><span>Project expenses</span><span class="num">${inr(b.expenses)}</span></div>
    <div class="l"><span>Losses</span><span class="num">${inr(b.losses)}</span></div>
-   <div class="l tot"><span>Profit so far</span><span class="num" style="color:${b.profit < 0 ? 'var(--bad)' : 'inherit'}">${inr(b.profit)}</span></div>
+   <div class="l tot prof"><span>Profit so far</span><span class="num" style="color:${b.profit < 0 ? 'var(--bad)' : 'inherit'}">${inr(b.profit)}</span></div>
    <a class="btn ghost sm" style="margin-top:10px;justify-content:center" href="ledger.php?client=${p.client.id}" target="_blank" rel="noopener">Open client ledger</a>
    ${B.acc && (B.partners || []).length ? (() => { const pt = B.partners.find(x => +x.id === +p.partner_id);
      return `<h3 style="margin-top:14px">Business partner</h3><form id="ptag" class="grid" style="grid-template-columns:1fr;gap:8px"><select name="partner_id"><option value="">— Zest's own order —</option>${B.partners.map(x => `<option value="${x.id}" ${+x.id === +p.partner_id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>

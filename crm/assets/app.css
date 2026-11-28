@@ -217,3 +217,64 @@ select[data-lheat]{min-width:140px}
 .kclick .kpi.on{outline:3px solid var(--gold);outline-offset:2px}
 #kdet:empty{display:none}
 #pkdet:empty{display:none}
+
+/* ================= colour refresh — same navy/gold brand, colour where it means something ================= */
+:root{
+  --won:#178a52; --won-2:#0f6e40; --teal:#0e7c86; --teal-bg:#e0f3f4; --ind:#4a55c9; --ind-bg:#eaecfb; --amb:#b86e00; --amb-bg:#fdf0d9;
+  --th-bg:#f5f6fa; --gold-ink:#8a6200;
+}
+@media (prefers-color-scheme:dark){:root{
+  --won:#2fa86b; --won-2:#238556; --teal:#5fd0d8; --teal-bg:#123236; --ind:#9aa3ff; --ind-bg:#1f2347; --amb:#f0b752; --amb-bg:#33270f;
+  --th-bg:#1c2130; --gold-ink:#f0c766;
+}}
+/* status pills: a dot + clearer colours; WON stands out */
+.pill.p-enquiry,.pill.p-quoted,.pill.p-won,.pill.p-completed,.pill.p-rejected{display:inline-flex;align-items:center;gap:6px}
+.pill.p-enquiry::before,.pill.p-quoted::before,.pill.p-won::before,.pill.p-completed::before,.pill.p-rejected::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.p-enquiry{background:var(--ind-bg);color:var(--ind)}
+.p-quoted{background:var(--amb-bg);color:var(--amb)}
+.pill.p-won{background:linear-gradient(135deg,var(--won),var(--won-2));color:#fff;box-shadow:0 1px 3px rgba(23,138,82,.35)}
+.pill.p-won::before{background:#c9f5dc}
+.p-completed{background:var(--teal-bg);color:var(--teal)}
+.head .pill{font-size:12px;padding:5px 13px}
+/* section headings: a small gold marker */
+.panel>h2::before,.panel>h3::before,.ph>h2::before,.ph>h3::before{content:"";display:inline-block;width:4px;height:.95em;border-radius:2px;background:var(--gold);margin-right:9px;vertical-align:-1px}
+.sum>h3::before{background:var(--navy)}
+/* menu: coloured section labels, gold marker on the open page */
+nav .sec{display:flex;align-items:center;gap:7px}
+nav .sec::before{content:"";width:7px;height:7px;border-radius:2px;background:var(--steel)}
+nav .sec:nth-of-type(1)::before{background:var(--navy)}
+nav .sec:nth-of-type(2)::before{background:var(--teal)}
+nav .sec:nth-of-type(3)::before{background:var(--gold)}
+nav .sec:nth-of-type(4)::before{background:var(--ind)}
+nav .sec:nth-of-type(5)::before{background:var(--won)}
+nav a.on{box-shadow:inset 3px 0 0 var(--gold)}
+/* tabs: gold underline on the open tab */
+.tabs a:hover{color:var(--navy)}
+.tabs a.on{border-bottom:3px solid var(--gold);padding-bottom:8px}
+/* tables: tinted header row */
+th{background:var(--th-bg)}
+tr:first-child>th:first-child{border-top-left-radius:7px}tr:first-child>th:last-child{border-top-right-radius:7px}
+/* dashboard boxes: coloured top edge + label by meaning (set by toneKpis in app.js) */
+.kpi{border-top:3px solid var(--line)}
+.kpi.t-good{border-top-color:var(--won)}.kpi.t-good>span{color:var(--won)}
+.kpi.t-bad{border-top-color:var(--bad)}.kpi.t-bad>span{color:var(--bad)}
+.kpi.t-gold{border-top-color:var(--gold)}.kpi.t-gold>span{color:var(--gold-ink)}
+.kpi.t-info{border-top-color:var(--ind)}.kpi.t-info>span{color:var(--ind)}
+.kpi.t-warn{border-top-color:var(--amb)}.kpi.t-warn>span{color:var(--amb)}
+.kpi.hl{border-top:3px solid var(--gold);background:linear-gradient(140deg,var(--navy-2),#22356f)}
+.kpi.hl>span{color:#e9c76f!important}
+/* bill summary: total, balance and profit highlighted */
+.sum .l.tot.big{background:var(--navy-soft);border:0;border-radius:8px;padding:10px 10px;margin:8px -4px 2px}
+.sum .l.tot.big span:first-child{color:var(--navy);font-weight:700}
+.sum .l.tot.bal-due{background:var(--bad-bg);border-radius:8px;padding:8px 10px;margin:6px -4px 0;border:0}
+.sum .l.tot.bal-ok{background:var(--ok-bg);border-radius:8px;padding:8px 10px;margin:6px -4px 0;border:0}
+.sum .l.tot.bal-due span:first-child{color:var(--bad);font-weight:700}.sum .l.tot.bal-ok span:first-child{color:var(--ok);font-weight:700}
+.sum .l.tot.prof{background:var(--gold-soft);border-radius:8px;padding:8px 10px;margin:6px -4px 0;border:0}
+.sum .l.tot.prof span:first-child{color:var(--gold-ink);font-weight:700}
+/* auto-calculated boxes look different from boxes you type in */
+input[readonly]{background:var(--bg);border-style:dashed}
+#calc-total{background:var(--gold-soft);border:1px solid var(--gold);color:var(--ink)}
+/* buttons */
+.btn:not(.ghost):not(.link):not(.danger):not(.wa):hover{filter:brightness(1.18)}
+.btn.ghost:hover{background:var(--navy-soft)}
+.badge{background:var(--bad);color:#fff}
