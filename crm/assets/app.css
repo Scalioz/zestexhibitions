@@ -282,3 +282,12 @@ input[readonly]{background:var(--bg);border-style:dashed}
 /* expo calendar: AI working indicator */
 .xspin{width:16px;height:16px;border-radius:50%;border:2px solid var(--gold-soft);border-top-color:var(--gold);animation:xspin .8s linear infinite;flex:none}
 @keyframes xspin{to{transform:rotate(360deg)}}
+/* expo calendar: month groups */
+details.xmon{border:1px solid var(--line);border-radius:10px;margin-bottom:8px;background:var(--panel)}
+details.xmon>summary{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 14px;cursor:pointer;list-style:none}
+details.xmon>summary::-webkit-details-marker{display:none}
+details.xmon>summary::before{content:"▸";color:var(--gold-ink);transition:transform .15s}
+details.xmon[open]>summary::before{transform:rotate(90deg)}
+details.xmon[open]>summary{border-bottom:1px solid var(--line)}
+details.xmon .xm-name{font:700 15px var(--f-display)}
+details.xmon .tw{padding:4px 10px 10px}

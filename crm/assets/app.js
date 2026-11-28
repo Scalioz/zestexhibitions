@@ -2532,6 +2532,11 @@ const xpDates = x => x.edate ? fd(x.edate) + (x.end_date && x.end_date !== x.eda
 const xpPlace = x => [x.venue, x.city, x.country && !/^india$/i.test(x.country) ? x.country : ''].filter(Boolean).map(esc).join(', ') || '—';
 const xpWhen = x => { if (!x.edate) return ''; const end = x.end_date || x.edate; if (end < B.today) return '<span class="pill p-off">over</span>'; if (x.edate <= B.today) return '<span class="pill p-won">on now</span>';
   const d = Math.round((new Date(x.edate) - new Date(B.today)) / 864e5); return d <= 30 ? `<span class="pill p-quoted">in ${d} day${d === 1 ? '' : 's'}</span>` : d <= 90 ? `<span class="pill p-enquiry">in ${Math.round(d / 7)} weeks</span>` : ''; };
+const XP_CITIES = [['Delhi NCR', /delhi|noida|gurugram|gurgaon|faridabad|ghaziabad|pragati maidan|bharat mandapam|yashobhoomi|dwarka|india expo (centre|mart)/i], ['Mumbai', /mumbai|bombay|goregaon|thane|nesco|jio world/i],
+  ['Bengaluru', /bengaluru|bangalore|biec|ktpo/i], ['Chennai', /chennai|madras|chennai trade centre/i], ['Hyderabad', /hyderabad|secunderabad|hitex|hicc/i], ['Ahmedabad', /ahmedabad|gandhinagar|mahatma mandir/i], ['Pune', /pune|moshi/i], ['Kolkata', /kolkata|calcutta|biswa bangla/i]];
+const xpCityGroup = x => { const t = [x.city, x.venue].filter(Boolean).join(' '); const m = XP_CITIES.find(([, r]) => r.test(t)); return m ? m[0] : 'Other'; };
+const xpCity = x => { const g = xpCityGroup(x); return g === 'Other' ? (x.city || x.country || 'City not known') : g === 'Delhi NCR' && x.city && !/delhi/i.test(x.city) ? x.city + ' (NCR)' : x.city || g; };
+const xpMonth = k => new Date(k + '-01T00:00:00').toLocaleString('en-IN', { month: 'long', year: 'numeric' });
 const xpProg = (el, t) => { if (el) el.innerHTML = t ? `<div class="inset" style="display:flex;gap:10px;align-items:center"><span class="xspin"></span><span>${t}</span></div>` : ''; };
 let PDFJS = null;
 async function pdfLib() { if (!PDFJS) { PDFJS = await import(new URL('assets/pdfjs/pdf.js?v=4.10.38', location.href).href); PDFJS.GlobalWorkerOptions.workerSrc = new URL('assets/pdfjs/pdf.worker.js?v=4.10.38', location.href).href; } return PDFJS; }
@@ -2591,6 +2596,11 @@ routes.expocal = async () => {
   const f = C.xf || (C.xf = { when: 'upcoming', q: '', india: 1 });
   const d = await api('xp_list', f);
   const A = C.xadd;   // the "add from links" panel state
+  const cityN = {}; d.expos.forEach(x => { const c = xpCityGroup(x); cityN[c] = (cityN[c] || 0) + 1; });
+  const list = d.expos.filter(x => !f.city || xpCityGroup(x) === f.city);
+  const byM = new Map(); list.forEach(x => { const k = x.edate ? x.edate.slice(0, 7) : 'zz'; if (!byM.has(k)) byM.set(k, []); byM.get(k).push(x); });
+  const months = [...byM.entries()].sort((a, b) => f.when === 'past' ? (a[0] === 'zz' ? 1 : b[0] === 'zz' ? -1 : b[0].localeCompare(a[0])) : a[0].localeCompare(b[0]));
+  C.xopen = C.xopen || new Set(); const open = new Set(C.xopen); if (!open.size && months.length) open.add(months[0][0]);
   view().innerHTML = `<div class="head"><div><h1>Expo calendar</h1><p>Major expos to target. Paste expo web links and the AI fills in the name, venue, dates and halls. Open an expo to add its exhibitor list and assign it to the team.</p></div>
    <div class="row"><button class="btn" id="xa-open">✨ Add expos from web links</button></div></div>
   ${A ? `<div class="panel" style="border-color:var(--gold)"><div class="ph"><h2>Add expos from web links</h2><button type="button" class="btn link sm" id="xa-x">Close ✕</button></div>
@@ -2612,13 +2622,19 @@ routes.expocal = async () => {
     <div style="margin:8px 0;display:grid;gap:4px">${A.more.map((m, i) => `<label class="row" style="gap:6px;font-size:13px"><input type="checkbox" data-xm="${i}" ${m.pick ? 'checked' : ''}> ${esc(m.title || '')} <span class="sub">${esc(m.url)}</span></label>`).join('')}</div>
     <button class="btn ghost sm" id="xm-go">✨ Read ticked pages too</button><div id="xm-prog" style="margin-top:8px"></div></div>` : ''}
   </div>` : ''}
-  <div class="panel"><div class="ph"><h2>${f.when === 'past' ? 'Past expos' : f.when === 'all' ? 'All expos' : 'Upcoming expos'} <span class="sub">(${d.expos.length})</span></h2>
+  <div class="panel"><div class="ph"><h2>${f.when === 'past' ? 'Past expos' : f.when === 'all' ? 'All expos' : 'Upcoming expos'} <span class="sub">(${list.length}${list.length !== d.expos.length ? ' of ' + d.expos.length : ''})</span></h2>
     <div class="row" style="gap:8px"><select id="xf-when" style="width:auto"><option value="upcoming" ${f.when === 'upcoming' ? 'selected' : ''}>Upcoming</option><option value="past" ${f.when === 'past' ? 'selected' : ''}>Past</option><option value="all" ${f.when === 'all' ? 'selected' : ''}>All</option></select>
-    <label class="row" style="gap:6px;font-size:13px"><input type="checkbox" id="xf-india" ${f.india ? 'checked' : ''}> India only</label><input id="xf-q" placeholder="Search expo, city, venue, industry…" value="${esc(f.q)}" style="max-width:260px"></div></div>
-   ${d.expos.length ? `<div class="tw"><table><tr><th>Expo</th><th>Dates</th><th>Venue</th><th>Halls</th><th class="r">Exhibitors</th><th>Assigned to</th></tr>
-   ${d.expos.map(x => `<tr class="click" data-go="expo-${x.id}"><td><b>${esc(x.name)}</b> ${xpWhen(x)}${x.industry ? `<div class="sub">${esc(x.industry)}</div>` : ''}</td><td class="num" style="white-space:nowrap">${xpDates(x)}</td><td>${xpPlace(x)}</td><td style="white-space:nowrap">${esc(x.halls || '—')}</td>
-     <td class="r num">${x.exhibitors || (x.lists ? '<span class="sub">list added</span>' : '—')}</td><td>${x.people.length ? x.people.map(p => `<span class="chip" style="margin:1px">${p.done ? '✓ ' : ''}${esc(p.name)}</span>`).join(' ') : '<span class="sub">—</span>'}</td></tr>`).join('')}</table></div>`
-   : blank(f.q ? 'No expo matches your search.' : 'No expos here yet. Use “Add expos from web links” to bring them in.')}
+    <label class="row" style="gap:6px;font-size:13px"><input type="checkbox" id="xf-india" ${f.india ? 'checked' : ''}> India only</label><input id="xf-q" placeholder="Search expo, industry, venue…" value="${esc(f.q)}" style="max-width:240px"></div></div>
+   <div class="row" style="gap:6px;margin-bottom:12px;flex-wrap:wrap"><span class="sub" style="margin-right:2px"><b>City</b></span>
+    ${[['', 'All cities', d.expos.length], ...XP_CITIES.map(([c]) => [c, c, cityN[c] || 0]), ['Other', 'Other cities', cityN.Other || 0]].filter(([k, , n]) => !k || n || f.city === k)
+      .map(([k, l, n]) => `<button type="button" class="btn sm ${(f.city || '') === k ? '' : 'ghost'}" data-xcity="${esc(k)}">${esc(l)} <span style="opacity:.7">${n}</span></button>`).join('')}</div>
+   ${list.length ? months.map(([mk, rows]) => `<details class="xmon" data-xmon="${mk}" ${open.has(mk) ? 'open' : ''}><summary><span class="xm-name">${mk === 'zz' ? 'Dates not known yet' : xpMonth(mk)}</span><span class="pill p-enquiry">${rows.length} expo${rows.length === 1 ? '' : 's'}</span>
+     <span class="sub">${[...new Set(rows.map(xpCity))].slice(0, 6).map(esc).join(' · ')}</span></summary>
+     <div class="tw"><table><tr><th>Expo</th><th>Dates</th><th>City · venue</th><th>Industry / sector</th><th class="r">Exhibitors</th><th>Assigned to</th></tr>
+     ${rows.map(x => `<tr class="click" data-go="expo-${x.id}"><td><b>${esc(x.name)}</b> ${xpWhen(x)}${x.organiser ? `<div class="sub">${esc(x.organiser)}</div>` : ''}</td><td class="num" style="white-space:nowrap">${xpDates(x)}</td>
+      <td><b style="font-weight:600">${esc(xpCity(x))}</b><div class="sub">${esc([x.venue, x.halls].filter(Boolean).join(' · '))}</div></td><td style="max-width:260px">${x.industry ? esc(x.industry) : '<span class="sub">—</span>'}</td>
+      <td class="r num">${x.exhibitors || (x.lists ? '<span class="sub">list added</span>' : '—')}</td><td>${x.people.length ? x.people.map(p => `<span class="chip" style="margin:1px">${p.done ? '✓ ' : ''}${esc(p.name)}</span>`).join(' ') : '<span class="sub">—</span>'}</td></tr>`).join('')}</table></div></details>`).join('')
+   : blank(f.q || f.city ? 'No expo matches this filter.' : 'No expos here yet. Use “Add expos from web links” to bring them in.')}
    <p class="sub">This is the same expo list used on orders and in Expo data, so expos typed there show up here too.</p></div>`;
   $('#xa-open').onclick = () => { C.xadd = C.xadd ? null : { mode: 'links' }; refresh(); };
   if (!A) { xpCalWire(f); return; }
@@ -2685,6 +2701,8 @@ routes.expocal = async () => {
   xpCalWire(f);
 };
 function xpCalWire(f) {
+  view().querySelectorAll('[data-xcity]').forEach(b => b.onclick = () => { f.city = b.dataset.xcity; C.xopen = new Set(); refresh(); });
+  view().querySelectorAll('[data-xmon]').forEach(dt => dt.addEventListener('toggle', () => { C.xopen = C.xopen || new Set(); if (!C.xopen.size) view().querySelectorAll('[data-xmon][open]').forEach(z => C.xopen.add(z.dataset.xmon)); dt.open ? C.xopen.add(dt.dataset.xmon) : C.xopen.delete(dt.dataset.xmon); }));
   $('#xf-when').onchange = e => { f.when = e.target.value; refresh(); };
   $('#xf-india').onchange = e => { f.india = e.target.checked ? 1 : 0; refresh(); };
   let t; $('#xf-q').oninput = e => { clearTimeout(t); t = setTimeout(() => { f.q = e.target.value.trim(); refresh().then(() => { const i = $('#xf-q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 350); };
