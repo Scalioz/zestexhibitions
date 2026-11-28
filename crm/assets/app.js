@@ -479,7 +479,7 @@ routes.clients = async () => {
   const qv = C.cq || '', ow = isAdmin() ? (C.cown || '') : '', every = !isAdmin() && C.cscope !== 'mine';
   const kind = C.ckind || 'won';
   const d = await api('clients', { q: qv, owner_id: ow, all: every ? 1 : '', kind }), n = d.counts;
-  const KT = [['won', 'Converted', 'won an order'], ['open', 'Orders in progress', 'enquiry / quoted, none won yet'], ['none', 'No orders yet', 'contacts only'], ['all', 'All', '']];
+  const KT = [['won', 'Converted', 'won an order'], ['open', 'Orders in progress', 'enquiry / quoted, none won yet'], ['lost', 'Lost', 'all orders rejected'], ['none', 'No orders yet', 'contacts only'], ['all', 'All', '']];
   const mine = d.clients.filter(c => !c.locked);
   const tot = mine.reduce((a, c) => (a.b += +c.business || 0, a.o += +c.due || +c.outstanding || 0, a), { b: 0, o: 0 });
   const showOwner = isAdmin() || every;
