@@ -2531,32 +2531,49 @@ const vStat = r => !r.live ? `<span class="sub">${esc(r.status)} — not counted
 routes.vdash = async () => {
   const d = await api('acc_vendors'), t = d.totals;
   view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#acc">← Accounts</a></div><h1>Vendor dashboard</h1><p>What we agreed with each vendor (the vendor quote chosen on the order), what we have paid, and what is still to pay. Click a vendor for order-by-order details.</p></div><div class="row"><a class="btn ghost" href="#vendors">Vendor list</a></div></div>
-  <div class="kpis"><div class="kpi hl"><span>Outstanding to vendors</span><b>${inr(t.outstanding)}</b><small>${t.with_dues} vendor${t.with_dues === 1 ? '' : 's'} with dues</small></div>
-   <div class="kpi"><span>Agreed with vendors</span><b>${inr(t.agreed)}</b><small>chosen quotes on won orders</small></div>
-   <div class="kpi"><span>Paid to vendors</span><b>${inr(t.paid)}</b><small>${t.orders} order${t.orders === 1 ? '' : 's'}</small></div>
-   ${t.over > 0.5 ? `<div class="kpi"><span>Paid more than agreed</span><b>${inr(t.over)}</b><small>check these orders</small></div>` : ''}</div>
+  <div class="kpis kclick"><div class="kpi hl" data-vk="out"><span>Outstanding to vendors</span><b>${inr(t.outstanding)}</b><small>${t.with_dues} vendor${t.with_dues === 1 ? '' : 's'} with dues</small></div>
+   <div class="kpi" data-vk="agreed"><span>Agreed with vendors</span><b>${inr(t.agreed)}</b><small>chosen quotes on won orders</small></div>
+   <div class="kpi" data-vk="paid"><span>Paid to vendors</span><b>${inr(t.paid)}</b><small>${d.payments.length} payment${d.payments.length === 1 ? '' : 's'} · ${t.orders} order${t.orders === 1 ? '' : 's'}</small></div>
+   ${t.over > 0.5 ? `<div class="kpi" data-vk="over"><span>Paid more than agreed</span><b>${inr(t.over)}</b><small>check these orders</small></div>` : ''}</div>
+  <p class="sub" style="margin:-6px 0 0">Click any box to see what makes up the figure.</p><div id="vkdet"></div>
   <div class="panel"><div class="ph"><h2>Vendors</h2><input id="vdq" placeholder="Search vendor…" value="${esc(C.vdq || '')}" style="max-width:240px"></div>
    ${d.vendors.length ? `<div class="tw"><table><tr><th>Vendor</th><th class="r">Orders</th><th class="r">Agreed</th><th class="r">Paid</th><th class="r">Outstanding</th><th>Last paid</th></tr>
    ${d.vendors.filter(x => !C.vdq || x.vendor.name.toLowerCase().includes(C.vdq.toLowerCase())).map(({ vendor: v, totals: x }) => `<tr class="click" data-go="vendor-${v.id}"><td><b>${esc(v.name)}</b>${v.city || v.notes ? `<div class="sub">${esc([v.city, v.notes].filter(Boolean).join(' · '))}</div>` : ''}</td><td class="r num">${x.orders}</td><td class="r num">${inr(x.agreed)}</td><td class="r num">${inr(x.paid)}</td>
      <td class="r num" style="${x.outstanding > 0.5 ? 'color:var(--bad);font-weight:700' : ''}">${x.outstanding > 0.5 ? inr(x.outstanding) : '<span class="pill p-ok">clear</span>'}${x.over > 0.5 ? `<div class="sub" style="color:var(--amb)">paid ${inr(x.over)} over</div>` : ''}</td><td class="num">${x.last ? fd(x.last) : '—'}</td></tr>`).join('')}
    <tr class="tot"><td><b>Total</b></td><td class="r num">${t.orders}</td><td class="r num">${inr(t.agreed)}</td><td class="r num">${inr(t.paid)}</td><td class="r num"><b>${inr(t.outstanding)}</b></td><td></td></tr></table></div>
    <p class="sub">Agreed = the vendor quote chosen on each won order. Outstanding = agreed − paid, for won orders not yet marked “vendor settled” or completed. Vendor payments come from each order's Payments &amp; costs tab and from accounts entries tagged to an order.${d.idle ? ` ${d.idle} vendor${d.idle === 1 ? ' has' : 's have'} no orders yet and ${d.idle === 1 ? 'is' : 'are'} not shown.` : ''}</p>` : blank('No vendor has been chosen or paid on any order yet.')}</div>`;
+  const rowsOf = f => d.vendors.flatMap(x => x.orders.filter(f).map(r => ({ ...r, vendor: x.vendor.name })));
+  const OT = (list, cols) => list.length ? `<div class="tw"><table><tr><th>Vendor</th><th>Order</th>${cols.map(c => `<th class="r">${c[0]}</th>`).join('')}</tr>${list.map(r => `<tr class="click" data-go="project-${r.project_id}-money"><td><b>${esc(r.vendor)}</b></td><td>${esc(r.company)}<div class="sub">${esc(r.expo)} · ${fd(r.start_date)}</div></td>${cols.map(c => `<td class="r num">${c[1](r)}</td>`).join('')}</tr>`).join('')}
+    <tr class="tot"><td colspan="2"><b>Total</b></td>${cols.map(c => `<td class="r num"><b>${c[2] ? inr(list.reduce((a, r) => a + (+r[c[2]] || 0), 0)) : ''}</b></td>`).join('')}</tr></table></div>` : '<div class="sub">Nothing here.</div>';
+  const VK = {
+    out: () => ['Outstanding — orders with money still to pay', OT(rowsOf(r => r.outstanding > 0.5).sort((a, b) => b.outstanding - a.outstanding), [['Agreed', r => inr(r.agreed), 'agreed'], ['Paid', r => inr(r.paid), 'paid'], ['Outstanding', r => `<b style="color:var(--bad)">${inr(r.outstanding)}</b>`, 'outstanding']])],
+    agreed: () => ['Agreed — chosen vendor quotes on won orders', OT(rowsOf(r => r.agreed !== null && (r.live || r.paid > 0)), [['Agreed', r => inr(r.agreed), 'agreed'], ['Paid', r => inr(r.paid), 'paid'], ['Status', r => vStat(r)]])],
+    paid: () => ['Paid — every vendor payment', d.payments.length ? `<div class="tw"><table><tr><th>Date</th><th>Vendor</th><th>Order</th><th>Mode</th><th>Reference</th><th class="r">Amount</th></tr>${d.payments.map(x => `<tr class="click" data-go="project-${x.project_id}-money"><td class="num">${fd(x.pdate)}</td><td><b>${esc(x.vendor)}</b></td><td>${esc(x.company)}<div class="sub">${esc(x.expo)}</div></td><td>${esc(x.mode)}</td><td class="sub">${esc(x.reference || '')}</td><td class="r num">${inr(x.amount)}</td></tr>`).join('')}<tr class="tot"><td colspan="5"><b>Total</b></td><td class="r num"><b>${inr(d.payments.reduce((a, x) => a + +x.amount, 0))}</b></td></tr></table></div>` : '<div class="sub">No payments yet.</div>'],
+    over: () => ['Paid more than agreed', OT(rowsOf(r => r.over > 0.5), [['Agreed', r => inr(r.agreed), 'agreed'], ['Paid', r => inr(r.paid), 'paid'], ['Over by', r => `<b style="color:var(--amb)">${inr(r.over)}</b>`, 'over']]) + '<p class="sub">Either the vendor quote on the order needs updating, or a payment was entered twice.</p>'],
+  };
+  const showV = k => { view().querySelectorAll('[data-vk]').forEach(x => x.classList.toggle('on', x.dataset.vk === k)); const box = $('#vkdet');
+    if (!k || !VK[k]) { box.innerHTML = ''; return; } const [title, body] = VK[k]();
+    box.innerHTML = `<div class="panel"><div class="ph"><h2>${title}</h2><button type="button" class="btn link sm" id="vkdet-x">Close ✕</button></div>${body}</div>`;
+    $('#vkdet-x').onclick = () => { C.vdK = ''; showV(''); }; };
+  view().querySelectorAll('[data-vk]').forEach(x => x.onclick = () => { C.vdK = C.vdK === x.dataset.vk ? '' : x.dataset.vk; showV(C.vdK); if (C.vdK) $('#vkdet').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  showV(C.vdK || '');
   $('#vdq').oninput = e => { C.vdq = e.target.value; clearTimeout(C.vdqT); C.vdqT = setTimeout(() => refresh().then(() => { const i = $('#vdq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }), 250); };
 };
 routes.vendor = async ({ id }) => {
   const d = await api('acc_vendor', { id }), v = d.vendor, t = d.totals;
   view().innerHTML = `<div class="head"><div><div class="crumb"><a href="#vdash">← Vendor dashboard</a></div><h1>${esc(v.name)}</h1><p>${esc([v.city, v.phone, v.email, v.notes].filter(Boolean).join(' · ')) || 'Vendor'}</p></div>${v.phone ? `<div class="row">${waBtn(v.phone, '', 'WhatsApp')}</div>` : ''}</div>
-  <div class="kpis"><div class="kpi hl"><span>Outstanding</span><b>${inr(t.outstanding)}</b><small>still to pay</small></div>
-   <div class="kpi"><span>Agreed</span><b>${inr(t.agreed)}</b><small>${t.orders} order${t.orders === 1 ? '' : 's'}</small></div>
-   <div class="kpi"><span>Paid to vendor</span><b>${inr(t.paid)}</b><small>${t.last ? 'last on ' + fd(t.last) : 'nothing paid yet'}</small></div>
-   ${t.over > 0.5 ? `<div class="kpi"><span>Paid more than agreed</span><b>${inr(t.over)}</b><small>check the orders below</small></div>` : ''}</div>
-  <div class="panel"><h2>Orders</h2>${d.orders.length ? `<div class="tw"><table><tr><th>Order</th><th>Status</th><th class="r">Agreed</th><th class="r">Paid</th><th class="r">Outstanding</th><th>Last paid</th></tr>
+  <div class="kpis kclick"><div class="kpi hl" data-vj="v-orders"><span>Outstanding</span><b>${inr(t.outstanding)}</b><small>still to pay</small></div>
+   <div class="kpi" data-vj="v-orders"><span>Agreed</span><b>${inr(t.agreed)}</b><small>${t.orders} order${t.orders === 1 ? '' : 's'}</small></div>
+   <div class="kpi" data-vj="v-pays"><span>Paid to vendor</span><b>${inr(t.paid)}</b><small>${t.last ? 'last on ' + fd(t.last) : 'nothing paid yet'}</small></div>
+   ${t.over > 0.5 ? `<div class="kpi" data-vj="v-orders"><span>Paid more than agreed</span><b>${inr(t.over)}</b><small>check the orders below</small></div>` : ''}</div>
+  <div class="panel" id="v-orders"><h2>Orders</h2>${d.orders.length ? `<div class="tw"><table><tr><th>Order</th><th>Status</th><th class="r">Agreed</th><th class="r">Paid</th><th class="r">Outstanding</th><th>Last paid</th></tr>
    ${d.orders.map(r => `<tr style="${r.live ? '' : 'opacity:.6'}"><td><a href="#project-${r.project_id}-money"><b>${esc(r.company)}</b></a><div class="sub">${esc(r.expo)}${r.location ? ', ' + esc(r.location) : ''} · ${fd(r.start_date)}</div></td><td>${vStat(r)}</td>
      <td class="r num">${r.agreed === null ? '—' : inr(r.agreed)}</td><td class="r num">${inr(r.paid)}${r.over > 0.5 ? `<div class="sub" style="color:var(--amb)">${inr(r.over)} over agreed</div>` : ''}</td><td class="r num" style="${r.outstanding > 0.5 ? 'color:var(--bad);font-weight:700' : ''}">${inr(r.outstanding)}</td><td class="num">${r.last ? fd(r.last) : '—'}</td></tr>`).join('')}
    <tr class="tot"><td><b>Total</b></td><td></td><td class="r num">${inr(t.agreed)}</td><td class="r num">${inr(t.paid)}</td><td class="r num"><b>${inr(t.outstanding)}</b></td><td></td></tr></table></div>
    <p class="sub">To record a payment, open the order (click its name) → Payments &amp; costs, or use + New entry → Payment to vendor. Tick “vendor settled” on the order when the final amount is paid even if it is less than agreed.</p>` : blank('No orders with this vendor yet.')}</div>
-  <div class="panel"><h2>Payments made</h2>${d.payments.length ? `<div class="tw"><table><tr><th>Date</th><th>Order</th><th>Mode</th><th>Reference</th><th class="r">Amount</th></tr>
+  <div class="panel" id="v-pays"><h2>Payments made</h2>${d.payments.length ? `<div class="tw"><table><tr><th>Date</th><th>Order</th><th>Mode</th><th>Reference</th><th class="r">Amount</th></tr>
    ${d.payments.map(x => `<tr><td class="num">${fd(x.pdate)}</td><td><a href="#project-${x.project_id}-money">${esc(x.company)}</a><div class="sub">${esc(x.expo)}</div></td><td>${esc(x.mode)}</td><td class="sub">${esc(x.reference || '')}</td><td class="r num">${inr(x.amount)}</td></tr>`).join('')}</table></div>` : '<div class="sub">No payments yet.</div>'}</div>`;
+  view().querySelectorAll('[data-vj]').forEach(x => x.onclick = () => { const el = document.getElementById(x.dataset.vj); el.scrollIntoView({ behavior: 'smooth', block: 'start' }); el.animate([{ boxShadow: '0 0 0 3px var(--gold)' }, { boxShadow: '0 0 0 0 transparent' }], { duration: 1400 }); });
 };
 routes.accset = async () => {
   const m = await accMeta(true); const c = m.company;

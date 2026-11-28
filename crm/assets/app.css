@@ -278,3 +278,4 @@ input[readonly]{background:var(--bg);border-style:dashed}
 .btn:not(.ghost):not(.link):not(.danger):not(.wa):hover{filter:brightness(1.18)}
 .btn.ghost:hover{background:var(--navy-soft)}
 .badge{background:var(--bad);color:#fff}
+#vkdet:empty{display:none}

@@ -756,7 +756,7 @@ case 'acc_vendor': {   // vendor dashboard: agreed (chosen quote) vs paid vs out
   $w = $one ? ' AND vendor_id = ' . $one : '';
   $q = []; foreach (all('SELECT vendor_id, project_id, amount FROM ' . T('vendor_quotes') . ' WHERE selected = 1' . $w) as $r) $q[$r['vendor_id']][$r['project_id']] = (float) $r['amount'];
   $pay = []; $plist = [];
-  foreach (all('SELECT * FROM ' . T('vendor_payments') . ' WHERE 1 = 1' . $w . ' ORDER BY pdate, id') as $r) { $x = &$pay[$r['vendor_id']][$r['project_id']]; $x = $x ?? ['paid' => 0.0, 'last' => null]; $x['paid'] += (float) $r['amount']; $x['last'] = $r['pdate']; unset($x); if ($one) $plist[] = $r; }
+  foreach (all('SELECT * FROM ' . T('vendor_payments') . ' WHERE 1 = 1' . $w . ' ORDER BY pdate, id') as $r) { $x = &$pay[$r['vendor_id']][$r['project_id']]; $x = $x ?? ['paid' => 0.0, 'last' => null]; $x['paid'] += (float) $r['amount']; $x['last'] = $r['pdate']; unset($x); $plist[] = $r; }
   $pids = []; foreach ([$q, $pay] as $src) foreach ($src as $byP) foreach (array_keys($byP) as $pid) $pids[$pid] = 1;
   $P = []; if ($pids) foreach (all('SELECT p.id, p.expo, p.location, p.start_date, p.status, p.vendor_settled, c.company FROM ' . T('projects') . ' p JOIN ' . T('clients') . ' c ON c.id = p.client_id WHERE p.id IN (' . implode(',', array_map('intval', array_keys($pids))) . ')') as $r) $P[$r['id']] = $r;
   $list = []; $G = ['agreed' => 0, 'paid' => 0, 'outstanding' => 0, 'over' => 0, 'with_dues' => 0, 'orders' => 0];
@@ -774,13 +774,14 @@ case 'acc_vendor': {   // vendor dashboard: agreed (chosen quote) vs paid vs out
     if (!$rows && !$one) continue;
     usort($rows, fn($a, $b) => [$b['outstanding'] > 0, $b['start_date'] ?? ''] <=> [$a['outstanding'] > 0, $a['start_date'] ?? '']);
     $T = array_map(fn($x) => is_float($x) ? round($x, 2) : $x, $T);
-    $list[] = ['vendor' => $v, 'totals' => $T, 'orders' => $one ? $rows : null];
+    $list[] = ['vendor' => $v, 'totals' => $T, 'orders' => $rows];
     foreach (['agreed', 'paid', 'outstanding', 'over', 'orders'] as $k) $G[$k] += $T[$k]; if ($T['outstanding'] > 0.5) $G['with_dues']++;
   }
   usort($list, fn($a, $b) => $b['totals']['outstanding'] <=> $a['totals']['outstanding'] ?: $b['totals']['paid'] <=> $a['totals']['paid']);
-  if ($one) { $vn = []; foreach ($plist as &$r) { $r['expo'] = $P[$r['project_id']]['expo'] ?? '—'; $r['company'] = $P[$r['project_id']]['company'] ?? ''; } unset($r);
-    out($list[0] + ['payments' => array_reverse($plist)]); }
-  out(['vendors' => $list, 'totals' => array_map(fn($x) => is_float($x) ? round($x, 2) : $x, $G), 'idle' => count($vs) - count($list)]);
+  $vnm = array_column($vs, 'name', 'id');
+  foreach ($plist as &$r) { $r['expo'] = $P[$r['project_id']]['expo'] ?? '—'; $r['company'] = $P[$r['project_id']]['company'] ?? ''; $r['vendor'] = $vnm[$r['vendor_id']] ?? '—'; } unset($r);
+  if ($one) out($list[0] + ['payments' => array_reverse($plist)]);
+  out(['vendors' => $list, 'payments' => array_reverse($plist), 'totals' => array_map(fn($x) => is_float($x) ? round($x, 2) : $x, $G), 'idle' => count($vs) - count($list)]);
 }
 case 'acc_partners': {
   need_acc(); $list = [];
