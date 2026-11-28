@@ -7,6 +7,10 @@ if (!class_exists('UserError')) { class UserError extends Exception {} }
 function mail_cfg() {
   return array_replace(['host' => '', 'port' => 465, 'secure' => 'ssl', 'imap_host' => '', 'imap_port' => 993], array_intersect_key((array) setting('smtp', []), array_flip(['host', 'port', 'secure', 'imap_host', 'imap_port'])));
 }
+// who always gets a copy (Cc): one list when admin sends, another when anyone else in the team sends
+function mail_cc_cfg() { return array_replace(['admin' => 'info@zestexhibitions.com', 'team' => 'info@zestexhibitions.com, m.osman@zestexhibitions.com'], array_intersect_key((array) setting('mail_cc', []), array_flip(['admin', 'team']))); }
+function mail_emails($s) { return array_values(array_unique(array_filter(array_map(fn($e) => strtolower(trim($e)), preg_split('/[,;\s]+/', (string) $s)), fn($e) => filter_var($e, FILTER_VALIDATE_EMAIL)))); }
+function mail_auto_cc($user) { $c = mail_cc_cfg(); return array_values(array_diff(mail_emails(($user['role'] ?? '') === 'admin' ? $c['admin'] : $c['team']), [strtolower((string) $user['email'])])); }
 function mail_server_ready() { return (bool) mail_cfg()['host']; }
 
 // mailbox passwords are stored encrypted with a key made from this server's config file (not stored in the database)

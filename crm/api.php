@@ -107,9 +107,9 @@ function profile_msgs() {
 }
 function profile_info() {
   $f = one('SELECT id, orig_name, size, created_at FROM ' . T('files') . " WHERE entity = 'profile' ORDER BY id DESC");
-  global $MID;
+  global $MID, $me;
   require_once __DIR__ . '/lib/mailer.php'; require_once __DIR__ . '/lib/att.php'; $w = att_cfg()['wa'];
-  return ['file' => $f ?: null, 'msgs' => profile_msgs(), 'mail_server' => mail_server_ready(), 'mail_ready' => mail_user_ready($MID), 'wa_gateway' => (bool) ($w['token'] ?? '')];
+  return ['file' => $f ?: null, 'msgs' => profile_msgs(), 'mail_server' => mail_server_ready(), 'mail_ready' => mail_user_ready($MID), 'auto_cc' => mail_auto_cc($me), 'wa_gateway' => (bool) ($w['token'] ?? '')];
 }
 function profile_pdf() {
   $f = one('SELECT * FROM ' . T('files') . " WHERE entity = 'profile' ORDER BY id DESC");
@@ -1307,7 +1307,7 @@ case 'settings':
   need_admin();
   require_once __DIR__ . '/lib/quote.php';
   out(['holidays' => all('SELECT * FROM ' . T('holidays') . ' ORDER BY hdate DESC'), 'track_from' => setting('track_from'), 'quote_defaults' => quote_defaults(), 'cards_ai' => (function () { require_once __DIR__ . '/lib/cards.php'; $a = cards_ai(); return ['has_key' => $a['key'] !== '', 'hint' => $a['key'] ? substr($a['key'], 0, 7) . '••••' . substr($a['key'], -4) : '', 'model' => $a['model']]; })(),
-    'smtp' => (function () { require_once __DIR__ . '/lib/mailer.php'; return mail_cfg() + ['people' => array_map(fn($u) => ['name' => $u['name'], 'email' => $u['email'], 'ready' => (bool) $u['mail_pass']], array_values(array_filter(all('SELECT id, name, email, role, department, extra_depts, mail_pass FROM ' . T('users') . ' WHERE active = 1 ORDER BY name'), fn($u) => $u['role'] === 'admin' || in_array('records', user_mods($u), true))))]; })()]);
+    'smtp' => (function () { require_once __DIR__ . '/lib/mailer.php'; return mail_cfg() + ['cc' => mail_cc_cfg(), 'people' => array_map(fn($u) => ['name' => $u['name'], 'email' => $u['email'], 'ready' => (bool) $u['mail_pass']], array_values(array_filter(all('SELECT id, name, email, role, department, extra_depts, mail_pass FROM ' . T('users') . ' WHERE active = 1 ORDER BY name'), fn($u) => $u['role'] === 'admin' || in_array('records', user_mods($u), true))))]; })()]);
 
 case 'storage':   // admin: how much space files use, and compress older files
   need_admin(); require_once __DIR__ . '/lib/shrink.php';
@@ -1345,7 +1345,9 @@ case 'settings_save':
   }
   if (isset($in['smtp'])) { $m = (array) $in['smtp'];
     set_setting('smtp', ['host' => s($m['host'] ?? null, 120) ?? '', 'port' => max(1, min(65535, (int) ($m['port'] ?? 465))), 'secure' => in_array($m['secure'] ?? '', ['ssl', 'tls', 'none'], true) ? $m['secure'] : 'ssl',
-      'imap_host' => s($m['imap_host'] ?? null, 120) ?? '', 'imap_port' => max(1, min(65535, (int) ($m['imap_port'] ?? 993)))]); }
+      'imap_host' => s($m['imap_host'] ?? null, 120) ?? '', 'imap_port' => max(1, min(65535, (int) ($m['imap_port'] ?? 993)))]);
+    if (isset($m['cc_admin']) || isset($m['cc_team'])) { require_once __DIR__ . '/lib/mailer.php';
+      set_setting('mail_cc', ['admin' => implode(', ', mail_emails($m['cc_admin'] ?? '')), 'team' => implode(', ', mail_emails($m['cc_team'] ?? ''))]); } }
   if (isset($in['profile_msgs'])) { $m = (array) $in['profile_msgs']; $cur = (array) setting('profile_msgs', []);
     foreach (['wa' => 3000, 'subj' => 200, 'body' => 5000] as $k => $mx) if (array_key_exists($k, $m)) $cur[$k] = mb_substr(str_replace("\r", '', trim((string) $m[$k])), 0, $mx);
     set_setting('profile_msgs', $cur); }
@@ -1430,7 +1432,8 @@ case 'profile_email':   // sends the company profile PDF as an attachment, from 
   $subj = s($in['subject'] ?? null, 200) ?? fail('Enter the subject.'); $body = s($in['body'] ?? null, 8000) ?? fail('Write the message.');
   [$pn, $pb] = profile_pdf();
   $newPw = (string) ($in['pass'] ?? '');   // first time: password typed right in the send box, saved once the email goes through
-  try { $r = mail_send_as($me, ['to' => $to, 'cc' => !empty($in['cc_me']) ? [$me['email']] : [], 'subject' => $subj, 'text' => $body, 'files' => [[$pn, $pb, 'application/pdf']], 'save_sent' => true], $newPw !== '' ? $newPw : null); }
+  $extra = mail_emails($in['cc'] ?? ''); foreach (array_filter(array_map('trim', preg_split('/[,;\s]+/', (string) ($in['cc'] ?? '')))) as $e) if (!filter_var($e, FILTER_VALIDATE_EMAIL)) fail("Check the Cc address: $e");
+  try { $r = mail_send_as($me, ['to' => $to, 'cc' => array_values(array_unique(array_merge(mail_auto_cc($me), $extra))), 'subject' => $subj, 'text' => $body, 'files' => [[$pn, $pb, 'application/pdf']], 'save_sent' => true], $newPw !== '' ? $newPw : null); }
   catch (UserError $e) { fail($e->getMessage()); }
   if ($newPw !== '') upd('users', $MID, ['mail_pass' => mail_lock($newPw)]);
   out(['ok' => true, 'from' => $me['email']] + $r);
