@@ -324,13 +324,14 @@ function renderNav(cur) {
     ? `<div class="sec">Overview</div>${L('home', 'Business dashboard')}${L('clientlog', 'Client log')}${L('saleslog', 'Sales log', B.pending_approvals || '')}${L('invappr', 'Invoice approvals', B.inv_pending || '')}${L('expocal', 'Expo calendar')}${L('leadlog', 'Expo data log')}${L('jobs', 'Design & production')}${L('reportlog', 'Daily reports', B.flags || '')}${L('att', 'Attendance', B.att_pending || '')}
        <div class="sec">Records</div>${L('clients', 'All clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('vendors', 'Vendors')}${L('dnq', 'Do-not-quote list')}
        <div class="sec">Accounts</div>${L('acc', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('payroll', 'Payroll & salaries')}${L('partners', 'Business partners')}${L('vdash', 'Vendor dashboard')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}
-       <div class="sec">Admin</div>${L('team', 'Team')}${L('alerts', 'Auto WhatsApp alerts')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
+       <div class="sec">Admin</div>${L('team', 'Team')}${L('devices', 'Office devices', B.dev_ack || '')}${L('alerts', 'Auto WhatsApp alerts')}${L('formats', 'Report formats')}${L('settings', 'Holidays & lists')}`
     : (B.modules || []).length > 1 ? multiNav(L)
     : B.module === 'accounts' ? `${L('home', 'Accounts dashboard')}${L('claims', 'Expense approvals', B.claims_waiting || '')}${L('entry', '+ New entry')}${L('vendors', 'Vendors')}${L('invoices', 'Invoices', B.inv_todo || '')}${L('topost', 'Post from orders')}${L('payroll', 'Payroll & salaries')}${L('partners', 'Business partners')}${L('vdash', 'Vendor dashboard')}${L('books', 'Books & reports')}${L('coa', 'Chart of accounts')}${L('accset', 'Company settings')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
     : B.records ? `${L('home', 'My dashboard')}${L('clients', 'My clients')}${L('newclient', '+ New client')}${L('refs', 'Referral leads', B.ref_new || '')}${L('contacts', 'Contacts')}${L('vendors', 'Vendors')}${L('myinv', 'My invoices', B.inv_attention || '')}${L('myexp', 'My expenses', B.claims_attention || '')}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`
     : `${L('home', 'My dashboard')}${['leads', 'calls'].includes(B.module) ? L('leads', 'Expo data') + L('newclient', '+ New client') + L('contacts', 'Contacts') : B.module === 'design' ? L('mydesign', 'My design jobs') : B.module === 'ops' ? L('myops', 'My production jobs') + L('vendors', 'Vendors') + L('contacts', 'Contacts') + L('myexp', 'My expenses', B.claims_attention || '') : ''}${L('myatt', 'My attendance', B.att_news || '') + L('report', 'Daily report', B.flags || '')}`;
   if (!isAdmin() && B.my_expos_all && !$('#nav a[href="#myexpos"]')) { const first = $('#nav a'); const h = L('myexpos', 'My expos', B.my_expos_n || ''); if (first) first.insertAdjacentHTML('afterend', h); else $('#nav').insertAdjacentHTML('afterbegin', h); }
   if (B.my_leads_all && !$('#nav a[href="#myleads"]')) { const first = $('#nav a'); const h = L('myleads', 'Assigned leads', B.my_leads_n || ''); if (first) first.insertAdjacentHTML('afterend', h); else $('#nav').insertAdjacentHTML('afterbegin', h); }
+  if (!isAdmin() && (B.dev_mine || B.dev_ack)) $('#nav').insertAdjacentHTML('beforeend', L('mydevices', 'My office devices', B.dev_ack || ''));
   $('#nav').insertAdjacentHTML('beforeend', `<div class="nav-acc"><div class="sec">${esc(B.me.name)}</div><a href="#account">Account</a><a href="logout.php">Sign out</a></div>`);
   tabBar(cur);
 }
@@ -352,7 +353,8 @@ function multiNav(L) {
 }
 
 // ---------- HOME ----------
-routes.home = async () => isAdmin() ? adminHome() : B.module === 'accounts' ? routes.acc() : empHome();
+routes.home = async () => { await (isAdmin() ? adminHome() : B.module === 'accounts' ? routes.acc() : empHome());
+  if (!isAdmin() && B.dev_ack) view().insertAdjacentHTML('afterbegin', `<div class="alert warn"><b>Please acknowledge your office device</b><span class="m">${B.dev_ack === 1 ? 'A company device has' : B.dev_ack + ' company devices have'} been given to you. <a href="#mydevices">Open and acknowledge →</a></span></div>`); };
 
 async function empHome() {
   const d = await api('home'); B.flags = d.missing.length; renderNav('home');
@@ -3446,4 +3448,105 @@ async function reboot() { Object.assign(B, await api('boot')); B.weekly_off = (B
     if (fresh && (!location.hash || location.hash === '#home') && L && L.h && L.h !== '#home' && Date.now() - L.t < 12 * 36e5 && DS.get(draftKey(L.h))) { history.replaceState(null, '', L.h); } } catch (e) {}
   route();
 })();
+// ===== Office devices: laptops / tablets / phones handed to staff, their acknowledgement, surrender and replacement =====
+const DV_ICON = { laptop: '💻', tablet: '📱', mobile: '📱', sim: '📶', other: '🔌' };
+const dvPill = s => ({ stock: '<span class="pill" style="background:#e7f6ec;color:#166534">In office</span>', issued: '<span class="pill" style="background:#e8eefc;color:#1e3a8a">With staff</span>', retired: '<span class="pill" style="background:#f1f1f1;color:#555">Retired</span>', lost: '<span class="pill" style="background:#fde8e8;color:#991b1b">Lost</span>' })[s] || esc(s);
+const dvAck = h => h.ack_at ? `<span style="color:#166534">✔ Acknowledged</span><div class="sub">${fd(h.ack_at)} ${String(h.ack_at).slice(11, 16)}</div>` : '<span style="color:#b45309">⏳ Waiting for acknowledgement</span>';
+const dvOpts = (o, sel) => Object.entries(o).map(([k, l]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${esc(l)}</option>`).join('');
+const dvToday = () => B.today || new Date().toISOString().slice(0, 10);
+
+routes.devices = async () => {
+  const d = await api('dev_list'); C.dv = d; B.dev_ack = d.devices.filter(x => x.holder && !x.holder.ack_at).length; renderNav('devices');
+  const f = C.dvf || 'all', who = C.dvwho || '';
+  const cnt = { all: d.devices.length, issued: 0, stock: 0, gone: 0 }; d.devices.forEach(x => x.status === 'issued' ? cnt.issued++ : x.status === 'stock' ? cnt.stock++ : cnt.gone++);
+  let list = d.devices.filter(x => f === 'all' || (f === 'gone' ? ['retired', 'lost'].includes(x.status) : x.status === f));
+  if (who) list = list.filter(x => x.history.some(h => +h.user_id === +who && (f === 'all' || !h.returned_on)));
+  const uOpts = sel => `<option value="">— pick team member —</option>${d.users.map(u => `<option value="${u.id}" ${+sel === +u.id ? 'selected' : ''}>${esc(u.name)}${u.department ? ' · ' + esc(u.department) : ''}</option>`).join('')}`;
+  const leftWith = d.devices.filter(x => x.holder && !x.holder.user_active);
+  const T = [['all', 'All'], ['issued', 'With staff'], ['stock', 'In office'], ['gone', 'Retired / lost']];
+  view().innerHTML = `<div class="head"><div><h1>Office devices</h1><p>Laptops, tablets, phones and SIMs given to the team — who has what, their acknowledgement, and every surrender or replacement.</p></div>
+    <div class="row"><button class="btn" data-dv="add">+ Add device</button></div></div>
+   <div class="kpis"><div class="kpi"><span>Devices</span><b>${cnt.all}</b></div><div class="kpi hl"><span>With staff</span><b>${cnt.issued}</b></div><div class="kpi"><span>In office</span><b>${cnt.stock}</b></div><div class="kpi"><span>Waiting acknowledgement</span><b>${B.dev_ack}</b></div></div>
+   ${leftWith.length ? `<div class="alert bad"><b>Still with people who have left</b><span class="m">${leftWith.map(x => `${esc(x.holder.user)} — ${esc(x.name)}`).join(' · ')}. Collect these and record the surrender.</span></div>` : ''}
+   <div id="dv-form"></div>
+   <div class="row" style="margin:6px 0 10px;gap:10px;flex-wrap:wrap"><div class="tabs" style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:0 8px">${T.map(([k, l]) => `<a href="#devices" data-dvt="${k}" class="${f === k ? 'on' : ''}">${l} <span class="sub">${cnt[k]}</span></a>`).join('')}</div>
+    <select id="dv-who" aria-label="Person" style="width:auto;min-width:220px;flex:0 0 auto"><option value="">Everyone</option>${d.users.map(u => `<option value="${u.id}" ${+who === +u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div>
+   <div class="panel">${list.length ? `<div class="tw"><table><tr><th>Device</th><th>Status</th><th>With</th><th>Acknowledgement</th><th></th></tr>
+    ${list.map(x => { const h = x.holder, past = x.history.filter(y => y.returned_on);
+      return `<tr><td><b>${DV_ICON[x.kind] || ''} ${esc(x.name)}</b><div class="sub">${esc(d.kinds[x.kind] || x.kind)}${x.serial ? ' · S/N ' + esc(x.serial) : ''}${x.imei ? ' · IMEI ' + esc(x.imei) : ''}</div>${x.accessories ? `<div class="sub">With: ${esc(x.accessories)}</div>` : ''}</td>
+       <td>${dvPill(x.status)}</td>
+       <td>${h ? `<b>${esc(h.user)}</b>${h.user_active ? '' : ' <span class="pill" style="background:#fde8e8;color:#991b1b">left</span>'}<div class="sub">since ${fd(h.issued_on)} · ${esc(d.conds[h.cond_out] || '')}</div>${h.replaces_id ? '<div class="sub">Replacement device</div>' : ''}` : '<span class="sub">—</span>'}</td>
+       <td>${h ? dvAck(h) : ''}</td>
+       <td style="white-space:nowrap;text-align:right">${h ? `<button class="btn ghost sm" data-dv="ret:${h.id}">Surrender</button> <button class="btn ghost sm" data-dv="rep:${h.id}">Replace</button>${h.ack_at ? '' : ` <button class="btn link sm" data-dv="undo:${h.id}">Undo</button>`}`
+         : x.status === 'stock' ? `<button class="btn sm" data-dv="give:${x.id}">Give to…</button> <button class="btn link sm" data-dv="edit:${x.id}">Edit</button> <button class="btn link sm" data-dv="${x.history.length ? 'retire' : 'del'}:${x.id}">${x.history.length ? 'Retire' : 'Delete'}</button>`
+         : `<button class="btn link sm" data-dv="back:${x.id}">Back to office</button>`}
+         ${x.history.length ? `<div><button class="btn link sm" data-dv="hist:${x.id}">History (${x.history.length})</button></div>` : ''}</td></tr>
+       <tr id="dvh-${x.id}" style="display:none"><td colspan="5" style="background:var(--bg,#f8fafc)">${x.history.map(y => `<div style="padding:4px 0"><b>${esc(y.user)}</b> · given ${fd(y.issued_on)}${y.by ? ' by ' + esc(y.by) : ''} (${esc(d.conds[y.cond_out] || '')})${y.accessories ? ' · with ' + esc(y.accessories) : ''}
+         · ${y.ack_at ? 'acknowledged ' + fd(y.ack_at) : 'not acknowledged'}${y.returned_on ? ` · <b>${esc(y.end_label)}</b> ${fd(y.returned_on)}${y.cond_in ? ' (' + esc(d.conds[y.cond_in]) + ')' : ''}${y.return_note ? ' — ' + esc(y.return_note) : ''}` : ' · <b>still with them</b>'}</div>`).join('')}</td></tr>`; }).join('')}</table></div>`
+    : `<p class="sub">${d.devices.length ? 'Nothing here.' : 'No devices yet. Use “+ Add device” to start the register.'}</p>`}</div>`;
+  C.dvU = uOpts;
+};
+
+function dvForm(mode, id) {
+  const d = C.dv, box = $('#dv-form'), x = d.devices.find(v => +v.id === +id), h = d.devices.map(v => v.history).flat().find(v => +v.id === +id);
+  const stock = d.devices.filter(v => v.status === 'stock' && (!h || +v.id !== +h.device_id));
+  const devFields = (v = {}, p = '') => `<label class="f">Type *<select name="${p}kind">${dvOpts(d.kinds, v.kind || 'laptop')}</select></label><label class="f">Make & model *<input name="${p}name" required placeholder="e.g. Lenovo IdeaPad 3" value="${esc(v.name || '')}"></label>
+    <label class="f">Serial number<input name="${p}serial" value="${esc(v.serial || '')}"></label><label class="f">IMEI (phones)<input name="${p}imei" value="${esc(v.imei || '')}"></label>
+    <label class="f">Bought on<input type="date" name="${p}bought_on" value="${esc(v.bought_on || '')}"></label><label class="f">Cost (₹)<input type="number" step="any" name="${p}cost" value="${esc(v.cost || '')}"></label>`;
+  const handFields = (who, cond = 'good') => `${who === null ? '' : `<label class="f">Give to${who === 'req' ? ' *' : ' (optional)'}<select name="${who === 'req' ? 'user_id' : 'give_to'}" ${who === 'req' ? 'required' : ''}>${C.dvU('')}</select></label>`}
+    <label class="f">Date given *<input type="date" name="issued_on" required value="${dvToday()}"></label><label class="f">Condition when given<select name="cond_out">${dvOpts(d.conds, cond)}</select></label>
+    <label class="f">Given with (accessories)<input name="accessories" placeholder="e.g. charger, bag, mouse" value="${esc((x && x.accessories) || '')}"></label><label class="f">Note<input name="note"></label>`;
+  const endFields = (why = 'returned') => `<label class="f">Date taken back *<input type="date" name="returned_on" required value="${dvToday()}"></label><label class="f">Reason *<select name="end_reason">${dvOpts(d.ends, why)}</select></label>
+    <label class="f">Condition when taken back<select name="cond_in"><option value="">—</option>${dvOpts(d.conds, why === 'worn' ? 'worn' : '')}</select></label><label class="f">Note<input name="return_note" placeholder="e.g. screen cracked, charger missing"></label>`;
+  const wrap = (t, body, btn, extra = '') => `<form class="panel" data-dvf="${mode}" data-id="${id || ''}"><h3>${t}</h3>${extra}<div class="grid g3">${body}</div><div class="row" style="margin-top:10px"><button class="btn">${btn}</button><button type="button" class="btn link" data-dv="x">Cancel</button></div></form>`;
+  if (mode === 'add') box.innerHTML = wrap('Add a device', devFields() + `<label class="f">Already given with (accessories)<input name="accessories" placeholder="e.g. charger, bag"></label><label class="f">Notes<input name="notes"></label>`
+    + `<label class="f">Give to (optional)<select name="give_to">${C.dvU('')}</select></label><label class="f">Date given<input type="date" name="issued_on" value="${dvToday()}"></label><label class="f">Condition when given<select name="cond_out">${dvOpts(d.conds, 'new')}</select></label>`, 'Save device');
+  if (mode === 'edit') box.innerHTML = wrap('Edit ' + esc(x.name), devFields(x) + `<label class="f">Accessories<input name="accessories" value="${esc(x.accessories || '')}"></label><label class="f">Notes<input name="notes" value="${esc(x.notes || '')}"></label>`, 'Save');
+  if (mode === 'give') box.innerHTML = wrap(`Give ${esc(x.name)} to a team member`, handFields('req'), 'Hand over', '<p class="sub" style="margin-top:0">They will be asked to acknowledge it when they next open the CRM.</p>');
+  if (mode === 'ret') box.innerHTML = wrap(`Surrender — ${esc(h.user)} returns ${esc(d.devices.find(v => +v.id === +h.device_id).name)}`, endFields('returned'), 'Record surrender', '<p class="sub" style="margin-top:0">Returned / upgraded goes back to the office. Worn out / damaged is retired. Lost is marked lost.</p>');
+  if (mode === 'rep') box.innerHTML = wrap(`Replace ${esc(d.devices.find(v => +v.id === +h.device_id).name)} for ${esc(h.user)}`,
+    endFields('worn') + `<div class="f" style="grid-column:1/-1"><b>Replacement device</b></div>
+     <label class="f">From the office<select name="new_device_id"><option value="">— or add a new one below —</option>${stock.map(v => `<option value="${v.id}">${esc(v.name)}${v.serial ? ' · ' + esc(v.serial) : ''}</option>`).join('')}</select></label>
+     <label class="f">New: make & model<input name="new_name" placeholder="only if it is a new device"></label><label class="f">New: type<select name="new_kind">${dvOpts(d.kinds, d.devices.find(v => +v.id === +h.device_id).kind)}</select></label>
+     <label class="f">New: serial<input name="new_serial"></label><label class="f">New: IMEI<input name="new_imei"></label><label class="f">New: cost (₹)<input type="number" step="any" name="new_cost"></label>
+     <label class="f">Date given *<input type="date" name="issued_on" required value="${dvToday()}"></label><label class="f">Condition of replacement<select name="cond_out">${dvOpts(d.conds, 'new')}</select></label><label class="f">Given with<input name="accessories" placeholder="e.g. charger"></label>`,
+    'Replace', `<p class="sub" style="margin-top:0">The old device is closed with the reason you pick, and the replacement is handed to ${esc(h.user)} — who acknowledges it again.</p>`);
+  box.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+routes.mydevices = async () => {
+  const d = await api('dev_mine'); const now = d.rows.filter(r => !r.returned_on), past = d.rows.filter(r => r.returned_on);
+  B.dev_ack = now.filter(r => !r.ack_at).length; B.dev_mine = now.length; renderNav('mydevices');
+  view().innerHTML = `<div class="head"><div><h1>My office devices</h1><p>Company devices given to you for official use.</p></div></div>
+   ${now.map(r => `<div class="panel" style="${r.ack_at ? '' : 'border:2px solid #f59e0b'}"><h3>${DV_ICON[r.kind] || ''} ${esc(r.name)}</h3>
+     <p class="sub" style="margin-top:0">${esc(d.kinds[r.kind] || r.kind)}${r.serial ? ' · S/N ' + esc(r.serial) : ''}${r.imei ? ' · IMEI ' + esc(r.imei) : ''} · given ${fd(r.issued_on)}${r.by ? ' by ' + esc(r.by) : ''} · condition: ${esc(d.conds[r.cond_out] || '')}${r.accessories ? ' · with ' + esc(r.accessories) : ''}${r.note ? ' · ' + esc(r.note) : ''}</p>
+     ${r.ack_at ? `<p style="margin-bottom:0;color:#166534">✔ You acknowledged receiving this on ${fd(r.ack_at)} at ${String(r.ack_at).slice(11, 16)}.</p>`
+       : `<form data-dvack="${r.id}"><div style="margin:8px 0;padding:12px 14px;border:1px solid var(--line);border-left:4px solid #f59e0b;border-radius:8px;background:var(--panel)">I, <b>${esc(d.me)}</b>, confirm that I have received the above ${esc((d.kinds[r.kind] || 'device').toLowerCase())}${r.accessories ? ' with ' + esc(r.accessories) : ''} from Zest Exhibitions on ${fd(r.issued_on)} in ${esc((d.conds[r.cond_out] || 'good').toLowerCase())} condition. It is company property for official use only. I will take care of it and return it when asked or when I leave the company.</div>
+         <label class="row" style="gap:6px;align-items:center"><input type="checkbox" name="agree" required> I agree</label><div style="margin-top:8px"><button class="btn">Acknowledge receipt</button></div></form>`}</div>`).join('') || '<div class="panel"><p class="sub" style="margin:0">No company device is with you right now.</p></div>'}
+   ${past.length ? `<div class="panel"><h3>Returned earlier</h3>${past.map(r => `<div style="padding:6px 0;border-top:1px solid var(--line)"><b>${esc(r.name)}</b><div class="sub">given ${fd(r.issued_on)} · ${esc(r.end_label || 'returned')} ${fd(r.returned_on)}${r.cond_in ? ' (' + esc(d.conds[r.cond_in]) + ')' : ''}</div></div>`).join('')}</div>` : ''}`;
+};
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-dv],[data-dvt]'); if (!b) return;
+  if (b.dataset.dvt) { e.preventDefault(); C.dvf = b.dataset.dvt; return refresh(); }
+  const [m, id] = b.dataset.dv.split(':');
+  if (m === 'x') { $('#dv-form').innerHTML = ''; return; }
+  if (m === 'hist') { const r = $('#dvh-' + id); r.style.display = r.style.display === 'none' ? '' : 'none'; return; }
+  if (['add', 'edit', 'give', 'ret', 'rep'].includes(m)) return dvForm(m, id);
+  if (m === 'undo') { if (!confirm('Remove this hand-over? Use this only if it was entered by mistake.')) return; await act(() => api('dev_undo', { id }), 'Removed'); return refresh(); }
+  if (m === 'del') { if (!confirm('Delete this device from the list?')) return; await act(() => api('dev_del', { id }), 'Deleted'); return refresh(); }
+  if (m === 'retire') { if (!confirm('Mark this device retired (no longer usable)?')) return; await act(() => api('dev_status', { id, status: 'retired' }), 'Retired'); return refresh(); }
+  if (m === 'back') { await act(() => api('dev_status', { id, status: 'stock' }), 'Back in office'); return refresh(); }
+});
+document.addEventListener('change', e => { if (e.target.id === 'dv-who') { C.dvwho = e.target.value; refresh(); } });
+document.addEventListener('submit', async e => {
+  const f = e.target; if (!f.dataset || (!f.dataset.dvf && !f.dataset.dvack)) return; e.preventDefault();
+  const o = Object.fromEntries(new FormData(f));
+  if (f.dataset.dvack) { const r = await act(() => api('dev_ack', { id: f.dataset.dvack, agree: o.agree ? 1 : 0 }), 'Thank you — acknowledged').catch(() => null); if (r) refresh(); return; }
+  const mode = f.dataset.dvf, id = f.getAttribute('data-id');
+  const call = { add: () => api('dev_save', o), edit: () => api('dev_save', { ...o, id }), give: () => api('dev_give', { ...o, device_id: id }), ret: () => api('dev_return', { ...o, id }), rep: () => api('dev_replace', { ...o, id }) }[mode];
+  const r = await act(call, { add: 'Device added', edit: 'Saved', give: 'Handed over — waiting for acknowledgement', ret: 'Surrender recorded', rep: 'Replacement given' }[mode]).catch(() => null);
+  if (r) { $('#dv-form').innerHTML = ''; refresh(); }
+});
+
 })();

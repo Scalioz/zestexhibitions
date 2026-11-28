@@ -145,6 +145,7 @@ if (in_array($A, ['lexpos', 'lexpo', 'lexpo_save', 'lead_add', 'lead_bulk', 'lea
   'ops_jobs', 'ops_job', 'ops_save', 'jobs_board'], true)) require __DIR__ . '/lib/work_api.php';
 if (str_starts_with($A, 'acc_') || str_starts_with($A, 'inv_') || str_starts_with($A, 'claim_')) require __DIR__ . '/lib/acc_api.php';
 if (str_starts_with($A, 'att_')) require __DIR__ . '/lib/att_api.php';
+if (str_starts_with($A, 'dev_')) require __DIR__ . '/lib/dev_api.php';
 if (str_starts_with($A, 'xp_')) require __DIR__ . '/lib/expo_api.php';
 if (in_array($A, ['appr_request', 'appr_cancel', 'appr_decide', 'appr_sent', 'sales_log', 'design_client_ok', 'design_source', 'quote_prefill', 'quote_save'], true)) require __DIR__ . '/lib/appr_api.php';
 
@@ -176,6 +177,8 @@ case 'boot':
     'dept_modules' => setting('dept_modules', default_dept_modules()),
     'furniture_items' => setting('furniture_items', default_furniture()),
     'acc' => $ACC,
+    'dev_mine' => $ADMIN ? 0 : (int) val('SELECT COUNT(*) FROM ' . T('device_issues') . ' WHERE user_id = ? AND returned_on IS NULL', [$MID]),
+    'dev_ack' => $ADMIN ? (int) val('SELECT COUNT(*) FROM ' . T('device_issues') . ' WHERE ack_at IS NULL AND returned_on IS NULL') : (int) val('SELECT COUNT(*) FROM ' . T('device_issues') . ' WHERE user_id = ? AND ack_at IS NULL AND returned_on IS NULL', [$MID]),
     'att_pending' => $ADMIN ? (int) val('SELECT COUNT(*) FROM ' . T('att_requests') . " WHERE status = 'pending'") : 0,
     'att_news' => $ADMIN ? 0 : (int) val('SELECT COUNT(*) FROM ' . T('att_requests') . " WHERE user_id = ? AND status IN ('approved','rejected') AND seen = 0", [$MID]),
     'att_today' => $ADMIN ? null : (function () use ($me, $MID) { $d = today(); if (!att_tracked_users($d) || ($me['joined_on'] ?: '2000-01-01') > $d) return null; return att_status($me, $d, one('SELECT * FROM ' . T('attendance') . ' WHERE user_id = ? AND adate = ?', [$MID, $d]), att_reqs($d, $d, ['approved', 'pending'], $MID)[$MID] ?? []); })(),

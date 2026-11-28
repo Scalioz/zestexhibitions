@@ -251,6 +251,18 @@ function migrate() {
       bill_address = (SELECT CASE WHEN c.location IS NULL OR c.location = '' THEN c.city ELSE c.location END FROM $Cl c WHERE c.id = $I.client_id) WHERE bill_name IS NULL");
     set_setting('schema_v', 34);
   }
+  if ($v < 35) {   // office devices (laptop / tablet / mobile …) handed to staff, with their acknowledgement, surrender and replacement
+    $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
+    $PK = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT UNSIGNED AUTO_INCREMENT PRIMARY KEY';
+    $E = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+    db()->exec('CREATE TABLE IF NOT EXISTS ' . T('devices') . " (id $PK, kind VARCHAR(30) NOT NULL, name VARCHAR(150) NOT NULL, serial VARCHAR(100), imei VARCHAR(100), accessories VARCHAR(300),
+      bought_on DATE, cost DECIMAL(12,2), status VARCHAR(20) NOT NULL DEFAULT 'stock', notes TEXT, created_by INT, created_at DATETIME NOT NULL)$E");
+    db()->exec('CREATE TABLE IF NOT EXISTS ' . T('device_issues') . " (id $PK, device_id INT NOT NULL, user_id INT NOT NULL, issued_on DATE NOT NULL, issued_by INT, cond_out VARCHAR(30), accessories VARCHAR(300), note TEXT,
+      ack_at DATETIME, ack_ip VARCHAR(45), returned_on DATE, cond_in VARCHAR(30), end_reason VARCHAR(20), return_note TEXT, returned_by INT, replaces_id INT, created_at DATETIME NOT NULL)$E");
+    try { db()->exec('CREATE INDEX zc_devi_user ON ' . T('device_issues') . ' (user_id)'); } catch (PDOException $e) {}
+    try { db()->exec('CREATE INDEX zc_devi_dev ON ' . T('device_issues') . ' (device_id)'); } catch (PDOException $e) {}
+    set_setting('schema_v', 35);
+  }
 }
 function create_cards_tables() {   // business cards read from photos (and contacts added by hand)
   $sqlite = (cfg()['driver'] ?? 'mysql') === 'sqlite';
