@@ -53,6 +53,17 @@ function xp_fetch($url) {
   fail('The link kept redirecting. Open it in your browser and paste the page text instead.');
 }
 
+// Pages that build their content in the browser (the list comes from a data feed after the page opens) arrive almost empty.
+// For those, ask a page-reading service to open the page like a browser and return the text. Returns text or null.
+function xp_reader($url) {
+  if (!function_exists('curl_init')) return null;
+  $ch = curl_init('https://r.jina.ai/' . $url);
+  curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 70, CURLOPT_CONNECTTIMEOUT => 15, CURLOPT_FOLLOWLOCATION => true,
+    CURLOPT_HTTPHEADER => ['Accept: text/plain', 'X-Timeout: 40', 'X-Retain-Images: none', 'User-Agent: ZestCRM/1.0']]);
+  $b = curl_exec($ch); $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
+  if ($code !== 200 || !is_string($b) || mb_strlen(trim($b)) < 300) return null;
+  return mb_substr($b, 0, 400000);
+}
 // Web page → readable text. Links are kept as "text [url]" so the AI can find exhibitor-list and expo-website links.
 function xp_html_text($html, $base) {
   if (!mb_check_encoding($html, 'UTF-8')) $html = mb_convert_encoding($html, 'UTF-8', 'ISO-8859-1');
@@ -104,7 +115,7 @@ function xp_chunks($text, $size) {
   $out = []; $cur = '';
   foreach (preg_split("/\n/", $text) as $line) {
     if (mb_strlen($line) > $size) { foreach (mb_str_split($line, $size) as $p) { if ($cur !== '') $out[] = $cur; $cur = $p; } continue; }
-    if (mb_strlen($cur) + mb_strlen($line) + 1 > $size && $cur !== '') { $out[] = $cur; $cur = ''; }
+    if (mb_strlen($cur) + mb_strlen($line) + 1 > $size && $cur !== '') { $out[] = $cur; $cur = implode("\n", array_slice(explode("\n", $cur), -6)); }   // repeat the last few lines so an item on the edge is not cut
     $cur .= ($cur === '' ? '' : "\n") . $line;
   }
   if (trim($cur) !== '') $out[] = $cur;
@@ -197,16 +208,24 @@ case 'xp_fetch':   // a web page → text parts for the AI (the browser sends ea
   $url = xp_url($in['url'] ?? '') ?? fail('Enter a web link.');
   $r = xp_fetch($url);
   if (str_contains($r['type'], 'pdf') || str_starts_with($r['body'], '%PDF')) fail('This link is a PDF file. Download it and use “Paste page text”, or add it under an expo’s exhibitor list.');
-  $text = xp_html_text($r['body'], $r['url']);
-  if (mb_strlen($text) < 200) fail('The page loaded but had almost no text (the site probably builds the page in the browser). Open it, select all (Ctrl+A), copy, and use “Paste page text”.');
-  $parts = xp_chunks($text, 45000);
-  out(['url' => $r['url'], 'parts' => array_slice($parts, 0, 12), 'more' => max(0, count($parts) - 12), 'chars' => mb_strlen($text), 'links' => xp_site_links($r['body'], $r['url'])]);
+  $text = xp_html_text($r['body'], $r['url']); $links = xp_site_links($r['body'], $r['url']); $via = 'direct';
+  if (mb_strlen($text) < 2500) {   // probably built in the browser: read it the way a browser shows it
+    $md = xp_reader($r['url']);
+    if ($md !== null && mb_strlen($md) > mb_strlen($text) + 300) {
+      $text = "PAGE ADDRESS: {$r['url']}\nPAGE TEXT (as shown in a browser):\n" . $md; $via = 'reader';
+      $anchors = ''; if (preg_match_all('~\[([^\]]{0,200})\]\((https?://[^)\s]+)\)~', $md, $mm, PREG_SET_ORDER)) foreach ($mm as $a) $anchors .= '<a href="' . htmlspecialchars($a[2]) . '">' . htmlspecialchars($a[1]) . '</a>';
+      $links = array_values(array_merge(array_column($links, null, 'url'), array_column(xp_site_links($anchors, $r['url']), null, 'url')));
+    }
+  }
+  if (mb_strlen($text) < 200) fail('The page loaded but had almost no text (the site builds it in the browser). Use the “Send to Zest CRM” bookmark button on that page, or copy the page text and use “Paste page text”.');
+  $parts = xp_chunks($text, 14000);   // smaller parts: a long events list is read in pieces so nothing gets cut off
+  out(['url' => $r['url'], 'parts' => array_slice($parts, 0, 30), 'more' => max(0, count($parts) - 30), 'chars' => mb_strlen($text), 'links' => $links, 'via' => $via]);
 
 case 'xp_extract':   // one part of page text → expos found
   need_admin();
   $text = s($in['text'] ?? null, 60000) ?? fail('No text to read.');
   $url = xp_url($in['url'] ?? '') ?? 'pasted text';
-  $d = xp_json(xp_ai([['type' => 'text', 'text' => sprintf(XP_EXPO_PROMPT, today(), $url) . "\n\n----- PAGE -----\n" . $text]], 12000));
+  $d = xp_json(xp_ai([['type' => 'text', 'text' => sprintf(XP_EXPO_PROMPT, today(), $url) . "\n\n----- PAGE -----\n" . $text]], 16000));
   if (!is_array($d) || !isset($d['expos'])) fail('Could not make out the expo details on this page. Try “Paste page text” with just the part about the expo.');
   $out = [];
   foreach (array_slice((array) $d['expos'], 0, 150) as $x) { $x = (array) $x; if (trim((string) ($x['name'] ?? '')) === '') continue;
@@ -351,6 +370,7 @@ case 'xp_src':   // an exhibitor-list file or link → what the browser should s
       $text = $isDoc ? xp_docx_text(__DIR__ . '/../uploads/' . $stored) : xp_sheet_text(__DIR__ . '/../uploads/' . $stored, $nm);
     } else {
       $text = xp_html_text($r['body'], $r['url']);
+      if (mb_strlen($text) < 2500 && ($md = xp_reader($r['url'])) !== null && mb_strlen($md) > mb_strlen($text) + 300) $text = $md;
       if (mb_strlen($text) < 300) fail('The page loaded but had almost no text (the site builds the list in the browser, or it needs a login). Open it, select all (Ctrl+A), copy and use “Paste list text”.');
     }
   }

@@ -2536,6 +2536,24 @@ const XP_CITIES = [['Delhi NCR', /delhi|noida|gurugram|gurgaon|faridabad|ghaziab
   ['Bengaluru', /bengaluru|bangalore|biec|ktpo/i], ['Chennai', /chennai|madras|chennai trade centre/i], ['Hyderabad', /hyderabad|secunderabad|hitex|hicc/i], ['Ahmedabad', /ahmedabad|gandhinagar|mahatma mandir/i], ['Pune', /pune|moshi/i], ['Kolkata', /kolkata|calcutta|biswa bangla/i]];
 const xpCityGroup = x => { const t = [x.city, x.venue].filter(Boolean).join(' '); const m = XP_CITIES.find(([, r]) => r.test(t)); return m ? m[0] : 'Other'; };
 const xpCity = x => { const g = xpCityGroup(x); return g === 'Other' ? (x.city || x.country || 'City not known') : g === 'Delhi NCR' && x.city && !/delhi/i.test(x.city) ? x.city + ' (NCR)' : x.city || g; };
+// "Send to Zest CRM" bookmark: on any expo page it scrolls to load everything, then sends the page text (and its links) to the CRM tab it opens
+function xpBookmarklet() {
+  const base = location.origin + location.pathname.replace(/[^/]*$/, '') + 'index.php', org = location.origin;
+  const js = `(()=>{const O=${JSON.stringify(org)},w=window.open(${JSON.stringify(base)}+'?src='+encodeURIComponent(location.href)+'#expocal-paste','_blank');(async()=>{let h=0;for(let i=0;i<8;i++){scrollTo(0,document.body.scrollHeight);await new Promise(r=>setTimeout(r,900));if(document.body.scrollHeight===h)break;h=document.body.scrollHeight}`
+    + `const L=[...document.querySelectorAll('a[href^=http]')].slice(0,400).map(a=>(a.innerText||'').trim().slice(0,80)+' ['+a.href+']').join('\\n');const t='PAGE ADDRESS: '+location.href+'\\nPAGE TITLE: '+document.title+'\\n\\nPAGE TEXT:\\n'+document.body.innerText+'\\n\\nLINKS ON THE PAGE:\\n'+L;`
+    + `let n=0;const s=setInterval(()=>{if(++n>60)return clearInterval(s);try{w.postMessage({zestPage:t,src:location.href},O)}catch(e){}},700);addEventListener('message',e=>{if(e.origin===O&&e.data==='zest-got')clearInterval(s)})})()})()`;
+  return 'javascript:' + encodeURIComponent(js);
+}
+window.addEventListener('message', e => {
+  const d = e.data; if (!d || typeof d.zestPage !== 'string' || !C.xadd || !C.xadd.fromBm) return;
+  try { e.source.postMessage('zest-got', e.origin); } catch (_) { /* window closed */ }
+  if (C.xadd.text) return;
+  C.xadd.text = d.zestPage.slice(0, 500000); C.xadd.src = C.xadd.src || String(d.src || '').slice(0, 500);
+  refresh().then(() => { const b = $('#xa-go'); if (b) b.click(); });
+});
+const xpBmHelp = () => `<details class="inset" style="margin-top:12px"><summary><b>Site won't open, or only part of the list comes through?</b> <span class="sub">— use the “Send to Zest CRM” bookmark button</span></summary>
+  <ol class="alsteps" style="margin:10px 0 4px"><li>Show your bookmarks bar: press <b>Ctrl + Shift + B</b> in Chrome.</li><li>Drag this button onto the bookmarks bar: <a class="btn sm" href="${xpBookmarklet()}" id="xa-bm" title="Drag me to your bookmarks bar">⭐ Send to Zest CRM</a></li>
+  <li>Open the expo or events page (e.g. ITPO events), wait for it to load, then click <b>⭐ Send to Zest CRM</b> on the bookmarks bar.</li><li>A CRM tab opens and the AI starts reading the whole page by itself — keep both tabs open until it finishes.</li></ol></details>`;
 const xpMonth = k => new Date(k + '-01T00:00:00').toLocaleString('en-IN', { month: 'long', year: 'numeric' });
 const xpProg = (el, t) => { if (el) el.innerHTML = t ? `<div class="inset" style="display:flex;gap:10px;align-items:center"><span class="xspin"></span><span>${t}</span></div>` : ''; };
 let PDFJS = null;
@@ -2595,6 +2613,7 @@ function xpRowsPreview(rows, have) {
 routes.expocal = async () => {
   const f = C.xf || (C.xf = { when: 'upcoming', q: '', india: 1 });
   const d = await api('xp_list', f);
+  if (location.hash.startsWith('#expocal-paste')) { C.xadd = { mode: 'paste', src: new URLSearchParams(location.search).get('src') || '', fromBm: 1, text: '' }; history.replaceState(null, '', location.pathname + '#expocal'); }
   const A = C.xadd;   // the "add from links" panel state
   const cityN = {}; d.expos.forEach(x => { const c = xpCityGroup(x); cityN[c] = (cityN[c] || 0) + 1; });
   const list = d.expos.filter(x => !f.city || xpCityGroup(x) === f.city);
@@ -2605,12 +2624,14 @@ routes.expocal = async () => {
    <div class="row"><button class="btn" id="xa-open">✨ Add expos from web links</button></div></div>
   ${A ? `<div class="panel" style="border-color:var(--gold)"><div class="ph"><h2>Add expos from web links</h2><button type="button" class="btn link sm" id="xa-x">Close ✕</button></div>
    <div class="tabs" style="margin-bottom:12px"><a href="#expocal" data-xamode="links" class="${A.mode !== 'paste' ? 'on' : ''}">Web links</a><a href="#expocal" data-xamode="paste" class="${A.mode === 'paste' ? 'on' : ''}">Paste page text</a></div>
+   ${A.fromBm && !A.text ? '<div class="inset" style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><span class="xspin"></span><span>Waiting for the page from your <b>⭐ Send to Zest CRM</b> bookmark… keep the expo page tab open. If nothing comes in 30 seconds, go to that page, press Ctrl+A then Ctrl+C, and paste below.</span></div>' : ''}
    ${A.mode === 'paste' ? `<label class="f">Page text <span class="sub" style="font-weight:400">open the expo page, press Ctrl+A then Ctrl+C, and paste here</span><textarea id="xa-text" style="min-height:160px">${esc(A.text || '')}</textarea></label>
      <label class="f" style="margin-top:8px">Page link (optional)<input id="xa-src" value="${esc(A.src || '')}" placeholder="https://…"></label>`
    : `<label class="f">Web links <span class="sub" style="font-weight:400">one per line — a single expo page, or an events calendar page that lists many expos</span><textarea id="xa-links" style="min-height:110px" placeholder="https://www.example-expo.com/&#10;https://www.organiser.com/events-calendar">${esc(A.links || '')}</textarea></label>`}
    ${A.mode !== 'paste' ? `<label class="row" style="gap:6px;margin-top:8px;font-size:13px"><input type="checkbox" id="xa-explore" ${A.explore !== false ? 'checked' : ''}> Also explore the website — follow its Events / Exhibition calendar / Upcoming shows pages <span class="sub">(up to 15 pages per website)</span></label>` : ''}
    <div class="row" style="margin-top:10px"><button class="btn" id="xa-go">✨ Read with AI</button><span class="sub">Each page takes 20–60 seconds — exploring a whole website can take several minutes. Only expos are picked up, not stand-alone conferences.</span></div>
    <div id="xa-prog" style="margin-top:10px"></div>
+   ${xpBmHelp()}
    ${A.errs && A.errs.length ? `<div class="warnbox" style="margin-top:10px">${A.errs.map(e => `<div>⚠ ${esc(e)}</div>`).join('')}</div>` : ''}
    ${A.found ? (A.found.length ? `<h3 style="margin:14px 0 6px">Found ${A.found.length} expo${A.found.length === 1 ? '' : 's'} — tick the ones to save</h3>
     <div class="row" style="gap:12px;margin-bottom:6px"><label class="row" style="gap:6px"><input type="checkbox" id="xa-all"> Select all</label><span class="sub">Expos in India are ticked for you.</span></div>
@@ -2639,6 +2660,7 @@ routes.expocal = async () => {
   $('#xa-open').onclick = () => { C.xadd = C.xadd ? null : { mode: 'links' }; refresh(); };
   if (!A) { xpCalWire(f); return; }
   $('#xa-x').onclick = () => { C.xadd = null; refresh(); };
+  if ($('#xa-bm')) $('#xa-bm').onclick = e => { e.preventDefault(); toast('Drag this button to your bookmarks bar — then click it on any expo page', true); };
   view().querySelectorAll('[data-xamode]').forEach(a => a.onclick = e => { e.preventDefault(); A.mode = a.dataset.xamode; refresh(); });
   if ($('#xa-all')) $('#xa-all').onchange = e => { A.found.forEach(x => x.pick = e.target.checked); view().querySelectorAll('[data-xa]').forEach(c => c.checked = e.target.checked); };
   view().querySelectorAll('[data-xa]').forEach(c => c.onchange = () => { A.found[+c.dataset.xa].pick = c.checked; });
@@ -2681,7 +2703,7 @@ routes.expocal = async () => {
     try {
       if (A.mode === 'paste') {
         A.text = $('#xa-text').value; A.src = $('#xa-src').value.trim(); if (A.text.trim().length < 50) throw new Error('Paste the page text first.');
-        const parts = A.text.match(/[\s\S]{1,45000}(\n|$)/g);
+        const parts = A.text.match(/[\s\S]{1,14000}(\n|$)/g).map((p, i, a) => i ? a[i - 1].split('\n').slice(-6).join('\n') + '\n' + p : p);
         for (let i = 0; i < parts.length; i++) { xpProg(el, `AI is reading the pasted text${parts.length > 1 ? ` (part ${i + 1} of ${parts.length})` : ''}…`); const r = await api('xp_extract', { text: parts[i], url: A.src }); take(r.expos, found); addMore(r.other_pages); }
       } else {
         A.links = $('#xa-links').value; const urls = [...new Set(A.links.split(/\s+/).map(u => u.trim()).filter(u => /^(https?:\/\/)?[\w-]+(\.[\w-]+)+/i.test(u)))];
